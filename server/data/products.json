@@ -1,0 +1,240 @@
+[
+  {
+    "id": "p-sofa-modern",
+    "name": "Modern Sofa",
+    "price": 1200,
+    "stock": 2,
+    "image": "assets/images/furniture_sofa_modern.png",
+    "description": "Contemporary modern sofa with clean lines. Perfect for living rooms.",
+    "designStyle": "Modern",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-sofa-classic",
+    "name": "Classic Sofa",
+    "price": 1500,
+    "stock": 3,
+    "image": "assets/images/furniture_sofa_classic.png",
+    "description": "Timeless classic sofa with elegant design. Comfortable and durable.",
+    "designStyle": "Classic",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-chair-modern",
+    "name": "Modern Chair",
+    "price": 350,
+    "stock": 8,
+    "image": "assets/images/furniture_chair_modern.png",
+    "description": "Sleek modern chair with ergonomic design.",
+    "designStyle": "Modern",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-chair-classic",
+    "name": "Classic Chair",
+    "price": 280,
+    "stock": 5,
+    "image": "assets/images/furniture_chair_classic.png",
+    "description": "Elegant classic chair with traditional styling.",
+    "designStyle": "Classic",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-table-coffee",
+    "name": "Modern Coffee Table",
+    "price": 450,
+    "stock": 4,
+    "image": "assets/images/furniture_table_coffee.png",
+    "description": "Modern coffee table with storage. Perfect for living rooms.",
+    "designStyle": "Modern",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-table-dining",
+    "name": "Classic Dining Table",
+    "price": 800,
+    "stock": 2,
+    "image": "assets/images/furniture_table_dining.png",
+    "description": "Beautiful dining table with chairs. Perfect for family gatherings.",
+    "designStyle": "Classic",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-bed-modern",
+    "name": "Modern Bed Frame",
+    "price": 1200,
+    "stock": 3,
+    "image": "assets/images/furniture_bed_modern.png",
+    "description": "Modern bed frame with headboard. Available in multiple sizes.",
+    "designStyle": "Modern",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-bed-classic",
+    "name": "Classic Bed Frame",
+    "price": 1400,
+    "stock": 2,
+    "image": "assets/images/furniture_bed_classic.png",
+    "description": "Elegant classic bed frame with traditional design.",
+    "designStyle": "Classic",
+    "category": "Furniture",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-lamp-floor",
+    "name": "Modern Floor Lamp",
+    "price": 180,
+    "stock": 12,
+    "image": "assets/images/furniture_lamp_floor.png",
+    "description": "Contemporary floor lamp with adjustable lighting.",
+    "designStyle": "Modern",
+    "category": "Lighting",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-lamp-table",
+    "name": "Classic Table Lamp",
+    "price": 120,
+    "stock": 15,
+    "image": "assets/images/furniture_lamp_table.png",
+    "description": "Traditional table lamp with warm lighting.",
+    "designStyle": "Classic",
+    "category": "Lighting",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-rug-modern",
+    "name": "Modern Rug",
+    "price": 250,
+    "stock": 10,
+    "image": "assets/images/furniture_rug_modern.png",
+    "description": "Contemporary rug with geometric patterns.",
+    "designStyle": "Modern",
+    "category": "Decor",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-rug-classic",
+    "name": "Classic Rug",
+    "price": 320,
+    "stock": 8,
+    "image": "assets/images/furniture_rug_classic.png",
+    "description": "Traditional rug with elegant patterns.",
+    "designStyle": "Classic",
+    "category": "Decor",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  },
+  {
+    "id": "p-paint-white",
+    "name": "White Glossy Wall Paint",
+    "price": 85,
+    "stock": 20,
+    "image": "assets/images/wall_white_glossy.png",
+    "description": "High-quality glossy white paint for modern interiors.",
+    "designStyle": "Modern",
+    "category": "Paint",
+    "supplier": {
+      "id": "s-elegant",
+      "name": "Elegant Interiors Co.",
+      "phone": "+60 12-345 6789",
+      "address": "123 Jalan Tun Razak, Kuala Lumpur, 50400",
+      "email": "contact@elegantinteriors.com"
+    }
+  },
+  {
+    "id": "p-wall-walnut",
+    "name": "Walnut Wood Texture",
+    "price": 95,
+    "stock": 12,
+    "image": "assets/images/wall_texture_wood_walnut.png",
+    "description": "Premium walnut wood texture for classic interiors.",
+    "designStyle": "Classic",
+    "category": "Wall Covering",
+    "supplier": {
+      "id": "s-modernhome",
+      "name": "Modern Home Solutions",
+      "phone": "+60 19-876 5432",
+      "address": "456 Jalan Ampang, Kuala Lumpur, 68000",
+      "email": "info@modernhomesolutions.com"
+    }
+  }
+]
