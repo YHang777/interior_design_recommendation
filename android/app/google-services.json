@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "246496255265",
+    "project_id": "interior-design-256c5",
+    "storage_bucket": "interior-design-256c5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:246496255265:android:a9f0c62bf07d504cefb260",
+        "android_client_info": {
+          "package_name": "com.example.interior_design_recommendation"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrVRBPA46tfDOipfoybm6n64SwAcmA-KU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

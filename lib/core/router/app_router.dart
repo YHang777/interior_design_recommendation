@@ -5,6 +5,7 @@ import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/verify_email_screen.dart';
+import '../../features/budget/presentation/screens/budget_planner_screen.dart';
 import '../../features/homeowner/presentation/screens/ai_recommendation_screen.dart';
 import '../../features/homeowner/presentation/screens/dashboard_screen.dart';
 import '../../features/homeowner/presentation/screens/homeowner_shell.dart';
@@ -89,6 +90,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/verify-email',
         name: RouteNames.verifyEmail,
         builder: (_, __) => const VerifyEmailScreen(),
+      ),
+
+      // ── Standalone routes ──
+      GoRoute(
+        path: '/budget',
+        name: RouteNames.homeownerBudget,
+        builder: (_, __) => const BudgetPlannerScreen(),
       ),
 
       // ── Homeowner shell ──

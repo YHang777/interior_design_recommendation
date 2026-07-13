@@ -1,23 +1,23 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/datasources/firebase_auth_datasource.dart';
+import '../../data/datasources/firestore_user_datasource.dart';
 import '../../data/models/app_user.dart';
-import '../../data/repositories/mock_auth_repository.dart';
+import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/repositories/auth_repository.dart';
 
 // ---------------------------------------------------------------------------
-// Repository provider — swap mock ↔ Firebase here
+// Repository provider — Firebase Auth + Firestore
 // ---------------------------------------------------------------------------
 
 /// Provides the current [IAuthRepository] implementation.
-/// Currently uses [MockAuthRepository] for development.
-/// Replace with [AuthRepositoryImpl] when Firebase is set up.
+/// Uses Firebase Auth + Firestore for production.
+/// Switch back to [MockAuthRepository] for offline testing.
 final authRepositoryProvider = Provider<IAuthRepository>((ref) {
-  // TODO: switch to Firebase when ready:
-  // return AuthRepositoryImpl(
-  //   authDatasource: FirebaseAuthDatasource(),
-  //   firestoreDatasource: FirestoreUserDatasource(),
-  // );
-  return MockAuthRepository();
+  return AuthRepositoryImpl(
+    authDatasource: FirebaseAuthDatasource(),
+    firestoreDatasource: FirestoreUserDatasource(),
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -38,7 +38,6 @@ dependencies:
   # State Management
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
-  provider: ^6.1.5  # kept for old report screens — remove after full migration
 
   # Navigation
   go_router: ^14.8.1
@@ -48,18 +47,16 @@ dependencies:
   firebase_auth: ^5.5.1
   cloud_firestore: ^5.6.5
 
-  # AR (Android) — add arcore_flutter_plugin when AR feature is implemented
-  # arcore_flutter_plugin: ^0.1.0
-
   # AI
   google_generative_ai: ^0.4.7
 
   # Network
   http: ^1.2.0
 
-  # Camera / ML
+  # Camera / ML / Media
   camera: ^0.10.5+5
   google_mlkit_image_labeling: ^0.11.0
+  image_picker: ^1.2.1
 
 dev_dependencies:
   flutter_test:

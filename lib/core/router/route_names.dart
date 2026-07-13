@@ -8,6 +8,9 @@ class RouteNames {
   static const forgotPassword = 'forgot-password';
   static const verifyEmail = 'verify-email';
 
+  // Standalone
+  static const homeownerBudget = 'homeowner-budget';
+
   // Homeowner
   static const homeownerShell = 'homeowner-shell';
   static const homeownerDashboard = 'homeowner-dashboard';
