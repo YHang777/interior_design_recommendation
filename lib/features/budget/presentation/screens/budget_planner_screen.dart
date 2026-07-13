@@ -77,7 +77,7 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
             const SizedBox(height: 8),
             Text('Plan your $_selectedRoom renovation',
                 style: GoogleFonts.poppins(
-                    color: Colors.white.withValues(alpha: 0.9), fontSize: 14)),
+                    color: AppColors.textSecondary, fontSize: 14)),
             const SizedBox(height: 20),
 
             // ── Budget Overview ──
@@ -227,7 +227,7 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                 icon: const Icon(Icons.picture_as_pdf),
                 label: const Text('Export Report'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.secondary,
+                  backgroundColor: AppColors.accent,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

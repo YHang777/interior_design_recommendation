@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../../core/constants/app_colors.dart';
 import '../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../shared/widgets/stat_card.dart';
 
@@ -17,7 +18,7 @@ class SalesAnalyticsScreen extends ConsumerWidget {
           children: [
             const SizedBox(height: 16),
             Text('Sales Overview',
-                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
             const SizedBox(height: 16),
             Row(
               children: [

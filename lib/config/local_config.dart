@@ -12,5 +12,7 @@ class LocalConfig {
 
   /// Marketplace API base URL. Set to your backend list endpoint.
   /// Leave as `null` to use bundled asset fallback.
-  static const String? marketplaceApiUrl = "http://localhost:5191/products";
+  /// Set to your backend endpoint when the Node.js server is ready.
+  /// Leave `null` to use bundled asset fallback directly.
+  static const String? marketplaceApiUrl = null;
 }

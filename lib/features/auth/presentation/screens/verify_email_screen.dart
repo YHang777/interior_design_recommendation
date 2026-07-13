@@ -33,7 +33,7 @@ class VerifyEmailScreen extends ConsumerWidget {
                 const Icon(
                   Icons.mark_email_unread,
                   size: 64,
-                  color: AppColors.secondary,
+                  color: AppColors.accent,
                 ),
                 const SizedBox(height: 24),
                 Text(
@@ -62,7 +62,7 @@ class VerifyEmailScreen extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: const Text('Verification email resent!'),
-                        backgroundColor: AppColors.secondary,
+                        backgroundColor: AppColors.accent,
                         behavior: SnackBarBehavior.floating,
                       ),
                     );

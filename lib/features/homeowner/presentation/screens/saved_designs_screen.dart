@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../../core/constants/app_colors.dart';
 import '../../../../shared/widgets/gradient_scaffold.dart';
 
 /// Saved Designs + Style Library
@@ -186,7 +187,7 @@ class _SavedDesignsScreenState extends ConsumerState<SavedDesignsScreen> {
         margin: const EdgeInsets.all(2),
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.9),
+          color: AppColors.textSecondary,
           shape: BoxShape.circle,
         ),
         child: Icon(icon, size: 16, color: color),

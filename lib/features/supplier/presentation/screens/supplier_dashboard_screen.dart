@@ -28,7 +28,7 @@ class SupplierDashboardScreen extends ConsumerWidget {
                   width: 50,
                   height: 50,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.9),
+                    color: AppColors.textSecondary,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.business, color: AppColors.primary, size: 28),
@@ -40,7 +40,7 @@ class SupplierDashboardScreen extends ConsumerWidget {
                     children: [
                       Text('Welcome back!',
                           style: GoogleFonts.poppins(
-                              color: Colors.white.withValues(alpha: 0.9),
+                              color: AppColors.textSecondary,
                               fontSize: 13)),
                       Text(user?.name ?? 'Supplier',
                           style: GoogleFonts.poppins(

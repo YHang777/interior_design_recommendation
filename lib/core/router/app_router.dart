@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
@@ -74,29 +75,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/login',
         name: RouteNames.login,
-        builder: (_, __) => const LoginScreen(),
+        pageBuilder: (_, __) => _buildPage(const LoginScreen()),
       ),
       GoRoute(
         path: '/register',
         name: RouteNames.register,
-        builder: (_, __) => const RegisterScreen(),
+        pageBuilder: (_, __) => _buildPage(const RegisterScreen()),
       ),
       GoRoute(
         path: '/forgot-password',
         name: RouteNames.forgotPassword,
-        builder: (_, __) => const ForgotPasswordScreen(),
+        pageBuilder: (_, __) => _buildPage(const ForgotPasswordScreen()),
       ),
       GoRoute(
         path: '/verify-email',
         name: RouteNames.verifyEmail,
-        builder: (_, __) => const VerifyEmailScreen(),
+        pageBuilder: (_, __) => _buildPage(const VerifyEmailScreen()),
       ),
 
       // ── Standalone routes ──
       GoRoute(
         path: '/budget',
         name: RouteNames.homeownerBudget,
-        builder: (_, __) => const BudgetPlannerScreen(),
+        pageBuilder: (_, __) => _buildPage(const BudgetPlannerScreen()),
       ),
 
       // ── Homeowner shell ──
@@ -216,3 +217,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// Smooth fade transition for all pages.
+CustomTransitionPage<T> _buildPage<T>(Widget child) {
+  return CustomTransitionPage<T>(
+    child: child,
+    transitionsBuilder: (_, animation, __, child) {
+      return FadeTransition(opacity: animation, child: child);
+    },
+    transitionDuration: const Duration(milliseconds: 200),
+  );
+}

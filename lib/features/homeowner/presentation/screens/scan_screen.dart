@@ -23,7 +23,7 @@ class ScanScreen extends ConsumerWidget {
                 color: Colors.white.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.camera_alt, size: 80, color: Colors.white),
+              child: const Icon(Icons.camera_alt, size: 80, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 24),
             Text('Room Scanner',
@@ -36,7 +36,7 @@ class ScanScreen extends ConsumerWidget {
                 'Scan your room to identify furniture\nand get AI design recommendations',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
-                    color: Colors.white.withValues(alpha: 0.8))),
+                    color: AppColors.textSecondary)),
             const SizedBox(height: 32),
             ElevatedButton.icon(
               onPressed: () {

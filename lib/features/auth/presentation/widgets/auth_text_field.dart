@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Reusable styled text field for auth screens.
-/// Matches the existing input decoration: filled, rounded, with icon prefix.
+/// Modern outlined text field matching the new theme.
 class AuthTextField extends StatelessWidget {
   const AuthTextField({
     super.key,
@@ -14,7 +13,7 @@ class AuthTextField extends StatelessWidget {
     this.keyboardType,
     this.textInputAction,
     this.validator,
-    this.onChanged,
+    this.onFieldSubmitted,
     this.enabled = true,
   });
 
@@ -27,7 +26,7 @@ class AuthTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final String? Function(String?)? validator;
-  final void Function(String)? onChanged;
+  final void Function(String)? onFieldSubmitted;
   final bool enabled;
 
   @override
@@ -38,9 +37,8 @@ class AuthTextField extends StatelessWidget {
       keyboardType: keyboardType,
       textInputAction: textInputAction,
       validator: validator,
-      onChanged: onChanged,
+      onFieldSubmitted: onFieldSubmitted,
       enabled: enabled,
-      style: Theme.of(context).textTheme.bodyLarge,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,

@@ -45,7 +45,7 @@ class MarketplaceScreen extends ConsumerWidget {
                     )
                   : _ProductGrid(products: filtered, ref: ref),
               loading: () => const Center(
-                child: CircularProgressIndicator(color: AppColors.secondary),
+                child: CircularProgressIndicator(color: AppColors.accent),
               ),
               error: (e, _) => Center(
                 child: Column(
@@ -167,7 +167,7 @@ class _FilterBar extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
             icon:
-                const Icon(Icons.expand_more, color: Colors.white),
+                const Icon(Icons.expand_more, color: AppColors.textPrimary),
             items: _styles.map((style) {
               return DropdownMenuItem(
                 value: style,
@@ -583,7 +583,7 @@ void _showCartBottomSheet(BuildContext context, WidgetRef ref) {
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.secondary,
+                      backgroundColor: AppColors.accent,
                       padding: const EdgeInsets.symmetric(
                           horizontal: 24, vertical: 12),
                     ),

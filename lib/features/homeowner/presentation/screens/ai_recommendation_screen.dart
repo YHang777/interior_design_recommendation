@@ -105,7 +105,7 @@ class _AiRecommendationScreenState
           mainAxisSize: MainAxisSize.min,
           children: _rooms.map((r) {
             return ListTile(
-              leading: Icon(r.$2, color: AppColors.secondary),
+              leading: Icon(r.$2, color: AppColors.accent),
               title: Text(r.$1, style: GoogleFonts.poppins()),
               onTap: () {
                 setState(() => _selectedRoom = r.$1);
@@ -198,7 +198,7 @@ class _AiRecommendationScreenState
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Icon(Icons.psychology,
-                            size: 64, color: Colors.white),
+                            size: 64, color: AppColors.textPrimary),
                         const SizedBox(height: 16),
                         Text('AI Design Assistant',
                             style: GoogleFonts.poppins(
@@ -208,7 +208,7 @@ class _AiRecommendationScreenState
                         const SizedBox(height: 8),
                         Text('Select a style to get started',
                             style: GoogleFonts.poppins(
-                                color: Colors.white.withValues(alpha: 0.8))),
+                                color: AppColors.textSecondary)),
                         const SizedBox(height: 24),
                         ElevatedButton.icon(
                           onPressed: _showStyleDialog,
@@ -254,7 +254,7 @@ class _AiRecommendationScreenState
                   ),
                   IconButton(
                     icon: const Icon(Icons.send,
-                        color: AppColors.secondary),
+                        color: AppColors.accent),
                     onPressed: _sendMessage,
                   ),
                 ],

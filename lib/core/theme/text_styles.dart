@@ -51,18 +51,18 @@ class AppTextStyles {
   static TextStyle get labelLarge => GoogleFonts.poppins(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: AppColors.textOnPrimary,
+        color: AppColors.textOnDark,
       );
 
   static TextStyle get buttonText => GoogleFonts.poppins(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        color: AppColors.textOnPrimary,
+        color: AppColors.textOnDark,
       );
 
   static TextStyle get appBarTitle => GoogleFonts.poppins(
         fontSize: 22,
         fontWeight: FontWeight.bold,
-        color: AppColors.textOnPrimary,
+        color: AppColors.textOnDark,
       );
 }

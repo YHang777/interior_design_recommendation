@@ -28,10 +28,10 @@ class SupplierProfileScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           Text(user?.name ?? 'Supplier',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+              style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
           Text(user?.email ?? '',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 13, color: Colors.white.withValues(alpha: 0.8))),
+              style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textPrimary.withValues(alpha: 0.8))),
           const SizedBox(height: 24),
 
           // Business Info
@@ -57,7 +57,7 @@ class SupplierProfileScreen extends ConsumerWidget {
               icon: const Icon(Icons.lock_reset),
               label: const Text('Change Password'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.secondary,
+                backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -67,7 +67,7 @@ class SupplierProfileScreen extends ConsumerWidget {
           // Logout
           ElevatedButton.icon(
             onPressed: () => ref.read(authStateProvider.notifier).logout(),
-            icon: const Icon(Icons.logout, color: Colors.white),
+            icon: const Icon(Icons.logout, color: AppColors.textPrimary),
             label: const Text('Logout', style: TextStyle(color: Colors.white)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red.shade400,

@@ -1,35 +1,37 @@
 import 'package:flutter/material.dart';
 
-/// Centralized color palette extracted from the existing design.
-/// Prevents hardcoded Color(0xFF...) scattered across the codebase.
+/// Modern Minimal design palette.
+/// Clean whites, dark charcoal, forest green accents.
 class AppColors {
   AppColors._();
 
-  // Primary palette — soft warm browns
-  static const Color primary = Color(0xFFBCAAA4);
-  static const Color primaryLight = Color(0xFFD7CCC8);
-  static const Color primaryLighter = Color(0xFFEFEBE9);
+  // Primary — dark charcoal/navy
+  static const Color primary = Color(0xFF1A1A2E);
+  static const Color primaryLight = Color(0xFF2D2D44);
 
-  // Secondary — teal accent
-  static const Color secondary = Color(0xFF80CBC4);
+  // Accent — forest green (CTAs, active states)
+  static const Color accent = Color(0xFF2E7D32);
+  static const Color accentLight = Color(0xFF4CAF50);
+
+  // Secondary accent — navy blue (links)
+  static const Color secondaryAccent = Color(0xFF1565C0);
 
   // Backgrounds
-  static const Color background = Color(0xFFF8F6F1);
+  static const Color background = Color(0xFFF8F9FA);
   static const Color surface = Colors.white;
 
   // Text
-  static Color textPrimary = Colors.brown.shade900;
-  static Color textSecondary = Colors.brown.shade700;
-  static Color textHint = Colors.brown.shade300;
-  static const Color textOnPrimary = Colors.white;
+  static const Color textPrimary = Color(0xFF1A1A2E);
+  static const Color textSecondary = Color(0xFF6B7280);
+  static const Color textHint = Color(0xFF9CA3AF);
+  static const Color textOnDark = Colors.white;
 
   // Status
-  static const Color success = Color(0xFF4CAF50);
-  static const Color error = Color(0xFFE53935);
-  static const Color warning = Color(0xFFFFA726);
+  static const Color success = Color(0xFF2E7D32);
+  static const Color error = Color(0xFFDC2626);
+  static const Color warning = Color(0xFFF59E0B);
 
-  // Misc
-  static const Color divider = Color(0xFFE0E0E0);
-  static Color greyLight = Colors.grey.shade200;
-  static Color greyMedium = Colors.grey.shade400;
+  // Borders & dividers
+  static const Color border = Color(0xFFE5E7EB);
+  static const Color divider = Color(0xFFF3F4F6);
 }

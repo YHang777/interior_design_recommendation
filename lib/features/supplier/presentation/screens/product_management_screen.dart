@@ -229,7 +229,7 @@ class _ProductTile extends StatelessWidget {
                   children: [
                     _Badge(product.category, Colors.brown),
                     const SizedBox(width: 6),
-                    _Badge(product.style, AppColors.secondary),
+                    _Badge(product.style, AppColors.accent),
                   ],
                 ),
               ],

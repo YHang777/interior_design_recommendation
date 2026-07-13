@@ -1,253 +1,153 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
-import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/validators.dart';
 import '../../data/models/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_providers.dart';
-import '../widgets/auth_button.dart';
-import '../widgets/auth_text_field.dart';
 
-/// Homeowner registration screen.
-/// Always creates accounts with [UserRole.homeowner].
-/// Supplier accounts are created externally by the admin website.
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
-
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
 }
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  final _phoneController = TextEditingController();
-  bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _pwdCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  bool _obscure = true;
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    _phoneController.dispose();
+    _nameCtrl.dispose(); _emailCtrl.dispose();
+    _pwdCtrl.dispose(); _confirmCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _handleRegister() async {
+  Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
-
     await ref.read(authStateProvider.notifier).register(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
-          name: _nameController.text.trim(),
-          role: UserRole.homeowner, // Always homeowner
-          phone: _phoneController.text.trim().isNotEmpty
-              ? _phoneController.text.trim()
-              : null,
-        );
-
-    // Check if registration succeeded (user was created but email not verified)
-    final authState = ref.read(authStateProvider);
-    if (authState is AsyncData && authState.value != null) {
-      // Should not be logged in yet — email needs verification.
-      // Navigate to verify screen. The user data is in the state.
-      if (mounted) {
-        context.push('/verify-email');
-      }
-    }
+      email: _emailCtrl.text.trim(),
+      password: _pwdCtrl.text,
+      name: _nameCtrl.text.trim(),
+      role: UserRole.homeowner,
+    );
+    if (mounted) context.push('/verify-email');
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authStateProvider);
+    final state = ref.watch(authStateProvider);
+    final loading = state is AsyncLoading<AppUser?>;
 
-    // Listen for errors
-    ref.listen<AsyncValue<AppUser?>>(authStateProvider, (previous, next) {
-      next.whenOrNull(
-        error: (error, _) {
-          final message = error is AuthException
-              ? error.message
-              : AppStrings.registrationFailed;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(message)),
-                ],
-              ),
-              backgroundColor: AppColors.error,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          );
-        },
-      );
+    ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
+      next.whenOrNull(error: (e, _) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e is AuthException ? e.message : 'Registration failed'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      });
     });
 
-    final isLoading = authState is AsyncLoading<AppUser?>;
-
     return Scaffold(
-      appBar: AppBar(title: const Text(AppStrings.createAccount)),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              AppColors.background,
-              Colors.white,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+      backgroundColor: AppColors.surface,
+      appBar: AppBar(title: const Text('Create Account')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Get started',
+                  style: GoogleFonts.poppins(
+                      fontSize: 22, fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text('Fill in your details below',
+                  style: GoogleFonts.poppins(
+                      color: AppColors.textSecondary)),
+              const SizedBox(height: 28),
+              TextFormField(
+                controller: _nameCtrl,
+                keyboardType: TextInputType.name,
+                textInputAction: TextInputAction.next,
+                validator: (v) => Validators.required(v, 'Full name'),
+                decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person_outlined)),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                validator: Validators.email,
+                decoration: const InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: Icon(Icons.email_outlined)),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _pwdCtrl,
+                obscureText: _obscure,
+                textInputAction: TextInputAction.next,
+                validator: Validators.password,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outlined),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _confirmCtrl,
+                obscureText: _obscure,
+                textInputAction: TextInputAction.done,
+                validator: (v) => Validators.confirmPassword(v, _pwdCtrl.text),
+                onFieldSubmitted: (_) => _register(),
+                decoration: const InputDecoration(
+                    labelText: 'Confirm Password',
+                    prefixIcon: Icon(Icons.lock_outlined)),
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: loading ? null : _register,
+                  child: loading
+                      ? const SizedBox(width: 22, height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: AppColors.textPrimary))
+                      : const Text('Create Account'),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    'Create Your Account',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Fill in your details to get started',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 28),
-
-                  // Full Name
-                  AuthTextField(
-                    controller: _nameController,
-                    label: AppStrings.fullNameLabel,
-                    prefixIcon: Icons.person_outlined,
-                    keyboardType: TextInputType.name,
-                    textInputAction: TextInputAction.next,
-                    validator: (v) =>
-                        Validators.required(v, 'Full name'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Email
-                  AuthTextField(
-                    controller: _emailController,
-                    label: AppStrings.emailLabel,
-                    prefixIcon: Icons.email_outlined,
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.next,
-                    validator: Validators.email,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Phone (optional)
-                  AuthTextField(
-                    controller: _phoneController,
-                    label: AppStrings.phoneLabel,
-                    prefixIcon: Icons.phone_outlined,
-                    keyboardType: TextInputType.phone,
-                    textInputAction: TextInputAction.next,
-                    validator: Validators.phone,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Password
-                  AuthTextField(
-                    controller: _passwordController,
-                    label: AppStrings.passwordLabel,
-                    prefixIcon: Icons.lock_outlined,
-                    obscureText: _obscurePassword,
-                    textInputAction: TextInputAction.next,
-                    validator: Validators.password,
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscurePassword
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        color: AppColors.textHint,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscurePassword = !_obscurePassword;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Confirm Password
-                  AuthTextField(
-                    controller: _confirmPasswordController,
-                    label: AppStrings.confirmPasswordLabel,
-                    prefixIcon: Icons.lock_outlined,
-                    obscureText: _obscureConfirmPassword,
-                    textInputAction: TextInputAction.done,
-                    validator: (v) => Validators.confirmPassword(
-                      v,
-                      _passwordController.text,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureConfirmPassword
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        color: AppColors.textHint,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscureConfirmPassword = !_obscureConfirmPassword;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // Register button
-                  AuthButton(
-                    label: AppStrings.createAccount,
-                    onPressed: _handleRegister,
-                    isLoading: isLoading,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Login link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        AppStrings.alreadyHaveAccount,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      TextButton(
-                        onPressed: isLoading ? null : () => context.pop(),
-                        child: Text(
-                          AppStrings.login,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: AppColors.secondary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ),
-                    ],
+                  Text('Already have an account?',
+                      style: GoogleFonts.poppins(
+                          color: AppColors.textSecondary)),
+                  TextButton(
+                    onPressed: () => context.pop(),
+                    child: Text('Sign In',
+                        style: GoogleFonts.poppins(
+                            color: AppColors.accent,
+                            fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
         ),
       ),

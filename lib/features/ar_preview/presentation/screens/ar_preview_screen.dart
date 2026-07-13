@@ -98,7 +98,7 @@ class _ArPreviewScreenState extends ConsumerState<ArPreviewScreen> {
             const SizedBox(height: 8),
             Text('Take a photo of your room and preview\nnew colors and materials instantly.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(color: Colors.white.withValues(alpha: 0.8))),
+                style: GoogleFonts.poppins(color: AppColors.textPrimary.withValues(alpha: 0.8))),
             const SizedBox(height: 40),
             ElevatedButton.icon(
               onPressed: () => _pickImage(ImageSource.camera),
@@ -115,7 +115,7 @@ class _ArPreviewScreenState extends ConsumerState<ArPreviewScreen> {
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: () => _pickImage(ImageSource.gallery),
-              icon: const Icon(Icons.photo_library, color: Colors.white),
+              icon: const Icon(Icons.photo_library, color: AppColors.textPrimary),
               label: const Text('Choose from Gallery',
                   style: TextStyle(color: Colors.white)),
               style: OutlinedButton.styleFrom(
@@ -194,13 +194,13 @@ class _ArPreviewScreenState extends ConsumerState<ArPreviewScreen> {
                       () => setState(() => _activeTool = 'furniture')),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.undo, color: Colors.white),
+                    icon: const Icon(Icons.undo, color: AppColors.textPrimary),
                     onPressed: _zones.isNotEmpty
                         ? () => setState(() => _zones.removeLast())
                         : null,
                   ),
                   IconButton(
-                    icon: const Icon(Icons.clear_all, color: Colors.white),
+                    icon: const Icon(Icons.clear_all, color: AppColors.textPrimary),
                     onPressed: () => setState(() => _zones.clear()),
                   ),
                 ],
@@ -330,7 +330,7 @@ class _ToolBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? AppColors.secondary : Colors.white12,
+          color: active ? AppColors.accent : Colors.white12,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(

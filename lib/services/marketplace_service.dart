@@ -23,7 +23,10 @@ class HttpMarketplaceService implements MarketplaceService {
     final uri = Uri.parse(_apiUrl);
     http.Response resp;
     try {
-      resp = await http.get(uri);
+      resp = await http.get(uri).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => http.Response('timeout', 408),
+      );
     } catch (_) {
       // Network/connection error: fall back to assets for seamless dev use
       return AssetMarketplaceService().fetchProducts();
