@@ -1,0 +1,8 @@
+[
+  {"id": "style-modern", "name": "Modern", "active": true},
+  {"id": "style-classic", "name": "Classic", "active": true},
+  {"id": "style-industrial", "name": "Industrial", "active": true},
+  {"id": "style-scandinavian", "name": "Scandinavian", "active": true},
+  {"id": "style-bohemian", "name": "Bohemian", "active": true},
+  {"id": "style-minimalist", "name": "Minimalist", "active": true}
+]

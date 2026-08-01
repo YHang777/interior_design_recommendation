@@ -10,7 +10,6 @@ import '../../features/budget/presentation/screens/budget_planner_screen.dart';
 import '../../features/homeowner/presentation/screens/ai_recommendation_screen.dart';
 import '../../features/homeowner/presentation/screens/dashboard_screen.dart';
 import '../../features/homeowner/presentation/screens/homeowner_shell.dart';
-import '../../features/homeowner/presentation/screens/marketplace_screen.dart';
 import '../../features/homeowner/presentation/screens/profile_screen.dart';
 import '../../features/homeowner/presentation/screens/saved_designs_screen.dart';
 import '../../features/homeowner/presentation/screens/scan_screen.dart';
@@ -20,6 +19,17 @@ import '../../features/supplier/presentation/screens/product_management_screen.d
 import '../../features/supplier/presentation/screens/supplier_dashboard_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_profile_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_shell.dart';
+
+// Marketplace feature
+import '../../features/marketplace/presentation/screens/marketplace_screen.dart';
+import '../../features/marketplace/presentation/screens/product_detail_screen.dart';
+import '../../features/marketplace/presentation/screens/cart_screen.dart';
+import '../../features/marketplace/presentation/screens/checkout_screen.dart';
+import '../../features/marketplace/presentation/screens/order_confirmation_screen.dart';
+import '../../features/marketplace/presentation/screens/order_history_screen.dart';
+import '../../features/marketplace/presentation/screens/wishlist_screen.dart';
+import '../../features/supplier/presentation/screens/order_detail_screen.dart';
+
 import 'route_names.dart';
 
 /// GoRouter provider with role-based redirect logic.
@@ -27,10 +37,6 @@ import 'route_names.dart';
 /// The router watches [authStateProvider] and redirects based on:
 /// - Authentication state (logged in / logged out)
 /// - User role (homeowner / supplier)
-///
-/// This is the "hidden seller" design: the router is the only place that
-/// knows about both role shells. Homeowner screens never import supplier
-/// widgets and vice versa.
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
 
@@ -44,30 +50,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == '/forgot-password' ||
           state.matchedLocation == '/verify-email';
 
-      // Case 1: Not logged in, trying to access protected route → login
       if (!isLoggedIn && !isOnAuthRoute) {
         return '/login';
       }
-
-      // Case 2: Logged in, but on an auth route → go to correct shell
       if (isLoggedIn && isOnAuthRoute) {
         return user.isHomeowner ? '/home' : '/supplier/dashboard';
       }
-
-      // Case 3: Logged-in homeowner trying to access supplier routes → redirect
       if (isLoggedIn && user.isHomeowner &&
           state.matchedLocation.startsWith('/supplier')) {
         return '/home';
       }
-
-      // Case 4: Logged-in supplier trying to access homeowner routes → redirect
       if (isLoggedIn && user.isSupplier &&
           !state.matchedLocation.startsWith('/supplier') &&
           !isOnAuthRoute) {
         return '/supplier/dashboard';
       }
-
-      // No redirect needed
       return null;
     },
     routes: [
@@ -98,6 +95,54 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/budget',
         name: RouteNames.homeownerBudget,
         pageBuilder: (_, __) => _buildPage(const BudgetPlannerScreen()),
+      ),
+
+      // ── Marketplace (buyer, full-screen over shell) ──
+      GoRoute(
+        path: '/marketplace/product/:id',
+        name: RouteNames.homeownerProductDetail,
+        pageBuilder: (_, state) => _buildPage(
+          ProductDetailScreen(
+            productId: state.pathParameters['id']!,
+          ),
+        ),
+      ),
+      GoRoute(
+        path: '/marketplace/cart',
+        name: RouteNames.homeownerCart,
+        pageBuilder: (_, __) => _buildPage(const CartScreen()),
+      ),
+      GoRoute(
+        path: '/marketplace/checkout',
+        name: RouteNames.homeownerCheckout,
+        pageBuilder: (_, __) => _buildPage(const CheckoutScreen()),
+      ),
+      GoRoute(
+        path: '/marketplace/order-confirmation',
+        name: RouteNames.homeownerOrderConfirmation,
+        pageBuilder: (_, __) =>
+            _buildPage(const OrderConfirmationScreen()),
+      ),
+      GoRoute(
+        path: '/marketplace/orders',
+        name: RouteNames.homeownerOrderHistory,
+        pageBuilder: (_, __) => _buildPage(const OrderHistoryScreen()),
+      ),
+      GoRoute(
+        path: '/marketplace/wishlist',
+        name: RouteNames.homeownerWishlist,
+        pageBuilder: (_, __) => _buildPage(const WishlistScreen()),
+      ),
+
+      // ── Supplier order detail (full-screen) ──
+      GoRoute(
+        path: '/supplier/orders/:id',
+        name: RouteNames.supplierOrderDetail,
+        pageBuilder: (_, state) => _buildPage(
+          SupplierOrderDetailScreen(
+            orderId: state.pathParameters['id']!,
+          ),
+        ),
       ),
 
       // ── Homeowner shell ──

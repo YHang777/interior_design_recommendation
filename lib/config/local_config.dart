@@ -11,8 +11,7 @@ class LocalConfig {
   static const String? geminiModel = null; // e.g., "gemini-2.0-flash"
 
   /// Marketplace API base URL. Set to your backend list endpoint.
-  /// Leave as `null` to use bundled asset fallback.
-  /// Set to your backend endpoint when the Node.js server is ready.
-  /// Leave `null` to use bundled asset fallback directly.
-  static const String? marketplaceApiUrl = null;
+  /// Uses the local Dart server by default (run `dart run server/bin/server.dart`).
+  /// Set to `null` to use bundled asset fallback only.
+  static const String marketplaceApiUrl = 'http://localhost:8080';
 }

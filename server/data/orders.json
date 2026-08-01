@@ -1,0 +1,74 @@
+[
+  {
+    "id": "ord-demo-001",
+    "orderNumber": "ORD-240801-1",
+    "customerId": "demo-user-1",
+    "customerName": "Ahmad Bin Ali",
+    "customerEmail": "ahmad@email.com",
+    "customerPhone": "+60 12-345 6789",
+    "shippingAddress": "123 Jalan Ampang, Kuala Lumpur, 50450",
+    "items": [
+      {
+        "productId": "p-sofa-modern",
+        "name": "Modern Sofa",
+        "image": "assets/images/furniture_sofa_modern.png",
+        "unitPrice": 1200,
+        "quantity": 1,
+        "supplierId": "s-elegant"
+      },
+      {
+        "productId": "p-lamp-floor",
+        "name": "Modern Floor Lamp",
+        "image": "assets/images/furniture_lamp_floor.png",
+        "unitPrice": 180,
+        "quantity": 2,
+        "supplierId": "s-elegant"
+      }
+    ],
+    "status": "pending",
+    "paymentMethod": "card_fpx",
+    "subtotal": 1560,
+    "shippingFee": 0,
+    "total": 1560,
+    "createdAt": "2026-08-01T10:30:00Z",
+    "refundStatus": null,
+    "refundReason": null,
+    "refundAmount": null
+  },
+  {
+    "id": "ord-demo-002",
+    "orderNumber": "ORD-240730-2",
+    "customerId": "demo-user-2",
+    "customerName": "Siti Nurhaliza",
+    "customerEmail": "siti@email.com",
+    "customerPhone": "+60 19-876 5432",
+    "shippingAddress": "456 Jalan Tun Razak, Kuala Lumpur, 68000",
+    "items": [
+      {
+        "productId": "p-table-dining",
+        "name": "Classic Dining Table",
+        "image": "assets/images/furniture_table_dining.png",
+        "unitPrice": 800,
+        "quantity": 1,
+        "supplierId": "s-modernhome"
+      },
+      {
+        "productId": "p-rug-classic",
+        "name": "Classic Rug",
+        "image": "assets/images/furniture_rug_classic.png",
+        "unitPrice": 320,
+        "quantity": 1,
+        "supplierId": "s-modernhome"
+      }
+    ],
+    "status": "delivered",
+    "paymentMethod": "cod",
+    "subtotal": 1120,
+    "shippingFee": 25,
+    "total": 1145,
+    "createdAt": "2026-07-30T14:15:00Z",
+    "refundStatus": null,
+    "refundReason": null,
+    "refundAmount": null
+  }
+]

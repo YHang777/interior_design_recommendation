@@ -1,0 +1,9 @@
+[
+  {"id": "cat-furniture", "name": "Furniture", "icon": "chair", "active": true},
+  {"id": "cat-lighting", "name": "Lighting", "icon": "lightbulb", "active": true},
+  {"id": "cat-decor", "name": "Decor", "icon": "palette", "active": true},
+  {"id": "cat-paint", "name": "Paint", "icon": "format_paint", "active": true},
+  {"id": "cat-flooring", "name": "Flooring", "icon": "grid_on", "active": true},
+  {"id": "cat-textiles", "name": "Textiles", "icon": "style", "active": true},
+  {"id": "cat-wall-covering", "name": "Wall Covering", "icon": "wallpaper", "active": true}
+]

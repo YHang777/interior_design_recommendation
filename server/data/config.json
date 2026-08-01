@@ -1,0 +1,11 @@
+{
+  "shippingFee": 25,
+  "freeShippingThreshold": 500,
+  "currency": "MYR",
+  "taxRate": 0.06,
+  "membershipTiers": [
+    {"name": "Free", "discountPercent": 0, "minOrders": 0},
+    {"name": "Silver", "discountPercent": 5, "minOrders": 5},
+    {"name": "Gold", "discountPercent": 10, "minOrders": 15}
+  ]
+}

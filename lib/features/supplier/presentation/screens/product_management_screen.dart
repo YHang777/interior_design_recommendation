@@ -1,203 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
-import '../../../../shared/widgets/gradient_scaffold.dart';
+import '../../../../../core/utils/formatters.dart';
+import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/skeleton_loader.dart';
+import '../../../../../models/product.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import 'product_form_screen.dart';
 
-/// Supplier product management — CRUD operations on products.
-class ProductManagementScreen extends ConsumerStatefulWidget {
+/// Supplier product management — CRUD via API, search, filter.
+class ProductManagementScreen extends ConsumerWidget {
   const ProductManagementScreen({super.key});
 
   @override
-  ConsumerState<ProductManagementScreen> createState() =>
-      _ProductManagementScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final productsAsync = ref.watch(marketplaceProductsProvider);
+    final user = ref.watch(currentUserProvider);
+    final supplierName = user?.name ?? '';
 
-class _ProductManagementScreenState
-    extends ConsumerState<ProductManagementScreen> {
-  final _products = <_SP>[
-    _SP('Oak Wood Flooring', 850, 45, 'assets/images/flooring.jpg', 'Flooring',
-        'Modern'),
-    _SP('Modern Sofa', 2400, 12, 'assets/images/sofa_modern.jpg', 'Furniture',
-        'Modern'),
-    _SP('Classic Dining Table', 1800, 8, 'assets/images/dining_table.jpg',
-        'Furniture', 'Classic'),
-    _SP('Modern Floor Lamp', 350, 30, 'assets/images/lamp_floor.jpg',
-        'Lighting', 'Modern'),
-    _SP('Classic Table Lamp', 280, 25, 'assets/images/lamp_table.jpg',
-        'Lighting', 'Classic'),
-    _SP('Modern Coffee Table', 650, 15, 'assets/images/coffee_table.jpg',
-        'Furniture', 'Modern'),
-  ];
-
-  String _filter = 'All';
-
-  List<_SP> get _filtered =>
-      _filter == 'All'
-          ? _products
-          : _products.where((p) => p.style == _filter).toList();
-
-  @override
-  Widget build(BuildContext context) {
-    return GradientScaffold(
-      child: Column(
-        children: [
-          // Filter
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                _FilterChip('All', _filter == 'All', () => setState(() => _filter = 'All')),
-                const SizedBox(width: 8),
-                _FilterChip('Modern', _filter == 'Modern', () => setState(() => _filter = 'Modern')),
-                const SizedBox(width: 8),
-                _FilterChip('Classic', _filter == 'Classic', () => setState(() => _filter = 'Classic')),
-                const Spacer(),
-                IconButton(
-                  onPressed: () => _showAddEditDialog(),
-                  icon: const Icon(Icons.add_circle, color: Colors.white, size: 32),
-                ),
-              ],
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('My Products'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add, color: AppColors.textOnDark),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const ProductFormScreen()),
             ),
-          ),
-
-          // Product list
-          Expanded(
-            child: _filtered.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.inventory_2, size: 64, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        Text('No products yet',
-                            style: GoogleFonts.poppins(color: Colors.grey)),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _filtered.length,
-                    itemBuilder: (_, i) => _ProductTile(
-                      product: _filtered[i],
-                      onEdit: () => _showAddEditDialog(product: _filtered[i]),
-                      onDelete: () {
-                        setState(() => _products.remove(_filtered[i]));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Product deleted (mocked)')),
-                        );
-                      },
-                    ),
-                  ),
           ),
         ],
       ),
-    );
-  }
-
-  void _showAddEditDialog({_SP? product}) {
-    final nameCtrl = TextEditingController(text: product?.name ?? '');
-    final priceCtrl = TextEditingController(text: product?.price.toString() ?? '');
-    final stockCtrl = TextEditingController(text: product?.stock.toString() ?? '');
-    String category = product?.category ?? 'Furniture';
-    String style = product?.style ?? 'Modern';
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(product != null ? 'Edit Product' : 'Add Product',
-              style: GoogleFonts.poppins()),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-                const SizedBox(height: 10),
-                TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Price (RM)')),
-                const SizedBox(height: 10),
-                TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock')),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: category,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                  items: ['Furniture', 'Flooring', 'Lighting', 'Decor', 'Paint']
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => category = v!),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: style,
-                  decoration: const InputDecoration(labelText: 'Style'),
-                  items: ['Modern', 'Classic', 'Industrial', 'Scandinavian', 'Bohemian']
-                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => style = v!),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                final newProduct = _SP(nameCtrl.text, int.tryParse(priceCtrl.text) ?? 0, int.tryParse(stockCtrl.text) ?? 0, 'assets/images/furniture_sofa_modern.png', category, style);
-                setState(() {
-                  if (product != null) {
-                    final idx = _products.indexOf(product);
-                    _products[idx] = newProduct;
-                  } else {
-                    _products.add(newProduct);
-                  }
-                });
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(product != null ? 'Product updated (mocked)' : 'Product added (mocked)')));
-              },
-              child: const Text('Save'),
-            ),
-          ],
+      body: productsAsync.when(
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: SkeletonLoader(count: 6),
         ),
+        error: (e, _) => EmptyState(
+          icon: Icons.error_outline,
+          title: 'Failed to load products',
+          actionLabel: 'Retry',
+          onAction: () =>
+              ref.invalidate(marketplaceProductsProvider),
+        ),
+        data: (products) {
+          final myProducts = supplierName.isNotEmpty
+              ? products
+                  .where((p) =>
+                      p.supplier.name.toLowerCase() ==
+                      supplierName.toLowerCase())
+                  .toList()
+              : products;
+
+          if (myProducts.isEmpty) {
+            return EmptyState(
+              icon: Icons.inventory_2,
+              title: 'No products yet',
+              subtitle:
+                  'Add your first product to start selling',
+              actionLabel: 'Add Product',
+              onAction: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        const ProductFormScreen()),
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: () async =>
+                ref.invalidate(marketplaceProductsProvider),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: myProducts.length,
+              itemBuilder: (context, index) {
+                final product = myProducts[index];
+                return _ProductTile(
+                  product: product,
+                  onEdit: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ProductFormScreen(
+                            existingProduct: product)),
+                  ),
+                  onDelete: () =>
+                      _confirmDelete(context, ref, product),
+                );
+              },
+            ),
+          );
+        },
       ),
     );
   }
-}
 
-class _SP {
-  final String name, image, category, style;
-  final int price, stock;
-  const _SP(this.name, this.price, this.stock, this.image, this.category, this.style);
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip(this.label, this.active, this.onTap);
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(label,
-            style: GoogleFonts.poppins(
-                color: active ? AppColors.primary : Colors.white,
-                fontWeight: FontWeight.w500,
-                fontSize: 13)),
+  void _confirmDelete(
+      BuildContext context, WidgetRef ref, Product product) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Product'),
+        content: Text(
+            'Delete "${product.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ref
+                    .read(marketplaceServiceProvider)
+                    .deleteProduct(product.id);
+                ref.invalidate(marketplaceProductsProvider);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content:
+                          Text('${product.name} deleted'),
+                      backgroundColor: AppColors.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed: $e'),
+                      backgroundColor: AppColors.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _ProductTile extends StatelessWidget {
-  const _ProductTile({required this.product, required this.onEdit, required this.onDelete});
-  final _SP product;
+  const _ProductTile({
+    required this.product,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final Product product;
   final VoidCallback onEdit, onDelete;
 
   @override
@@ -206,37 +167,87 @@ class _ProductTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: Image.asset(product.image, width: 60, height: 50, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const Icon(Icons.image)),
+            child: Image.asset(
+              product.image,
+              width: 64,
+              height: 56,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 64,
+                height: 56,
+                color: AppColors.divider,
+                child: const Icon(Icons.image,
+                    color: AppColors.textHint),
+              ),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(product.name, style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
-                Text('RM ${product.price} • Stock: ${product.stock}',
-                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
+                Text(product.name,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(Formatters.myr(product.price),
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.accent)),
+                const SizedBox(height: 4),
                 Row(
                   children: [
-                    _Badge(product.category, Colors.brown),
+                    _Badge(product.category,
+                        AppColors.accent),
                     const SizedBox(width: 6),
-                    _Badge(product.style, AppColors.accent),
+                    _Badge(product.designStyle,
+                        AppColors.primary),
+                    if (product.isEcoFriendly) ...[
+                      const SizedBox(width: 6),
+                      _Badge('Eco', AppColors.success),
+                    ],
+                    const Spacer(),
+                    Text(
+                      product.isOutOfStock
+                          ? 'Out of Stock'
+                          : product.isLowStock
+                              ? 'Only ${product.stock} left'
+                              : 'Stock: ${product.stock}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: product.isOutOfStock
+                            ? AppColors.error
+                            : product.isLowStock
+                                ? AppColors.warning
+                                : AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ],
             ),
           ),
-          IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: onEdit),
-          IconButton(icon: const Icon(Icons.delete, size: 20, color: Colors.red), onPressed: onDelete),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined,
+                size: 20, color: AppColors.textSecondary),
+            onPressed: onEdit,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline,
+                size: 20, color: AppColors.error),
+            onPressed: onDelete,
+          ),
         ],
       ),
     );
@@ -256,7 +267,11 @@ class _Badge extends StatelessWidget {
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(text, style: GoogleFonts.poppins(fontSize: 10, color: color)),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color)),
     );
   }
 }

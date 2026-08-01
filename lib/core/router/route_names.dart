@@ -20,11 +20,20 @@ class RouteNames {
   static const homeownerSaved = 'homeowner-saved';
   static const homeownerProfile = 'homeowner-profile';
 
+  // Marketplace (buyer)
+  static const homeownerProductDetail = 'homeowner-product-detail';
+  static const homeownerCart = 'homeowner-cart';
+  static const homeownerCheckout = 'homeowner-checkout';
+  static const homeownerOrderConfirmation = 'homeowner-order-confirmation';
+  static const homeownerOrderHistory = 'homeowner-order-history';
+  static const homeownerWishlist = 'homeowner-wishlist';
+
   // Supplier
   static const supplierShell = 'supplier-shell';
   static const supplierDashboard = 'supplier-dashboard';
   static const supplierProducts = 'supplier-products';
   static const supplierOrders = 'supplier-orders';
+  static const supplierOrderDetail = 'supplier-order-detail';
   static const supplierAnalytics = 'supplier-analytics';
   static const supplierProfile = 'supplier-profile';
 }
