@@ -28,6 +28,7 @@ import '../../features/marketplace/presentation/screens/checkout_screen.dart';
 import '../../features/marketplace/presentation/screens/order_confirmation_screen.dart';
 import '../../features/marketplace/presentation/screens/order_history_screen.dart';
 import '../../features/marketplace/presentation/screens/wishlist_screen.dart';
+import '../../features/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
 
 import 'route_names.dart';
@@ -95,6 +96,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/budget',
         name: RouteNames.homeownerBudget,
         pageBuilder: (_, __) => _buildPage(const BudgetPlannerScreen()),
+      ),
+
+      // ── Design Editor (full-screen from scan or saved designs) ──
+      GoRoute(
+        path: '/design-editor',
+        name: RouteNames.homeownerDesignEditor,
+        pageBuilder: (_, state) => _buildPage(
+          RoomScannerScreen(existingDesign: state.extra as dynamic),
+        ),
       ),
 
       // ── Marketplace (buyer, full-screen over shell) ──

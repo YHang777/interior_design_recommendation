@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../models/cart_item.dart';
 import '../providers/marketplace_providers.dart';
 
 /// Shopping cart with quantity controls, order summary, and checkout button.

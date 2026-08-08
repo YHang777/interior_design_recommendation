@@ -27,6 +27,7 @@ class RouteNames {
   static const homeownerOrderConfirmation = 'homeowner-order-confirmation';
   static const homeownerOrderHistory = 'homeowner-order-history';
   static const homeownerWishlist = 'homeowner-wishlist';
+  static const homeownerDesignEditor = 'homeowner-design-editor';
 
   // Supplier
   static const supplierShell = 'supplier-shell';
