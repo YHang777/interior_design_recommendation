@@ -29,6 +29,8 @@ import '../../features/marketplace/presentation/screens/order_confirmation_scree
 import '../../features/marketplace/presentation/screens/order_history_screen.dart';
 import '../../features/marketplace/presentation/screens/wishlist_screen.dart';
 import '../../features/scanner/presentation/screens/room_scanner_screen.dart';
+import '../../features/ar/data/furniture_model_library.dart';
+import '../../features/ar/presentation/screens/ar_viewer_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
 
 import 'route_names.dart';
@@ -104,6 +106,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: RouteNames.homeownerDesignEditor,
         pageBuilder: (_, state) => _buildPage(
           RoomScannerScreen(existingDesign: state.extra as dynamic),
+        ),
+      ),
+
+      // ── AR Viewer (full-screen; extras: List<ArFurnitureItem>) ──
+      GoRoute(
+        path: '/ar-viewer',
+        name: RouteNames.arViewer,
+        pageBuilder: (_, state) => _buildPage(
+          ArViewerScreen(items: state.extra as List<ArFurnitureItem>?),
         ),
       ),
 

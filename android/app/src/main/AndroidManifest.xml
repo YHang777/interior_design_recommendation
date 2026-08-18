@@ -1,13 +1,24 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Allow network access -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Enable camera access for scan feature -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- ARCore (Google Play Services for AR). Marked optional so the app still
+         installs on devices without ARCore — the AR screen shows a fallback. -->
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false"
+        tools:replace="android:required" />
     <application
         android:label="interior_design_recommendation"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+        <!-- ARCore install-time requirement: "optional" (installs everywhere) -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -46,5 +57,7 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Package visibility for the ARCore availability check (Android 11+) -->
+        <package android:name="com.google.ar.core" />
     </queries>
 </manifest>

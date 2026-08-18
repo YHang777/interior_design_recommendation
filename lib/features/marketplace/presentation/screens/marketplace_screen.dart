@@ -9,6 +9,7 @@ import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/skeleton_loader.dart';
 
 import '../providers/marketplace_providers.dart';
+import '../../../ar/data/furniture_model_library.dart';
 
 /// Marketplace — browse, search, filter, and shop products.
 class MarketplaceScreen extends ConsumerWidget {
@@ -309,6 +310,11 @@ class MarketplaceScreen extends ConsumerWidget {
                             isWishlisted: isWishlisted,
                             onTap: () => context.push(
                                 '/marketplace/product/${product.id}'),
+                            onArPreview: () => context.push(
+                              '/ar-viewer',
+                              extra: ArFurnitureLibrary.fromCategory(
+                                  product.category),
+                            ),
                             onAddToCart: () {
                               ref
                                   .read(cartProvider.notifier)

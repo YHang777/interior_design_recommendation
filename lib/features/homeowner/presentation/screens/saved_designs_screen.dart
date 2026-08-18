@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../models/room_design.dart';
+import '../../../ar/data/furniture_model_library.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../shared/widgets/section_header.dart';
@@ -182,6 +183,16 @@ class SavedDesignsScreen extends ConsumerWidget {
                     top: 4,
                     child: Row(
                       children: [
+                        _actionBtn(Icons.view_in_ar_outlined,
+                            AppColors.accent, () {
+                          context.push(
+                            '/ar-viewer',
+                            extra: ArFurnitureLibrary.fromIconNames(
+                                design.furniture
+                                    .map((f) => f.iconName)
+                                    .toList()),
+                          );
+                        }),
                         _actionBtn(Icons.edit_outlined,
                             AppColors.secondaryAccent, () {
                           context.push('/design-editor',

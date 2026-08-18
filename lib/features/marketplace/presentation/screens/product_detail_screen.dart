@@ -8,6 +8,7 @@ import '../../../../../shared/widgets/rating_stars.dart';
 import '../../../../../shared/widgets/section_header.dart';
 import '../../../../../shared/widgets/product_card.dart';
 import '../providers/marketplace_providers.dart';
+import '../../../ar/data/furniture_model_library.dart';
 
 /// Full-screen product detail page with hero image, qty selector, supplier info,
 /// and related products.
@@ -74,6 +75,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             title: Text(product.name,
                 style: const TextStyle(fontSize: 16)),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.view_in_ar,
+                    color: AppColors.textOnDark),
+                tooltip: 'View in AR',
+                onPressed: () => context.push(
+                  '/ar-viewer',
+                  extra: ArFurnitureLibrary.fromCategory(
+                      product.category),
+                ),
+              ),
               IconButton(
                 icon: Icon(
                   isWishlisted
