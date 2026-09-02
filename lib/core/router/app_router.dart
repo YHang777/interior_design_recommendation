@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../models/product.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -15,6 +16,7 @@ import '../../features/homeowner/presentation/screens/saved_designs_screen.dart'
 import '../../features/homeowner/presentation/screens/scan_screen.dart';
 import '../../features/supplier/presentation/screens/analytics_screen.dart';
 import '../../features/supplier/presentation/screens/order_management_screen.dart';
+import '../../features/supplier/presentation/screens/product_form_screen.dart';
 import '../../features/supplier/presentation/screens/product_management_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_dashboard_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_profile_screen.dart';
@@ -27,6 +29,7 @@ import '../../features/marketplace/presentation/screens/cart_screen.dart';
 import '../../features/marketplace/presentation/screens/checkout_screen.dart';
 import '../../features/marketplace/presentation/screens/order_confirmation_screen.dart';
 import '../../features/marketplace/presentation/screens/order_history_screen.dart';
+import '../../features/marketplace/presentation/screens/buyer_order_detail_screen.dart';
 import '../../features/marketplace/presentation/screens/wishlist_screen.dart';
 import '../../features/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/ar/data/furniture_model_library.dart';
@@ -63,7 +66,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation.startsWith('/supplier')) {
         return '/home';
       }
+      // Suppliers may browse the storefront (grid + product detail) so they
+      // can preview their own live listings ("View in store"), and may open
+      // the AR viewer from a product's "View in AR" preview. Cart, checkout,
+      // orders and wishlist remain buyer-only.
+      final isStorefrontBrowse =
+          state.matchedLocation == '/marketplace' ||
+              state.matchedLocation.startsWith('/marketplace/product/') ||
+              state.matchedLocation == '/ar-viewer';
       if (isLoggedIn && user.isSupplier &&
+          !isStorefrontBrowse &&
           !state.matchedLocation.startsWith('/supplier') &&
           !isOnAuthRoute) {
         return '/supplier/dashboard';
@@ -109,13 +121,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
-      // ── AR Viewer (full-screen; extras: List<ArFurnitureItem>) ──
+      // ── AR Viewer (full-screen; extras: Product | List<ArFurnitureItem>) ──
       GoRoute(
         path: '/ar-viewer',
         name: RouteNames.arViewer,
-        pageBuilder: (_, state) => _buildPage(
-          ArViewerScreen(items: state.extra as List<ArFurnitureItem>?),
-        ),
+        pageBuilder: (_, state) => _buildPage(_buildArViewer(state.extra)),
       ),
 
       // ── Marketplace (buyer, full-screen over shell) ──
@@ -150,9 +160,32 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (_, __) => _buildPage(const OrderHistoryScreen()),
       ),
       GoRoute(
+        path: '/marketplace/orders/:id',
+        name: RouteNames.homeownerOrderDetail,
+        pageBuilder: (_, state) => _buildPage(
+          BuyerOrderDetailScreen(
+            orderId: state.pathParameters['id']!,
+          ),
+        ),
+      ),
+      GoRoute(
         path: '/marketplace/wishlist',
         name: RouteNames.homeownerWishlist,
         pageBuilder: (_, __) => _buildPage(const WishlistScreen()),
+      ),
+
+      // ── Supplier product form (create / edit, full-screen) ──
+      GoRoute(
+        path: '/supplier/products/new',
+        name: RouteNames.supplierProductNew,
+        pageBuilder: (_, __) => _buildPage(const ProductFormScreen()),
+      ),
+      GoRoute(
+        path: '/supplier/products/:id/edit',
+        name: RouteNames.supplierProductEdit,
+        pageBuilder: (_, state) => _buildPage(
+          ProductFormScreen(productId: state.pathParameters['id']),
+        ),
       ),
 
       // ── Supplier order detail (full-screen) ──
@@ -293,4 +326,16 @@ CustomTransitionPage<T> _buildPage<T>(Widget child) {
     },
     transitionDuration: const Duration(milliseconds: 200),
   );
+}
+
+/// Maps the /ar-viewer route extra to the screen:
+///  * a [Product] → product mode (marketplace AR button): the product's own
+///    true-size 3D model leads the catalog;
+///  * a [List] of [ArFurnitureItem] → room-plan mode (scanner / saved
+///    designs) with exactly those bundled models;
+///  * anything else / nothing → the full bundled catalog.
+Widget _buildArViewer(Object? extra) {
+  if (extra is Product) return ArViewerScreen(product: extra);
+  if (extra is List<ArFurnitureItem>) return ArViewerScreen(items: extra);
+  return const ArViewerScreen();
 }

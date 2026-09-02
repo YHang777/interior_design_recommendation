@@ -61,6 +61,7 @@ class AuthRepositoryImpl implements IAuthRepository {
     required String name,
     required UserRole role,
     String? phone,
+    String? address,
   }) async {
     try {
       final credential = await _authDatasource.createUserWithEmailAndPassword(
@@ -69,7 +70,15 @@ class AuthRepositoryImpl implements IAuthRepository {
       );
       final fbUser = credential.user!;
 
-      // Create Firestore document
+      final isSupplier = role == UserRole.supplier;
+
+      // Suppliers are trusted on registration so their listings are visible
+      // to buyers immediately (buyer feeds filter on `verificationStatus`).
+      // TODO(future): replace with an admin approval flow that flips
+      // `verificationStatus` from 'pending' once moderation exists.
+      const verificationStatus = 'verified';
+
+      // Create Firestore document.
       await _firestoreDatasource.createUser(
         uid: fbUser.uid,
         data: {
@@ -77,8 +86,12 @@ class AuthRepositoryImpl implements IAuthRepository {
           'email': email,
           'role': role.firestoreValue,
           'phone': phone ?? '',
-          'address': '',
+          'address': address ?? '',
           'profilePicture': '',
+          'verificationStatus': verificationStatus,
+          'businessName': isSupplier ? name : '',
+          'businessPhone': isSupplier ? (phone ?? '') : '',
+          'businessAddress': isSupplier ? (address ?? '') : '',
         },
       );
 
@@ -91,6 +104,11 @@ class AuthRepositoryImpl implements IAuthRepository {
         name: name,
         role: role,
         phone: phone,
+        address: address,
+        verificationStatus: verificationStatus,
+        businessName: isSupplier ? name : null,
+        businessPhone: isSupplier ? phone : null,
+        businessAddress: isSupplier ? address : null,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
@@ -99,6 +117,30 @@ class AuthRepositoryImpl implements IAuthRepository {
     } on fb.FirebaseAuthException catch (e) {
       throw _mapFirebaseError(e);
     }
+  }
+
+  @override
+  Future<AppUser> updateProfile({
+    required String name,
+    String? phone,
+    String? address,
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
+  }) async {
+    final fbUser = _authDatasource.currentUser;
+    if (fbUser == null) {
+      throw const AuthException('You are not signed in', code: 'not-signed-in');
+    }
+    await _firestoreDatasource.updateUser(fbUser.uid, {
+      'name': name,
+      'phone': phone ?? '',
+      'address': address ?? '',
+      'businessName': businessName ?? '',
+      'businessPhone': businessPhone ?? '',
+      'businessAddress': businessAddress ?? '',
+    });
+    return _buildAppUser(fbUser);
   }
 
   @override

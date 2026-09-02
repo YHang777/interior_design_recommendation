@@ -3,10 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/product.dart';
+import 'product_image.dart';
 import 'rating_stars.dart';
 
-/// Reusable product card used in marketplace grid, wishlist, and related
-/// products. All colors from AppColors — no raw Color() values.
+/// Reusable product card used in marketplace grid and related-product rails.
+/// All colors from AppColors — no raw Color() values.
+///
+/// Visual language (Loop 3): hero image (tag `product-{id}`), discount and
+/// eco badges top-left, wishlist heart top-right, low-stock chip and overlay
+/// quick actions (AR, add-to-cart) on the image, name/rating/price below.
+/// Out-of-stock items get a scrim and lose their buy affordances.
 class ProductCard extends StatelessWidget {
   const ProductCard({
     super.key,
@@ -50,120 +56,157 @@ class ProductCard extends StatelessWidget {
             Expanded(
               flex: 3,
               child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  ClipRRect(
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(16)),
-                    child: Image.asset(
-                      product.image,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: AppColors.divider,
-                        child: const Icon(Icons.image,
-                            size: 32, color: AppColors.textHint),
+                  Hero(
+                    tag: 'product-${product.id}',
+                    child: ClipRRect(
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(16)),
+                      child: ProductImage(
+                        product: product,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorIconSize: 32,
                       ),
                     ),
                   ),
 
-                  // Eco-friendly badge (top-left)
-                  if (product.isEcoFriendly)
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.eco, size: 12, color: Colors.white),
-                            SizedBox(width: 2),
-                            Text('Eco',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
+                  // Top-left badges: discount first, eco underneath.
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (product.discountPercent != null)
+                          _Badge(
+                            text: '-${product.discountPercent}%',
+                            background: AppColors.error,
+                          ),
+                        if (product.discountPercent != null &&
+                            product.isEcoFriendly)
+                          const SizedBox(height: 4),
+                        if (product.isEcoFriendly)
+                          const _Badge(
+                            text: 'Eco',
+                            icon: Icons.eco,
+                            background: AppColors.success,
+                          ),
+                      ],
                     ),
+                  ),
 
                   // Wishlist heart (top-right)
                   if (onToggleWishlist != null)
                     Positioned(
                       top: 6,
                       right: 6,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onToggleWishlist,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.9),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              isWishlisted
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                              size: 18,
-                              color: isWishlisted
-                                  ? AppColors.error
-                                  : AppColors.textSecondary,
+                      child: Semantics(
+                        button: true,
+                        label: isWishlisted
+                            ? 'Remove from wishlist'
+                            : 'Add to wishlist',
+                        child: Tooltip(
+                          message: isWishlisted
+                              ? 'Remove from wishlist'
+                              : 'Add to wishlist',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: onToggleWishlist,
+                              borderRadius: BorderRadius.circular(20),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  isWishlisted
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  size: 18,
+                                  color: isWishlisted
+                                      ? AppColors.error
+                                      : AppColors.textSecondary,
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
 
-                  // Out of stock overlay
+                  // Low stock chip (bottom-left)
+                  if (product.isLowStock)
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('Only ${product.stock} left',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+
+                  // Out of stock scrim + label
                   if (product.isOutOfStock)
                     Positioned.fill(
                       child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(16)),
-                        ),
-                        child: const Center(
-                          child: Text('Out of Stock',
+                        color: Colors.black.withValues(alpha: 0.45),
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text('Out of Stock',
                               style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w600)),
                         ),
                       ),
                     ),
 
-                  // AR preview button (bottom-right of image)
-                  if (onArPreview != null && !product.isOutOfStock)
-                    Positioned(
-                      bottom: 6,
-                      right: 6,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onArPreview,
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withValues(alpha: 0.75),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.view_in_ar,
-                                size: 16, color: Colors.white),
+                  // Bottom-right quick actions: AR preview above add-to-cart.
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (onArPreview != null && !product.isOutOfStock) ...[
+                          _CircleAction(
+                            tooltip: 'View in AR',
+                            icon: Icons.view_in_ar,
+                            iconColor: AppColors.primary,
+                            onTap: onArPreview,
                           ),
-                        ),
-                      ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (onAddToCart != null && !product.isOutOfStock)
+                          _CircleAction(
+                            tooltip: 'Add to cart',
+                            icon: Icons.add_shopping_cart,
+                            iconColor: AppColors.accent,
+                            onTap: onAddToCart,
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -189,13 +232,30 @@ class ProductCard extends StatelessWidget {
                     ),
                     const Spacer(),
 
-                    // Rating
-                    if (!compact)
-                      RatingStars(
-                        rating: product.rating,
-                        count: product.ratingCount,
-                        size: 11,
-                      ),
+                    // Rating (or "New" for unreviewed items)
+                    if (!compact) ...[
+                      const SizedBox(height: 3),
+                      if (product.ratingCount > 0)
+                        RatingStars(
+                          rating: product.rating,
+                          count: product.ratingCount,
+                          size: 11,
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text('New',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.accent)),
+                        ),
+                    ],
 
                     // Price row
                     Row(
@@ -210,68 +270,18 @@ class ProductCard extends StatelessWidget {
                         ),
                         if (product.originalPrice != null) ...[
                           const SizedBox(width: 4),
-                          Text(
-                            Formatters.myr(product.originalPrice!),
-                            style: GoogleFonts.poppins(
-                              fontSize: compact ? 10 : 11,
-                              decoration: TextDecoration.lineThrough,
-                              color: AppColors.textHint,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-
-                    // Category + Stock + Add-to-cart
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color:
-                                AppColors.accent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            product.category,
-                            style: GoogleFonts.poppins(
-                                fontSize: compact ? 8 : 9,
-                                color: AppColors.accent),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          product.isOutOfStock
-                              ? 'OOS'
-                              : product.isLowStock
-                                  ? '${product.stock} left'
-                                  : '',
-                          style: GoogleFonts.poppins(
-                            fontSize: compact ? 8 : 9,
-                            color: product.isLowStock
-                                ? AppColors.warning
-                                : AppColors.textHint,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (onAddToCart != null && !product.isOutOfStock)
-                          Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: onAddToCart,
-                              borderRadius: BorderRadius.circular(14),
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.accent,
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(Icons.add,
-                                    size: 16, color: Colors.white),
+                          Flexible(
+                            child: Text(
+                              Formatters.myr(product.originalPrice!),
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(
+                                fontSize: compact ? 10 : 11,
+                                decoration: TextDecoration.lineThrough,
+                                color: AppColors.textHint,
                               ),
                             ),
                           ),
+                        ],
                       ],
                     ),
                   ],
@@ -279,6 +289,92 @@ class ProductCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small filled label used on the card image (discount %, eco).
+class _Badge extends StatelessWidget {
+  const _Badge({
+    required this.text,
+    required this.background,
+    this.icon,
+  });
+
+  final String text;
+  final Color background;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: background.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: Colors.white),
+            const SizedBox(width: 3),
+          ],
+          Text(text,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small circular overlay action (AR / add-to-cart) on the card image.
+class _CircleAction extends StatelessWidget {
+  const _CircleAction({
+    required this.icon,
+    required this.iconColor,
+    required this.onTap,
+    required this.tooltip,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+
+  /// Callers guard visibility; null simply leaves the button inert.
+  final VoidCallback? onTap;
+
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.92),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 15, color: iconColor),
+          ),
         ),
       ),
     );

@@ -26,6 +26,17 @@ class AppUser {
   final String? phone;
   final String? address;
   final String? profilePicture;
+
+  /// Onboarding/verification state: 'verified', 'pending' or 'rejected'.
+  /// Suppliers register as 'verified' today; an admin approval flow that
+  /// writes 'pending' is future work.
+  final String verificationStatus;
+
+  /// Supplier business profile (populated when [role] is supplier).
+  final String? businessName;
+  final String? businessPhone;
+  final String? businessAddress;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -37,12 +48,17 @@ class AppUser {
     this.phone,
     this.address,
     this.profilePicture,
+    this.verificationStatus = 'verified',
+    this.businessName,
+    this.businessPhone,
+    this.businessAddress,
     required this.createdAt,
     required this.updatedAt,
   });
 
   bool get isHomeowner => role == UserRole.homeowner;
   bool get isSupplier => role == UserRole.supplier;
+  bool get isVerified => verificationStatus == 'verified';
 
   /// Creates from Firestore document + Firebase Auth user.
   factory AppUser.fromFirestore({
@@ -50,16 +66,25 @@ class AppUser {
     required String email,
     required Map<String, dynamic> data,
   }) {
+    final role = UserRole.fromString(data['role'] as String? ?? 'homeowner');
+    final name = data['name'] as String? ?? '';
     return AppUser(
       uid: uid,
       email: email,
-      name: data['name'] as String? ?? '',
-      role: UserRole.fromString(data['role'] as String? ?? 'homeowner'),
+      name: name,
+      role: role,
       phone: data['phone'] as String?,
       address: data['address'] as String?,
       profilePicture: data['profilePicture'] as String?,
-      createdAt: (data['createdAt'] as dynamic)?.toDate() ?? DateTime.now(),
-      updatedAt: (data['updatedAt'] as dynamic)?.toDate() ?? DateTime.now(),
+      // Missing status defaults to verified — suppliers are trusted at
+      // registration today; admin moderation is future work.
+      verificationStatus: data['verificationStatus']?.toString() ?? 'verified',
+      businessName: data['businessName']?.toString() ??
+          (role == UserRole.supplier ? name : null),
+      businessPhone: data['businessPhone']?.toString(),
+      businessAddress: data['businessAddress']?.toString(),
+      createdAt: _toDate(data['createdAt']),
+      updatedAt: _toDate(data['updatedAt']),
     );
   }
 
@@ -72,6 +97,10 @@ class AppUser {
       'phone': phone ?? '',
       'address': address ?? '',
       'profilePicture': profilePicture ?? '',
+      'verificationStatus': verificationStatus,
+      'businessName': businessName ?? '',
+      'businessPhone': businessPhone ?? '',
+      'businessAddress': businessAddress ?? '',
       'updatedAt': DateTime.now(),
     };
   }
@@ -81,6 +110,10 @@ class AppUser {
     String? phone,
     String? address,
     String? profilePicture,
+    String? verificationStatus,
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
   }) {
     return AppUser(
       uid: uid,
@@ -90,6 +123,10 @@ class AppUser {
       phone: phone ?? this.phone,
       address: address ?? this.address,
       profilePicture: profilePicture ?? this.profilePicture,
+      verificationStatus: verificationStatus ?? this.verificationStatus,
+      businessName: businessName ?? this.businessName,
+      businessPhone: businessPhone ?? this.businessPhone,
+      businessAddress: businessAddress ?? this.businessAddress,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
@@ -98,4 +135,16 @@ class AppUser {
   @override
   String toString() =>
       'AppUser(uid: $uid, email: $email, name: $name, role: $role)';
+}
+
+DateTime _toDate(dynamic value) {
+  if (value is DateTime) return value;
+  try {
+    final toDate = value?.toDate;
+    if (toDate is Function) {
+      final parsed = value.toDate();
+      if (parsed is DateTime) return parsed;
+    }
+  } catch (_) {}
+  return DateTime.now();
 }

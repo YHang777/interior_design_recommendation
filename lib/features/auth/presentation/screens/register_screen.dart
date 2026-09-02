@@ -20,12 +20,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _emailCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  UserRole _role = UserRole.homeowner;
   bool _obscure = true;
+
+  bool get _isSupplier => _role == UserRole.supplier;
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _emailCtrl.dispose();
-    _pwdCtrl.dispose(); _confirmCtrl.dispose();
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _pwdCtrl.dispose();
+    _confirmCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
     super.dispose();
   }
 
@@ -35,7 +44,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       email: _emailCtrl.text.trim(),
       password: _pwdCtrl.text,
       name: _nameCtrl.text.trim(),
-      role: UserRole.homeowner,
+      role: _role,
+      phone: _isSupplier ? _phoneCtrl.text.trim() : null,
+      address: _isSupplier ? _addressCtrl.text.trim() : null,
     );
     if (mounted) context.push('/verify-email');
   }
@@ -44,6 +55,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(authStateProvider);
     final loading = state is AsyncLoading<AppUser?>;
+    final nameLabel = _isSupplier ? 'Business Name' : 'Full Name';
 
     ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
       next.whenOrNull(error: (e, _) {
@@ -73,17 +85,77 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               Text('Fill in your details below',
                   style: GoogleFonts.poppins(
                       color: AppColors.textSecondary)),
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
+
+              // ── Role selector ──
+              SegmentedButton<UserRole>(
+                segments: const [
+                  ButtonSegment(
+                    value: UserRole.homeowner,
+                    label: Text('Homeowner'),
+                    icon: Icon(Icons.home_outlined),
+                  ),
+                  ButtonSegment(
+                    value: UserRole.supplier,
+                    label: Text('Supplier'),
+                    icon: Icon(Icons.storefront_outlined),
+                  ),
+                ],
+                selected: {_role},
+                onSelectionChanged: (selection) {
+                  setState(() => _role = selection.first);
+                },
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: AppColors.accent,
+                  selectedForegroundColor: Colors.white,
+                  side: const BorderSide(color: AppColors.border),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_isSupplier)
+                Text('Supplier listings publish instantly once your email is verified.',
+                    style: GoogleFonts.poppins(
+                        fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 20),
+
               TextFormField(
                 controller: _nameCtrl,
                 keyboardType: TextInputType.name,
                 textInputAction: TextInputAction.next,
-                validator: (v) => Validators.required(v, 'Full name'),
-                decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    prefixIcon: Icon(Icons.person_outlined)),
+                validator: (v) => Validators.required(v, nameLabel),
+                decoration: InputDecoration(
+                    labelText: nameLabel,
+                    prefixIcon: Icon(_isSupplier
+                        ? Icons.business_outlined
+                        : Icons.person_outlined)),
               ),
               const SizedBox(height: 16),
+
+              // ── Supplier-only business contact fields ──
+              if (_isSupplier) ...[
+                TextFormField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  textInputAction: TextInputAction.next,
+                  validator: (v) => Validators.required(v, 'Business phone'),
+                  decoration: const InputDecoration(
+                      labelText: 'Business Phone',
+                      prefixIcon: Icon(Icons.phone_outlined)),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _addressCtrl,
+                  keyboardType: TextInputType.streetAddress,
+                  textInputAction: TextInputAction.next,
+                  maxLines: 2,
+                  validator: (v) => Validators.required(v, 'Business address'),
+                  decoration: const InputDecoration(
+                      labelText: 'Business Address',
+                      prefixIcon: Icon(Icons.location_on_outlined)),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               TextFormField(
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
@@ -128,7 +200,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       ? const SizedBox(width: 22, height: 22,
                           child: CircularProgressIndicator(
                               strokeWidth: 2.5, color: AppColors.textPrimary))
-                      : const Text('Create Account'),
+                      : Text(_isSupplier
+                          ? 'Register as Supplier'
+                          : 'Create Account'),
                 ),
               ),
               const SizedBox(height: 20),

@@ -59,6 +59,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
     required String name,
     required UserRole role,
     String? phone,
+    String? address,
   }) async {
     state = const AsyncValue.loading();
     state = AsyncValue.data(state.valueOrNull);
@@ -69,6 +70,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
         name: name,
         role: role,
         phone: phone,
+        address: address,
       );
       state = AsyncValue.data(user);
     } catch (e, st) {
@@ -78,6 +80,28 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
 
   Future<void> logout() async {
     await _repository.logout();
+  }
+
+  /// Persists profile edits and refreshes the local auth state with the
+  /// updated user. Errors propagate to the caller (snackbar) — the auth
+  /// state is left untouched on failure so the user is never signed out.
+  Future<void> updateProfile({
+    required String name,
+    String? phone,
+    String? address,
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
+  }) async {
+    final updated = await _repository.updateProfile(
+      name: name,
+      phone: phone,
+      address: address,
+      businessName: businessName,
+      businessPhone: businessPhone,
+      businessAddress: businessAddress,
+    );
+    state = AsyncValue.data(updated);
   }
 
   Future<void> sendPasswordResetEmail(String email) async {

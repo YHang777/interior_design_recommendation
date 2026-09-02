@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // ── Users: only the owner can read/write their own profile doc ──
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ── Products: public catalogue, authenticated sellers write ──
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update, delete: if signedIn();
+
+      // ── Reviews: public read, authenticated buyers write ──
+      match /reviews/{reviewId} {
+        allow read: if true;
+        allow create, update, delete: if signedIn();
+      }
+    }
+
+    // ── Orders: only participants — the customer who placed the order and
+    // the suppliers fulfilling it — may read or update an order. Creation
+    // must claim the ordering customer, and nobody can delete an order.
+    // These rules line up with the app's queries: the customer watches
+    // `orders where customerId == me` and each supplier watches
+    // `orders where supplierIds array-contains me`, both of which are
+    // satisfied by the per-document conditions below.
+    match /orders/{orderId} {
+      allow read: if signedIn() &&
+          (request.auth.uid == resource.data.customerId ||
+           request.auth.uid in resource.data.supplierIds);
+      allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.customerId;
+      allow update: if signedIn() &&
+          (request.auth.uid == resource.data.customerId ||
+           request.auth.uid in resource.data.supplierIds);
+    }
+
+    // ── Per-user cart (owner only) ──
+    match /users/{uid}/cart/{productId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ── Per-user wishlist (owner only) ──
+    match /users/{uid}/wishlist/{productId} {
+      allow read, write: if isOwner(uid);
+    }
+  }
+}

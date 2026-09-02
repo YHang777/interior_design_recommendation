@@ -12,7 +12,7 @@ class ArFurnitureItem {
   /// Display name (shown in the AR catalog bar).
   final String name;
 
-  /// File name under `android/app/src/main/assets/Models/`.
+  /// File name under `assets/models/` (bundled Flutter assets).
   /// Models are MIT-licensed, sourced from github.com/chayanforyou/ARFurniture.
   final String modelFile;
 
@@ -23,11 +23,12 @@ class ArFurnitureItem {
 
   final IconData icon;
 
-  /// URI used with `NodeType.localGLTF2` — resolved against the app's
-  /// Android assets folder by the plugin.
-  /// NOTE: lowercase `models/` — the Android asset merger packages the
-  /// directory as `assets/models/` (asset paths are case-sensitive at
-  /// runtime), so a `Models/` prefix would silently fail to load.
+  /// URI used with `NodeType.localGLTF2`. The plugin resolves these URIs
+  /// through Flutter's `getLookupKeyForAsset`, i.e. against the app's
+  /// bundled Flutter assets. The files therefore live in `assets/models/`
+  /// (registered in pubspec.yaml under `flutter/assets`); the asset key
+  /// passed to `getLookupKeyForAsset` omits the leading `assets/`, so the
+  /// key is `models/<file>.glb`. Paths are case-sensitive at runtime.
   String get uri => 'models/$modelFile';
 }
 

@@ -138,8 +138,9 @@ class _AiRecommendationScreenState
     });
     _msgCtrl.clear();
 
-    if (_gemini != null && _gemini!.isConfigured) {
-      _gemini!.sendMessage(text).then((reply) {
+    final gemini = _gemini;
+    if (gemini != null && gemini.isConfigured) {
+      gemini.sendMessage(text).then((reply) {
         setState(() {
           _msgs.removeLast();
           _msgs.add(_ChatMsg(sender: 'AI', text: reply));

@@ -112,7 +112,26 @@ class Order {
   final int subtotal;
   final int shippingFee;
   final int total;
+
+  /// Membership discount (whole ringgit) applied at checkout.
+  final int discount;
+
+  /// Sales tax (whole ringgit) applied at checkout.
+  final int tax;
+
+  /// Membership tier the customer held at purchase time (Free/Silver/Gold).
+  final String membershipTier;
+
+  /// Supplier uids fulfilled by this order. Derives from items when empty.
+  final List<String> supplierIds;
+
   final DateTime createdAt;
+
+  /// Timestamp per status transition — map key is the [OrderStatus] name
+  /// ('pending', 'confirmed', …), value the moment the order reached it.
+  /// Enables per-step dates in the buyer/supplier status timelines.
+  final Map<String, DateTime> statusHistory;
+
   final RefundStatus? refundStatus;
   final String? refundReason;
   final int? refundAmount;
@@ -132,17 +151,33 @@ class Order {
     required this.shippingFee,
     required this.total,
     required this.createdAt,
+    this.discount = 0,
+    this.tax = 0,
+    this.membershipTier = '',
+    this.supplierIds = const [],
+    this.statusHistory = const {},
     this.refundStatus,
     this.refundReason,
     this.refundAmount,
   });
 
   String get paymentMethodLabel => switch (paymentMethod) {
+        'fpx' => 'FPX Online Banking',
+        'card' => 'Credit / Debit Card',
         'card_fpx' => 'Card / FPX',
         'cod' => 'Cash on Delivery',
         'ewallet' => 'E-Wallet',
         _ => paymentMethod,
       };
+
+  /// Supplier ids, deriving from item snapshots when none were recorded.
+  List<String> get resolvedSupplierIds => supplierIds.isNotEmpty
+      ? supplierIds
+      : items
+          .map((i) => i.supplierId)
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
 
   Order copyWith({
     String? id,
@@ -158,7 +193,12 @@ class Order {
     int? subtotal,
     int? shippingFee,
     int? total,
+    int? discount,
+    int? tax,
+    String? membershipTier,
+    List<String>? supplierIds,
     DateTime? createdAt,
+    Map<String, DateTime>? statusHistory,
     RefundStatus? refundStatus,
     String? refundReason,
     int? refundAmount,
@@ -178,7 +218,12 @@ class Order {
       subtotal: subtotal ?? this.subtotal,
       shippingFee: shippingFee ?? this.shippingFee,
       total: total ?? this.total,
+      discount: discount ?? this.discount,
+      tax: tax ?? this.tax,
+      membershipTier: membershipTier ?? this.membershipTier,
+      supplierIds: supplierIds ?? this.supplierIds,
       createdAt: createdAt ?? this.createdAt,
+      statusHistory: statusHistory ?? this.statusHistory,
       refundStatus: clearRefund ? null : (refundStatus ?? this.refundStatus),
       refundReason: clearRefund ? null : (refundReason ?? this.refundReason),
       refundAmount: clearRefund ? null : (refundAmount ?? this.refundAmount),
@@ -186,6 +231,10 @@ class Order {
   }
 
   factory Order.fromJson(Map<String, dynamic> json) {
+    final items = (json['items'] as List<dynamic>?)
+            ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
     return Order(
       id: json['id']?.toString() ?? '',
       orderNumber: json['orderNumber']?.toString() ?? '',
@@ -194,18 +243,24 @@ class Order {
       customerEmail: json['customerEmail']?.toString() ?? '',
       customerPhone: json['customerPhone']?.toString() ?? '',
       shippingAddress: json['shippingAddress']?.toString() ?? '',
-      items: (json['items'] as List<dynamic>?)
-              ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          [],
+      items: items,
       status: OrderStatus.fromString(json['status']?.toString() ?? 'pending'),
       paymentMethod: json['paymentMethod']?.toString() ?? 'card_fpx',
       subtotal: (json['subtotal'] as num?)?.toInt() ?? 0,
       shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 0,
       total: (json['total'] as num?)?.toInt() ?? 0,
+      discount: (json['discount'] as num?)?.toInt() ?? 0,
+      tax: (json['tax'] as num?)?.toInt() ?? 0,
+      membershipTier: json['membershipTier']?.toString() ?? '',
+      supplierIds: (json['supplierIds'] as List<dynamic>?)
+              ?.map((e) => e?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList() ??
+          const [],
       createdAt: json['createdAt'] != null
-          ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
+          ? _parseOrderDate(json['createdAt']) ?? DateTime.now()
           : DateTime.now(),
+      statusHistory: _parseStatusHistory(json['statusHistory']),
       refundStatus: RefundStatus.fromString(json['refundStatus']?.toString()),
       refundReason: json['refundReason']?.toString(),
       refundAmount: (json['refundAmount'] as num?)?.toInt(),
@@ -226,9 +281,41 @@ class Order {
         'subtotal': subtotal,
         'shippingFee': shippingFee,
         'total': total,
+        'discount': discount,
+        'tax': tax,
+        'membershipTier': membershipTier,
+        'supplierIds': resolvedSupplierIds,
         'createdAt': createdAt.toUtc().toIso8601String(),
+        'statusHistory': statusHistory.map(
+            (status, when) => MapEntry(status, when.toUtc().toIso8601String())),
         if (refundStatus != null) 'refundStatus': refundStatus!.name,
         if (refundReason != null) 'refundReason': refundReason,
         if (refundAmount != null) 'refundAmount': refundAmount,
       };
+}
+
+/// Parses the stored status→timestamp map (values may be ISO strings or
+/// Firestore Timestamps). Unparseable entries are dropped, never fabricated.
+Map<String, DateTime> _parseStatusHistory(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return {};
+  final history = <String, DateTime>{};
+  raw.forEach((status, when) {
+    if (when == null) return;
+    final parsed = _parseOrderDate(when);
+    if (parsed != null) history[status] = parsed;
+  });
+  return history;
+}
+
+/// Parses a date that may be an ISO-8601 string or a Firestore Timestamp.
+DateTime? _parseOrderDate(dynamic value) {
+  if (value is DateTime) return value;
+  try {
+    final toDate = value.toDate;
+    if (toDate is Function) {
+      final parsed = value.toDate();
+      if (parsed is DateTime) return parsed;
+    }
+  } catch (_) {}
+  return DateTime.tryParse(value.toString());
 }

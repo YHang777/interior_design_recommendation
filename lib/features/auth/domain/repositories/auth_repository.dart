@@ -14,14 +14,26 @@ abstract class IAuthRepository {
   Future<AppUser> login(String email, String password);
 
   /// Create a new account. Role defaults to [UserRole.homeowner] for
-  /// standard registration. Supplier accounts are created externally
-  /// by the admin website.
+  /// standard registration.
   Future<AppUser> register({
     required String email,
     required String password,
     required String name,
     required UserRole role,
     String? phone,
+    String? address,
+  });
+
+  /// Updates the signed-in user's public profile in Firestore and returns
+  /// the refreshed [AppUser]. Suppliers pass `businessName`/`businessPhone`/
+  /// `businessAddress` so their storefront identity stays in sync.
+  Future<AppUser> updateProfile({
+    required String name,
+    String? phone,
+    String? address,
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
   });
 
   /// Sign out the current user.

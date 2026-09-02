@@ -45,5 +45,4 @@ class AppStrings {
 
   // Currency
   static const String currencyCode = 'MYR';
-  static String formatMyr(int amount) => 'RM ${amount.toString()}';
 }

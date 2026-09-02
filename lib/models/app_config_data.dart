@@ -41,6 +41,22 @@ class AppConfigData {
     required this.membershipTiers,
   });
 
+  /// The highest tier whose `minOrders` threshold the given [orderCount]
+  /// satisfies (tiers sorted by threshold). Falls back to the lowest tier
+  /// (minOrders 0) when none match.
+  MembershipTier tierForOrderCount(int orderCount) {
+    if (membershipTiers.isEmpty) {
+      return const MembershipTier(
+          name: 'Free', discountPercent: 0, minOrders: 0);
+    }
+    final sorted = [...membershipTiers]
+      ..sort((a, b) => a.minOrders.compareTo(b.minOrders));
+    for (var i = sorted.length - 1; i >= 0; i--) {
+      if (orderCount >= sorted[i].minOrders) return sorted[i];
+    }
+    return sorted.first;
+  }
+
   factory AppConfigData.fromJson(Map<String, dynamic> json) {
     return AppConfigData(
       shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 25,

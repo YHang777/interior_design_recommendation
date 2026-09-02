@@ -31,6 +31,13 @@ class AppColors {
   static const Color error = Color(0xFFDC2626);
   static const Color warning = Color(0xFFF59E0B);
 
+  // Lighter secondary stops for StatCard/QuickActionButton gradients and
+  // bar charts (pairs with the primary status colors above).
+  static const Color gradientGreen = Color(0xFF66BB6A);
+  static const Color gradientBlue = Color(0xFF42A5F5);
+  static const Color gradientOrange = Color(0xFFFFB74D);
+  static const Color gradientRed = Color(0xFFEF5350);
+
   // Borders & dividers
   static const Color border = Color(0xFFE5E7EB);
   static const Color divider = Color(0xFFF3F4F6);

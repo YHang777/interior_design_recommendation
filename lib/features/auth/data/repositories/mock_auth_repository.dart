@@ -91,6 +91,7 @@ class MockAuthRepository implements IAuthRepository {
     required String name,
     required UserRole role,
     String? phone,
+    String? address,
   }) async {
     // Simulate network delay
     await Future.delayed(const Duration(milliseconds: 1000));
@@ -104,12 +105,20 @@ class MockAuthRepository implements IAuthRepository {
       );
     }
 
+    // Suppliers are trusted on registration (see AuthRepositoryImpl for the
+    // TODO about a future admin approval flow).
+    const verificationStatus = 'verified';
     final newUser = AppUser(
       uid: 'mock-uid-${DateTime.now().millisecondsSinceEpoch}',
       email: normalizedEmail,
       name: name,
       role: role,
       phone: phone,
+      address: address,
+      verificationStatus: verificationStatus,
+      businessName: role == UserRole.supplier ? name : null,
+      businessPhone: role == UserRole.supplier ? phone : null,
+      businessAddress: role == UserRole.supplier ? address : null,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -121,6 +130,38 @@ class MockAuthRepository implements IAuthRepository {
     );
 
     return newUser;
+  }
+
+  @override
+  Future<AppUser> updateProfile({
+    required String name,
+    String? phone,
+    String? address,
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
+  }) async {
+    final current = _currentUser;
+    if (current == null) {
+      throw const AuthException('You are not signed in', code: 'not-signed-in');
+    }
+    final updated = current.copyWith(
+      name: name,
+      phone: phone,
+      address: address,
+      businessName: businessName,
+      businessPhone: businessPhone,
+      businessAddress: businessAddress,
+    );
+    final previousRecord = _users[current.email]!;
+    _currentUser = updated;
+    _users[current.email] = _MockUserRecord(
+      password: previousRecord.password,
+      appUser: updated,
+      emailVerified: previousRecord.emailVerified,
+    );
+    _authStateController.add(updated);
+    return updated;
   }
 
   @override

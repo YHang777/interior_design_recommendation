@@ -26,6 +26,7 @@ class RouteNames {
   static const homeownerCheckout = 'homeowner-checkout';
   static const homeownerOrderConfirmation = 'homeowner-order-confirmation';
   static const homeownerOrderHistory = 'homeowner-order-history';
+  static const homeownerOrderDetail = 'homeowner-order-detail';
   static const homeownerWishlist = 'homeowner-wishlist';
   static const homeownerDesignEditor = 'homeowner-design-editor';
   static const arViewer = 'ar-viewer';
@@ -34,6 +35,8 @@ class RouteNames {
   static const supplierShell = 'supplier-shell';
   static const supplierDashboard = 'supplier-dashboard';
   static const supplierProducts = 'supplier-products';
+  static const supplierProductNew = 'supplier-product-new';
+  static const supplierProductEdit = 'supplier-product-edit';
   static const supplierOrders = 'supplier-orders';
   static const supplierOrderDetail = 'supplier-order-detail';
   static const supplierAnalytics = 'supplier-analytics';
