@@ -47,7 +47,7 @@ class LocalConfig {
   /// presets → Add upload preset → Signing Mode: Unsigned). Set to `null`
   /// (make the field nullable again) to fall back to
   /// `--dart-define=CLOUDINARY_UPLOAD_PRESET=`.
-  static const String cloudinaryUploadPreset = 'interior_app'; // e.g., "interior_app"
+  static const String cloudinaryUploadPreset = 'interior_app'; 
 
   /// Supabase project URL, e.g. "https://abcd1234.supabase.co".
   ///
