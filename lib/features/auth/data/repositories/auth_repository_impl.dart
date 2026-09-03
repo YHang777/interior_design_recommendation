@@ -1,25 +1,36 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/firebase_auth_datasource.dart';
 import '../datasources/firestore_user_datasource.dart';
+import '../datasources/verification_email_datasource.dart';
 import '../models/app_user.dart';
 
 /// Production auth repository using Firebase Auth + Firestore.
 class AuthRepositoryImpl implements IAuthRepository {
   final FirebaseAuthDatasource _authDatasource;
   final FirestoreUserDatasource _firestoreDatasource;
+  final VerificationEmailDatasource _verificationDatasource;
 
   AuthRepositoryImpl({
     required FirebaseAuthDatasource authDatasource,
     required FirestoreUserDatasource firestoreDatasource,
+    required VerificationEmailDatasource verificationDatasource,
   })  : _authDatasource = authDatasource,
-        _firestoreDatasource = firestoreDatasource;
+        _firestoreDatasource = firestoreDatasource,
+        _verificationDatasource = verificationDatasource;
 
   @override
   Stream<AppUser?> authStateChanges() {
     return _authDatasource.authStateChanges().asyncMap((fbUser) async {
       if (fbUser == null) return null;
+      // Unverified sign-ins are treated as signed out. This matches the
+      // login() gate below AND fixes the post-register bounce race: the late
+      // `User` emission from createUserWithEmailAndPassword (which lands
+      // after register() has already signed out) would otherwise flip the
+      // router away from the Verify-Email screen seconds after arrival.
+      if (!fbUser.emailVerified) return null;
       return _buildAppUser(fbUser);
     });
   }
@@ -95,8 +106,22 @@ class AuthRepositoryImpl implements IAuthRepository {
         },
       );
 
-      // Send verification email
-      await _authDatasource.sendEmailVerification();
+      // Custom verification flow: the middleware emails a confirmation link
+      // (Brevo). Best-effort — a failure here must NOT fail registration;
+      // the Verify screen's Resend button is the retry path.
+      try {
+        await _verificationDatasource.sendVerificationEmail(
+          email: email,
+          uid: fbUser.uid,
+        );
+      } catch (e) {
+        debugPrint('[verify] initial send failed (Resend can retry): $e');
+      }
+
+      // The user must verify before their first login: sign out now so the
+      // Verify-Email screen stays reachable (the router redirects signed-in
+      // users off auth routes).
+      await _authDatasource.signOut();
 
       final user = AppUser(
         uid: fbUser.uid,
@@ -156,8 +181,14 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 
   @override
-  Future<void> resendVerificationEmail() async {
-    await _authDatasource.sendEmailVerification();
+  Future<void> resendVerificationEmail({
+    required String email,
+    required String uid,
+  }) {
+    return _verificationDatasource.sendVerificationEmail(
+      email: email,
+      uid: uid,
+    );
   }
 
   @override

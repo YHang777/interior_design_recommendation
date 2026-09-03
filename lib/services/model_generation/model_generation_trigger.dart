@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../features/auth/data/models/app_user.dart' show UserRole;
 import '../../models/product.dart';
+import '../media/media_store.dart';
 import 'generation_decider.dart';
 import 'tripo_generator.dart';
 
@@ -36,7 +36,7 @@ GenerationDecision kickOffProduct3DGeneration(
   Product product, {
   bool force = false,
   FirebaseFirestore? db,
-  FirebaseStorage? storage,
+  MediaStore? mediaStore,
 }) {
   final id = product.id.trim();
   if (id.isEmpty) {
@@ -69,7 +69,7 @@ GenerationDecision kickOffProduct3DGeneration(
     }
     final generator = Tripo3DGenerator(
       firestore,
-      storage: storage ?? FirebaseStorage.instance,
+      mediaStore: mediaStore ?? MediaStore.instance,
     );
     if (decision.action == GenerationAction.submitNewTripo) {
       unawaited(_safe(() => generator.generateForProduct(product)));
@@ -152,7 +152,7 @@ GenerationDecision kickOffProduct3DGeneration(
 /// Never throws.
 Future<void> resumeStuckGenerations({
   FirebaseFirestore? db,
-  FirebaseStorage? storage,
+  MediaStore? mediaStore,
 }) async {
   final firestore = db ?? FirebaseFirestore.instance;
   try {
@@ -186,7 +186,7 @@ Future<void> resumeStuckGenerations({
     for (final doc in snap.docs) {
       try {
         final product = Product.fromJson(doc.data());
-        kickOffProduct3DGeneration(product, db: firestore, storage: storage);
+        kickOffProduct3DGeneration(product, db: firestore, mediaStore: mediaStore);
       } catch (e) {
         debugPrint('[model-3d] resume kick-off failed for '
             '${doc.id}: $e');

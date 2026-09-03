@@ -182,8 +182,17 @@ class MockAuthRepository implements IAuthRepository {
   }
 
   @override
-  Future<void> resendVerificationEmail() async {
+  Future<void> resendVerificationEmail({
+    required String email,
+    required String uid,
+  }) async {
     await Future.delayed(const Duration(milliseconds: 400));
+    // Mock convenience: "resending" marks the record verified so the login
+    // gate passes — mirrors clicking the real email link.
+    final record = _users[email.toLowerCase().trim()];
+    if (record != null) {
+      record.emailVerified = true;
+    }
   }
 
   @override

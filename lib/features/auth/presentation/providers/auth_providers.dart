@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/firebase_auth_datasource.dart';
 import '../../data/datasources/firestore_user_datasource.dart';
+import '../../data/datasources/verification_email_datasource.dart';
 import '../../data/models/app_user.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -17,6 +18,7 @@ final authRepositoryProvider = Provider<IAuthRepository>((ref) {
   return AuthRepositoryImpl(
     authDatasource: FirebaseAuthDatasource(),
     firestoreDatasource: FirestoreUserDatasource(),
+    verificationDatasource: VerificationEmailDatasource(),
   );
 });
 
@@ -53,7 +55,11 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
     }
   }
 
-  Future<void> register({
+  /// Returns the created user (or null on failure) so the register screen
+  /// can navigate to the Verify-Email screen with the right params. The auth
+  /// state is set to signed-out (the repository signs out after registration
+  /// pending email verification).
+  Future<AppUser?> register({
     required String email,
     required String password,
     required String name,
@@ -72,9 +78,11 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
         phone: phone,
         address: address,
       );
-      state = AsyncValue.data(user);
+      state = AsyncValue.data(null);
+      return user;
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      return null;
     }
   }
 
@@ -106,6 +114,15 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
 
   Future<void> sendPasswordResetEmail(String email) async {
     await _repository.sendPasswordResetEmail(email);
+  }
+
+  /// Asks the middleware to (re)send the verification email. Errors
+  /// propagate to the caller (snackbar); auth state is untouched.
+  Future<void> resendVerificationEmail({
+    required String email,
+    required String uid,
+  }) {
+    return _repository.resendVerificationEmail(email: email, uid: uid);
   }
 
   @override

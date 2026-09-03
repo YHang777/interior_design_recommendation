@@ -1,0 +1,18 @@
+name: interior_design_server
+description: >-
+  Middleware for the Interior Design app: marketplace JSON API plus the
+  email-verification flow (Brevo mail + Firebase Identity Toolkit admin calls).
+publish_to: none
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  crypto: ^3.0.6
+  http: ^1.2.0
+  # Service-account OAuth2 flow (RS256 JWT + token refresh) for the
+  # Identity Toolkit admin calls.
+  googleapis_auth: ^1.6.0
+
+dev_dependencies:
+  test: ^1.25.0

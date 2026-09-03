@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:convert';
 
+import 'package:interior_design_server/verify_handlers.dart';
+
 /// Modular local API server for the interior design marketplace.
 ///
 /// Endpoints:
@@ -14,33 +16,77 @@ import 'dart:convert';
 ///   /styles/{id}  PUT/DELETE       → update / soft-delete style
 ///   /config       GET              → global configuration
 ///   /refunds/{id} PUT              → approve / reject refund
+///   /verify-email/send    POST     → email a verification link (Brevo)
+///   /verify-email/confirm GET      → validate the link + mark Firebase
+///                                    emailVerified (HTML page)
 ///
-/// All endpoints return JSON. CORS enabled for all origins.
+/// Marketplace endpoints return JSON (CORS enabled). The verify-email
+/// endpoints are driven by env vars: VERIFY_TOKEN_SECRET, BREVO_API_KEY,
+/// BREVO_SENDER_EMAIL/NAME, PUBLIC_BASE_URL, SERVICE_ACCOUNT_PATH,
+/// DATA_DIR, PRODUCTS_SEED_ASSET, PORT (Render injects PORT).
 
 Future<void> main(List<String> args) async {
-  final port = _readPort(args) ?? 8080;
+  // Local development keys live in secrets/local.env (gitignored); real
+  // environment variables take precedence (Render uses those).
+  final env = {
+    ..._loadLocalEnv(),
+    ...Platform.environment,
+  };
+  final port = _readPort(args, env) ?? 8080;
+
+  // The server is its own package now (run from server/: `dart run
+  // bin/server.dart`), so the CWD-relative defaults point at `server/data`
+  // and the repo-root assets. Render overrides both via env.
+  final dataDir = env['DATA_DIR'] ?? 'data';
+  final seedAsset = env['PRODUCTS_SEED_ASSET'] ?? '../assets/data/products.json';
 
   final stores = _Stores(
     products: ProductsStore(
-      dataFile: File('server/data/products.json'),
-      fallbackAsset: File('assets/data/products.json'),
+      dataFile: File('$dataDir/products.json'),
+      fallbackAsset: File(seedAsset),
     ),
-    orders: JsonFileStore('server/data/orders.json'),
-    categories: JsonFileStore('server/data/categories.json'),
-    styles: JsonFileStore('server/data/styles.json'),
-    config: JsonFileStore('server/data/config.json'),
+    orders: JsonFileStore('$dataDir/orders.json'),
+    categories: JsonFileStore('$dataDir/categories.json'),
+    styles: JsonFileStore('$dataDir/styles.json'),
+    config: JsonFileStore('$dataDir/config.json'),
   );
+
+  final verification = VerificationService(
+    tokenSecret: env['VERIFY_TOKEN_SECRET'] ?? '',
+    mailer: VerificationMailer(
+      apiKey: env['BREVO_API_KEY'] ?? '',
+      senderEmail: env['BREVO_SENDER_EMAIL'] ?? 'noreply@interior-design.app',
+      senderName: env['BREVO_SENDER_NAME'] ?? 'Interior Design App',
+      publicBaseUrl: env['PUBLIC_BASE_URL'] ?? '',
+    ),
+    admin: FirebaseAdminClient(
+      credentialsFile: File(
+          env['SERVICE_ACCOUNT_PATH'] ?? 'secrets/service-account.json'),
+      projectId: 'interior-design-256c5',
+    ),
+  );
+  if (!verification.isConfigured) {
+    stdout.writeln('NOTE: email verification is not configured — set '
+        'VERIFY_TOKEN_SECRET and BREVO_API_KEY (verify endpoints will '
+        'return 503).');
+  }
+  if (!verification.adminConfigured) {
+    stdout.writeln('NOTE: Firebase admin not configured — '
+        '${env['SERVICE_ACCOUNT_PATH'] ?? 'server/secrets/service-account.json'} '
+        'missing; /verify-email/confirm will show an unavailable page.');
+  }
 
   await stores.initAll();
 
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('Marketplace API server running at http://localhost:$port');
   stdout.writeln('  /products   /orders   /categories   /styles   /config   /refunds');
+  stdout.writeln('  /verify-email/send   /verify-email/confirm');
 
   await for (final req in server) {
     _addCorsHeaders(req.response);
     try {
-      await _route(req, stores);
+      await _route(req, stores, verification);
     } catch (e, st) {
       stderr.writeln('Error: $e\n$st');
       _jsonResponse(req.response, {'error': e.toString()},
@@ -51,13 +97,31 @@ Future<void> main(List<String> args) async {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-int? _readPort(List<String> args) {
+/// Loads `secrets/local.env` (KEY=VALUE lines, `#` comments) for local
+/// development. A missing file is fine (production uses real env vars).
+Map<String, String> _loadLocalEnv() {
+  final out = <String, String>{};
+  final file = File('secrets/local.env');
+  if (!file.existsSync()) return out;
+  for (final raw in file.readAsLinesSync()) {
+    final line = raw.trim();
+    if (line.isEmpty || line.startsWith('#')) continue;
+    final idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    out[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+  }
+  return out;
+}
+
+int? _readPort(List<String> args, Map<String, String> env) {
   for (final a in args) {
     if (a.startsWith('--port=')) {
       return int.tryParse(a.split('=')[1]);
     }
   }
-  return null;
+  // Render (and similar hosts) inject PORT.
+  final envPort = env['PORT'];
+  return envPort != null ? int.tryParse(envPort) : null;
 }
 
 void _addCorsHeaders(HttpResponse resp) {
@@ -82,7 +146,8 @@ Future<Map<String, dynamic>> _readBody(HttpRequest req) async {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
-Future<void> _route(HttpRequest req, _Stores stores) async {
+Future<void> _route(
+    HttpRequest req, _Stores stores, VerificationService verification) async {
   final segments = req.uri.pathSegments;
   final method = req.method.toUpperCase();
 
@@ -127,6 +192,16 @@ Future<void> _route(HttpRequest req, _Stores stores) async {
     case 'refunds':
       if (method == 'PUT' && hasId) {
         await _handleRefund(req, id!, stores.orders);
+      } else {
+        req.response.statusCode = HttpStatus.methodNotAllowed;
+        await req.response.close();
+      }
+      return;
+    case 'verify-email':
+      if (method == 'POST' && hasId && id == 'send') {
+        await handleVerifySend(req, verification);
+      } else if (method == 'GET' && hasId && id == 'confirm') {
+        await handleVerifyConfirm(req, verification);
       } else {
         req.response.statusCode = HttpStatus.methodNotAllowed;
         await req.response.close();

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -12,8 +11,8 @@ import '../models/order.dart';
 import '../models/product.dart';
 import '../models/product_category.dart';
 import '../models/review.dart';
+import 'media/media_store.dart';
 import 'model_generation/model_glb_resolver.dart';
-import 'model_generation/tripo_generator.dart';
 
 /// Firestore-backed marketplace repository — the single source of truth for
 /// products, orders, carts, wishlists and reviews.
@@ -24,11 +23,11 @@ import 'model_generation/tripo_generator.dart';
 /// - `users/{uid}/cart/{productId}`      → {product: Product json, quantity}
 /// - `users/{uid}/wishlist/{productId}`  → {productId, addedAt}
 class MarketplaceRepository {
-  MarketplaceRepository(this._db, {FirebaseStorage? storage})
-      : _storage = storage ?? FirebaseStorage.instance;
+  MarketplaceRepository(this._db, {MediaStore? mediaStore})
+      : _media = mediaStore ?? MediaStore.instance;
 
   final FirebaseFirestore _db;
-  final FirebaseStorage _storage;
+  final MediaStore _media;
   static final Random _rng = Random();
 
   static const String _productsCol = 'products';
@@ -159,16 +158,17 @@ class MarketplaceRepository {
       return updated;
     });
     if (removedImageUrls.isNotEmpty) {
-      await _deleteStorageImages(removedImageUrls);
+      await _deleteRemoteImages(removedImageUrls);
     }
     return product;
   }
 
-  /// Deletes a product and, best-effort, the Storage blobs behind its
-  /// network images plus its 3D artifacts (the AI model blob under
-  /// `images/product_models/` and the locally cached GLB). Blob failures
-  /// are logged and swallowed: the document delete is authoritative and
-  /// leftovers are reclaimable Storage garbage.
+  /// Deletes a product and, best-effort, the remote media blobs behind its
+  /// network images plus its 3D artifacts (the published model blob and the
+  /// locally cached GLB). Blob failures are logged and swallowed: the
+  /// document delete is authoritative. Note: Cloudinary unsigned uploads
+  /// cannot be deleted client-side, so [MediaStore.deleteByUrl] is a no-op
+  /// today — orphans are reclaimable from the Cloudinary console.
   Future<void> deleteProduct(String id) async {
     final snapshot = await _products.doc(id).get();
     if (snapshot.exists) {
@@ -176,28 +176,30 @@ class MarketplaceRepository {
       final networkImages = product.resolvedImages
           .where((url) => url.startsWith('http'))
           .toList();
+      final modelUrl = product.ar3d?.url ?? '';
       await _products.doc(id).delete();
       if (networkImages.isNotEmpty) {
-        await _deleteStorageImages(networkImages);
+        await _deleteRemoteImages(networkImages);
       }
-    }
-    // 3D cleanup (best-effort, never blocks or throws).
-    try {
-      await _storage.ref(Tripo3DGenerator.storagePathFor(id)).delete();
-    } catch (e) {
-      debugPrint('[model-3d] could not delete $id.glb: $e');
+      if (modelUrl.isNotEmpty) {
+        await _deleteRemoteBlob(modelUrl);
+      }
     }
     await ModelGlbResolver.pruneCacheForProduct(id);
   }
 
-  /// Best-effort Storage deletion for product image blobs.
-  Future<void> _deleteStorageImages(List<String> urls) async {
+  /// Best-effort deletion for product image blobs.
+  Future<void> _deleteRemoteImages(List<String> urls) async {
     for (final url in urls) {
-      try {
-        await _storage.refFromURL(url).delete();
-      } catch (e) {
-        debugPrint('[storage] could not delete $url: $e');
-      }
+      await _deleteRemoteBlob(url);
+    }
+  }
+
+  Future<void> _deleteRemoteBlob(String url) async {
+    try {
+      await _media.deleteByUrl(url);
+    } catch (e) {
+      debugPrint('[media] could not delete $url: $e');
     }
   }
 

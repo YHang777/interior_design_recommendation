@@ -40,7 +40,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
-    await ref.read(authStateProvider.notifier).register(
+    final created = await ref.read(authStateProvider.notifier).register(
       email: _emailCtrl.text.trim(),
       password: _pwdCtrl.text,
       name: _nameCtrl.text.trim(),
@@ -48,7 +48,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       phone: _isSupplier ? _phoneCtrl.text.trim() : null,
       address: _isSupplier ? _addressCtrl.text.trim() : null,
     );
-    if (mounted) context.push('/verify-email');
+    if (created == null || !mounted) return;
+    // The user is signed out pending email verification; the Verify screen
+    // receives the email + uid so its Resend can re-request the link.
+    context.push(Uri(
+      path: '/verify-email',
+      queryParameters: {'email': created.email, 'uid': created.uid},
+    ).toString());
   }
 
   @override

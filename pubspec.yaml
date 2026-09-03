@@ -64,7 +64,9 @@ dependencies:
 
   # Launching external links (e.g. install ARCore from Play Store)
   url_launcher: ^6.3.0
-  firebase_storage: ^12.4.10
+  # NOTE: firebase_storage was removed (Sep 2026) — Cloud Storage for
+  # Firebase requires the Blaze plan. Media goes through MediaStore
+  # (Cloudinary free tier) instead; see lib/services/media/media_store.dart.
   cached_network_image: ^3.4.1
   shared_preferences: ^2.5.3
   path_provider: ^2.1.5

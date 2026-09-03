@@ -45,8 +45,12 @@ abstract class IAuthRepository {
   /// Get the currently signed-in user, or null.
   Future<AppUser?> getCurrentUser();
 
-  /// Resend the email verification.
-  Future<void> resendVerificationEmail();
+  /// Resend the verification email for [email]/[uid] through the app's
+  /// middleware (works while signed out — the post-register flow is).
+  Future<void> resendVerificationEmail({
+    required String email,
+    required String uid,
+  });
 
   /// Check if the current user's email is verified.
   Future<bool> isEmailVerified();

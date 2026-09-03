@@ -3,16 +3,63 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
 
-class VerifyEmailScreen extends ConsumerWidget {
+/// Shown after registration: the middleware (via Brevo) has emailed a
+/// verification link. The link's page marks the Firebase user
+/// `emailVerified`; once it has, "I've Verified" proceeds to login.
+///
+/// Receives `email` and `uid` as route query parameters (the user is signed
+/// out at this point, so authState has no user to read them from); the
+/// Resend button uses them to re-request the email from the middleware.
+class VerifyEmailScreen extends ConsumerStatefulWidget {
   const VerifyEmailScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VerifyEmailScreen> createState() => _VerifyEmailScreenState();
+}
+
+class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
+  bool _resending = false;
+
+  Future<void> _resend() async {
+    final uri = GoRouterState.of(context).uri;
+    final email = uri.queryParameters['email'];
+    final uid = uri.queryParameters['uid'];
+    if (email == null || uid == null) return;
+    setState(() => _resending = true);
+    try {
+      await ref
+          .read(authStateProvider.notifier)
+          .resendVerificationEmail(email: email, uid: uid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Verification email sent! Check your inbox.'),
+        backgroundColor: AppColors.accent,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uri = GoRouterState.of(context).uri;
     final authState = ref.watch(authStateProvider);
-    final email = authState.whenOrNull(data: (user) => user?.email) ?? 'your email';
+    final email = uri.queryParameters['email'] ??
+        authState.whenOrNull(data: (user) => user?.email) ??
+        'your email';
+    final uid = uri.queryParameters['uid'];
 
     return Scaffold(
       appBar: AppBar(title: const Text(AppStrings.verifyEmailTitle)),
@@ -57,16 +104,8 @@ class VerifyEmailScreen extends ConsumerWidget {
 
                 // Resend button
                 AuthButton(
-                  label: AppStrings.resendEmail,
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Verification email resent!'),
-                        backgroundColor: AppColors.accent,
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
+                  label: _resending ? 'Sending…' : AppStrings.resendEmail,
+                  onPressed: (uid == null || _resending) ? null : _resend,
                   isOutlined: true,
                 ),
                 const SizedBox(height: 16),
@@ -75,7 +114,6 @@ class VerifyEmailScreen extends ConsumerWidget {
                 AuthButton(
                   label: AppStrings.iveVerified,
                   onPressed: () {
-                    // In mock mode, navigate to login
                     context.go('/login');
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
@@ -11,6 +10,7 @@ import '../../config/app_config.dart';
 import '../../features/ar/data/glb_bounds.dart';
 import '../../features/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
+import '../media/media_store.dart';
 import 'tripo_poll_state.dart';
 
 /// Raised when the Tripo API rejects a call in a way retrying will NOT fix
@@ -34,8 +34,9 @@ class TripoTransientApiException extends TripoApiException {
 /// Asynchronous AI 3D generation for a single product via the Tripo 3D API
 /// (image-to-model): submit → poll → download the resulting GLB → rescale it
 /// to the product's exact dimensions (the AR plugin only scales uniformly at
-/// placement, so true size is baked into the geometry) → upload the rescaled
-/// GLB to Firebase Storage → flip `product.ar3d` to `ready`.
+/// placement, so true size is baked into the geometry) → publish the rescaled
+/// GLB through [MediaStore] (Cloudinary raw upload) → flip `product.ar3d` to
+/// `ready`.
 ///
 /// Endpoints (doc-verified 2026-09 against
 /// https://developers.tripo3d.ai — quick-start / task-query pages):
@@ -72,8 +73,9 @@ class TripoTransientApiException extends TripoApiException {
 ///
 /// Product-doc writes are PARTIAL `.update({'ar3d': {...}})` calls only —
 /// never a full-document overwrite (sales, ratings and concurrent edits must
-/// survive). Storage blobs land at `images/product_models/<productId>.glb`
-/// (storage.rules: any authenticated user may write under `images/`).
+/// survive). Published models land in Cloudinary under the public_id
+/// `product_models/<productId>-<millis>` (a unique suffix is appended by the
+/// store because unsigned uploads cannot overwrite an existing public_id).
 ///
 /// Costs: Tripo is pay-as-you-go (~US$0.30 per textured model; free signup
 /// credits may apply). Configure the key in LocalConfig
@@ -83,11 +85,11 @@ class TripoTransientApiException extends TripoApiException {
 class Tripo3DGenerator {
   Tripo3DGenerator(
     FirebaseFirestore db, {
-    FirebaseStorage? storage,
+    MediaStore? mediaStore,
     http.Client? httpClient,
     DateTime Function()? clock,
   })  : _db = db,
-        _storage = storage ?? FirebaseStorage.instance,
+        _media = mediaStore ?? MediaStore.instance,
         _http = httpClient ?? http.Client(),
         _clock = clock ?? DateTime.now;
 
@@ -97,12 +99,12 @@ class Tripo3DGenerator {
   static const Duration _pollInterval = Duration(seconds: 5);
   static const Duration _maxWait = Duration(minutes: 5);
 
-  /// Storage path of a product's AI model blob.
+  /// Remote path (Cloudinary public_id base) of a product's AI model blob.
   static String storagePathFor(String productId) =>
-      'images/product_models/$productId.glb';
+      'product_models/$productId';
 
   final FirebaseFirestore _db;
-  final FirebaseStorage _storage;
+  final MediaStore _media;
   final http.Client _http;
   final DateTime Function() _clock;
 
@@ -405,19 +407,14 @@ class Tripo3DGenerator {
       }
 
       // ── Publish. Fix: a product deleted mid-generation is never charged
-      //    a Storage upload or flipped to ready — the doc is checked BEFORE
+      //    a media upload or flipped to ready — the doc is checked BEFORE
       //    the upload AND again before the terminal update. ───────────────
       if (!await _productDocExists(id)) {
         debugPrint('[model-3d] product $id was deleted mid-generation — '
             'dropping the model');
         return;
       }
-      final ref = _storage.ref(storagePathFor(id));
-      await ref.putData(glb, SettableMetadata(
-            contentType: 'model/gltf-binary',
-            cacheControl: 'public, max-age=31536000, immutable',
-          ));
-      final url = await ref.getDownloadURL();
+      final url = await _media.uploadModelBytes(glb, storagePathFor(id));
       if (!await _productDocExists(id)) {
         debugPrint('[model-3d] product $id was deleted before publishing — '
             'model kept in storage for nothing, doc untouched');

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +14,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../features/ar/data/glb_generator.dart' show resolveShapeFamily;
 import '../../../../models/product.dart';
 import '../../../../models/product_category.dart';
+import '../../../../services/media/media_store.dart';
 import '../../../../services/model_generation/model_generation_trigger.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/empty_state.dart';
@@ -424,15 +424,23 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     if (_images.length >= _maxImages) return;
     final supplier = ref.read(currentSupplierProvider);
     if (supplier == null) return;
+    final media = MediaStore.instance;
+    if (!media.isConfigured) {
+      showAppSnackbar(
+        context,
+        'Photo upload needs Cloudinary setup — set CLOUDINARY_CLOUD_NAME '
+        'and CLOUDINARY_UPLOAD_PRESET (see LocalConfig).',
+        isError: true,
+        duration: const Duration(seconds: 5),
+      );
+      return;
+    }
 
     final entryId = ++_nextImageId;
     final uid = supplier.id;
-    // NOTE: path lives under `images/` because storage.rules grants
-    // authenticated writes only inside that prefix.
+    // NOTE: the remote path doubles as the Cloudinary public_id (`/` becomes
+    // a folder separator, so photos group under product_images/{uid}).
     final millis = DateTime.now().millisecondsSinceEpoch;
-    final storageRef = FirebaseStorage.instance
-        .ref()
-        .child('images/product_images/$uid/${millis}_$entryId.jpg');
 
     final entry = _ImageEntry(
       id: entryId,
@@ -442,17 +450,15 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     );
     _setImageList([..._images, entry]);
 
-    final uploadTask = storageRef.putFile(File(localPath));
-    final progressSub = uploadTask.snapshotEvents.listen((event) {
-      if (!mounted) return;
-      final total = event.totalBytes;
-      _updateEntry(entryId, (e) => e.copyWith(
-          progress: total == 0 ? 0 : event.bytesTransferred / total));
-    });
-
     try {
-      await uploadTask;
-      final url = await storageRef.getDownloadURL();
+      final url = await media.uploadImageFile(
+        File(localPath),
+        'product_images/$uid/${millis}_$entryId',
+        onProgress: (progress) {
+          if (!mounted) return;
+          _updateEntry(entryId, (e) => e.copyWith(progress: progress));
+        },
+      );
       if (!mounted) return;
       final stillListed = _updateEntry(
         entryId,
@@ -479,8 +485,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
         actionLabel: 'Pick from catalog',
         onAction: () => _openCatalogPicker(),
       );
-    } finally {
-      progressSub.cancel();
     }
   }
 
@@ -597,7 +601,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _setImageList(_images.where((e) => e.id != id).toList());
     // Photos uploaded during THIS session are safe to delete remotely right
     // away. Pre-existing product photos are instead tracked so the SAVE
-    // deletes their Storage blobs (only after the doc write succeeds — the
+    // deletes their remote blobs (only after the doc write succeeds — the
     // user might otherwise hit back and keep the photo on the product).
     if (entry.isSessionUpload) {
       unawaited(_deleteRemote(entry.source));
@@ -608,7 +612,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
   Future<void> _deleteRemote(String url) async {
     try {
-      await FirebaseStorage.instance.refFromURL(url).delete();
+      await MediaStore.instance.deleteByUrl(url);
     } catch (_) {
       // Already gone or not deletable — orphan cleanup is best effort.
     }
