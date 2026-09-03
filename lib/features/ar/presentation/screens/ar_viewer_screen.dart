@@ -985,12 +985,17 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.transparent,
       body: _checking
-          ? const Center(
-              child: CircularProgressIndicator(color: AppColors.accent))
+          ? const ColoredBox(
+              color: Colors.black,
+              child: Center(
+                  child:
+                      CircularProgressIndicator(color: AppColors.accent)),
+            )
           : !_arCoreAvailable
-              ? _buildArCoreMissing()
+              ? ColoredBox(
+                  color: Colors.black, child: _buildArCoreMissing())
               : _buildArView(),
     );
   }
@@ -1154,6 +1159,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                 Expanded(
                   child: Text(
                     widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -1223,6 +1230,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                 child: Text(
                   _hintText,
                   textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
                       fontSize: 12, color: Colors.white),
                 ),
@@ -1540,15 +1549,25 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       child: Row(
         children: [
           const SizedBox(width: 42),
-          for (final size in RoomFinishCatalog.floorSizeOptionsM) ...[
-            _buildChoiceChip(
-              label: '${size.toStringAsFixed(0)} m',
-              selected: size == _floorSizeM,
-              onTap: () => _selectFloorSize(size),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final size
+                      in RoomFinishCatalog.floorSizeOptionsM) ...[
+                    _buildChoiceChip(
+                      label: '${size.toStringAsFixed(0)} m',
+                      selected: size == _floorSizeM,
+                      onTap: () => _selectFloorSize(size),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(width: 6),
-          ],
-          const Spacer(),
+          ),
+          const SizedBox(width: 6),
           _buildPlaceAction(
             label: 'Place floor',
             icon: Icons.grid_view,
