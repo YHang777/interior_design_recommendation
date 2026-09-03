@@ -9,6 +9,11 @@ RUN dart compile exe bin/server.dart -o bin/server_exe
 
 # ── Runtime stage (compiled exe needs glibc → debian-slim) ─────────────
 FROM debian:bookworm-slim
+# CA certificates — without them every HTTPS call (Brevo, Google OAuth2,
+# Identity Toolkit) fails with CERTIFICATE_VERIFY_FAILED.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/bin/server_exe /app/bin/server_exe
 # Seed data for the marketplace products store (Render disk is ephemeral;

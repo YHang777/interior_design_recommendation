@@ -20,7 +20,7 @@ class LocalConfig {
   /// the local Dart server (8080 is Apache; the Android emulator rewrites
   /// localhost to 10.0.2.2). Set this to the Render URL (https://…
   /// onrender.com) once deployed.
-  static const String verificationApiUrl = 'http://localhost:8088';
+  static const String verificationApiUrl = 'https://interior-design-recommendation.onrender.com';
 
   /// Tripo 3D API key (get one at https://platform.tripo3d.ai).
   ///
