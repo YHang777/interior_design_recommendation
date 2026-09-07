@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
-/// Homeowner shell with 6-tab BottomNavigationBar.
+/// Homeowner shell with 6-tab NavigationBar (Material 3).
 /// Uses GoRouter's StatefulNavigationShell for tab persistence.
 class HomeownerShell extends ConsumerWidget {
   const HomeownerShell({super.key, required this.navigationShell});
@@ -27,41 +27,41 @@ class HomeownerShell extends ConsumerWidget {
         ],
       ),
       body: navigationShell,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: navigationShell.currentIndex,
-        onTap: (index) => navigationShell.goBranch(
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: navigationShell.currentIndex,
+        onDestinationSelected: (index) => navigationShell.goBranch(
           index,
           initialLocation: index == navigationShell.currentIndex,
         ),
-        items: const [
-          BottomNavigationBarItem(
+        destinations: const [
+          NavigationDestination(
             icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
+            selectedIcon: Icon(Icons.home),
             label: 'Home',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.camera_alt_outlined),
-            activeIcon: Icon(Icons.camera_alt),
+            selectedIcon: Icon(Icons.camera_alt),
             label: 'Scan',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.psychology_outlined),
-            activeIcon: Icon(Icons.psychology),
+            selectedIcon: Icon(Icons.psychology),
             label: 'AI',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.store_outlined),
-            activeIcon: Icon(Icons.store),
+            selectedIcon: Icon(Icons.store),
             label: 'Shop',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.bookmark_outline),
-            activeIcon: Icon(Icons.bookmark),
+            selectedIcon: Icon(Icons.bookmark),
             label: 'Saved',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
+            selectedIcon: Icon(Icons.person),
             label: 'Profile',
           ),
         ],

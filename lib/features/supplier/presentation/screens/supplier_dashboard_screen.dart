@@ -211,31 +211,46 @@ class _SupplierDashboardScreenState
         const SizedBox(height: 16),
 
         // ── Quick actions ──
-        Row(
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          alignment: WrapAlignment.spaceEvenly,
           children: [
-            QuickActionButton(
-              icon: Icons.add_business_outlined,
-              label: 'Add product',
-              gradient: const [AppColors.accent, AppColors.gradientGreen],
-              onTap: _goAddProduct,
+            SizedBox(
+              width: 72,
+              child: QuickActionButton(
+                icon: Icons.add_business_outlined,
+                label: 'Add product',
+                gradient: const [AppColors.accent, AppColors.gradientGreen],
+                onTap: _goAddProduct,
+              ),
             ),
-            QuickActionButton(
-              icon: Icons.storefront_outlined,
-              label: 'Products',
-              gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
-              onTap: () => _goTab(RouteNames.supplierProducts),
+            SizedBox(
+              width: 72,
+              child: QuickActionButton(
+                icon: Icons.storefront_outlined,
+                label: 'Products',
+                gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+                onTap: () => _goTab(RouteNames.supplierProducts),
+              ),
             ),
-            QuickActionButton(
-              icon: Icons.receipt_long_outlined,
-              label: 'Orders',
-              gradient: const [AppColors.warning, AppColors.gradientOrange],
-              onTap: () => _goTab(RouteNames.supplierOrders),
+            SizedBox(
+              width: 72,
+              child: QuickActionButton(
+                icon: Icons.receipt_long_outlined,
+                label: 'Orders',
+                gradient: const [AppColors.warning, AppColors.gradientOrange],
+                onTap: () => _goTab(RouteNames.supplierOrders),
+              ),
             ),
-            QuickActionButton(
-              icon: Icons.insights_outlined,
-              label: 'Analytics',
-              gradient: const [AppColors.primary, AppColors.primaryLight],
-              onTap: () => _goTab(RouteNames.supplierAnalytics),
+            SizedBox(
+              width: 72,
+              child: QuickActionButton(
+                icon: Icons.insights_outlined,
+                label: 'Analytics',
+                gradient: const [AppColors.primary, AppColors.primaryLight],
+                onTap: () => _goTab(RouteNames.supplierAnalytics),
+              ),
             ),
           ],
         ),
@@ -244,44 +259,52 @@ class _SupplierDashboardScreenState
         // ── Stats ──
         Row(
           children: [
-            StatCard(
-              icon: Icons.payments_outlined,
-              label: 'Revenue this month',
-              value: Formatters.myr(monthRevenue),
-              gradient: const [AppColors.accent, AppColors.gradientGreen],
+            Expanded(
+              child: StatCard(
+                icon: Icons.payments_outlined,
+                label: 'Revenue this month',
+                value: Formatters.myr(monthRevenue),
+                gradient: const [AppColors.accent, AppColors.gradientGreen],
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.hourglass_top_outlined,
-              label: 'Pending orders',
-              value: '$pendingCount',
-              gradient: const [AppColors.warning, AppColors.gradientOrange],
-              onTap: pendingCount > 0
-                  ? () => _goTab(RouteNames.supplierOrders)
-                  : null,
+            Expanded(
+              child: StatCard(
+                icon: Icons.hourglass_top_outlined,
+                label: 'Pending orders',
+                value: '$pendingCount',
+                gradient: const [AppColors.warning, AppColors.gradientOrange],
+                onTap: pendingCount > 0
+                    ? () => _goTab(RouteNames.supplierOrders)
+                    : null,
+              ),
             ),
           ],
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            StatCard(
-              icon: Icons.visibility_outlined,
-              label: 'Active products',
-              value:
-                  '${mine.where((p) => p.isActive).length}',
-              gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
-              onTap: () => _goTab(RouteNames.supplierProducts),
+            Expanded(
+              child: StatCard(
+                icon: Icons.visibility_outlined,
+                label: 'Active products',
+                value:
+                    '${mine.where((p) => p.isActive).length}',
+                gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+                onTap: () => _goTab(RouteNames.supplierProducts),
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.priority_high_outlined,
-              label: 'Low stock',
-              value: '${lowStock.length}',
-              gradient: const [AppColors.primary, AppColors.primaryLight],
-              onTap: lowStock.isNotEmpty
-                  ? () => _goTab(RouteNames.supplierProducts)
-                  : null,
+            Expanded(
+              child: StatCard(
+                icon: Icons.priority_high_outlined,
+                label: 'Low stock',
+                value: '${lowStock.length}',
+                gradient: const [AppColors.primary, AppColors.primaryLight],
+                onTap: lowStock.isNotEmpty
+                    ? () => _goTab(RouteNames.supplierProducts)
+                    : null,
+              ),
             ),
           ],
         ),

@@ -72,20 +72,19 @@ class DashboardScreen extends ConsumerWidget {
                     fontSize: 18, fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
                 _ActionCard(
                     icon: Icons.camera_alt, label: 'Scan', color: const Color(0xFF7B1FA2),
                     onTap: () => context.go('/scan')),
-                const SizedBox(width: 12),
                 _ActionCard(
                     icon: Icons.psychology, label: 'AI Design', color: const Color(0xFF1565C0),
                     onTap: () => context.go('/ai')),
-                const SizedBox(width: 12),
                 _ActionCard(
                     icon: Icons.store, label: 'Shop', color: const Color(0xFF2E7D32),
                     onTap: () => context.go('/marketplace')),
-                const SizedBox(width: 12),
                 _ActionCard(
                     icon: Icons.palette, label: 'Styles', color: const Color(0xFFE91E63),
                     onTap: () => context.push('/saved')),
@@ -155,10 +154,14 @@ class _StatCard extends StatelessWidget {
             Icon(icon, color: color, size: 22),
             const SizedBox(height: 10),
             Text(value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                     fontSize: 18, fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
             Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                     fontSize: 11, color: AppColors.textSecondary)),
           ],
@@ -177,33 +180,33 @@ class _ActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03), blurRadius: 6)],
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12)),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(height: 8),
-              Text(label,
-                  style: GoogleFonts.poppins(
-                      fontSize: 12, fontWeight: FontWeight.w500,
-                      color: AppColors.textPrimary)),
-            ],
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 76,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03), blurRadius: 6)],
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(height: 8),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary)),
+          ],
         ),
       ),
     );

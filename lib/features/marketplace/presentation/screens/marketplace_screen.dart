@@ -567,29 +567,35 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
         ),
         const SizedBox(width: 8),
         // Sort
-        GestureDetector(
-          onTap: _showSortSheet,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.swap_vert,
-                    size: 14, color: AppColors.textSecondary),
-                const SizedBox(width: 4),
-                Text(
-                  'Sort · ${sortOption.label}',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.textSecondary),
-                ),
-              ],
+        Flexible(
+          child: GestureDetector(
+            onTap: _showSortSheet,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.swap_vert,
+                      size: 14, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      'Sort · ${sortOption.label}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

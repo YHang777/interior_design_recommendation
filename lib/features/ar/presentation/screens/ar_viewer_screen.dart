@@ -496,11 +496,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _busy = true;
     try {
       final node = _buildNode(entry);
+      final placement = entry.isProduct
+          ? PlacementType.floor // products default to floor
+          : entry.item!.placement;
       final placed = await _placeNodeAtTap(
         hits,
         node,
         entry.name,
         failureMessage: 'Could not load the 3D model for ${entry.name}.',
+        requiredPlacement: placement,
       );
       if (placed == null) return;
       if (!mounted) return;
@@ -517,25 +521,85 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
+  /// Returns whether a hit test result's world transform indicates a
+  /// horizontal surface (floor/table) or vertical surface (wall).
+  /// Uses the plane normal (Y-axis of the transform's rotation) to
+  /// determine orientation: ~1.0 = horizontal, ~0.0 = vertical.
+  static bool _isHorizontalPlane(ARHitTestResult hit) {
+    // The world transform's column 1 (Y-axis) is the plane normal.
+    // For horizontal planes, normal.y ≈ 1.0; for vertical, normal.y ≈ 0.0.
+    final normalY = hit.worldTransform.getColumn(1).y.abs();
+    return normalY > 0.7;
+  }
+
   /// SHARED anchor + node placement for every flow (furniture and finishes,
   /// fix 22): picks a plane hit (falling back to the first feature point),
   /// creates the anchor, adds the node and cleans up on failure. Returns the
   /// placed item — the caller records it in its own (mounted-guarded)
   /// setState, since only the caller knows the chip/label semantics.
+  ///
+  /// [requiredPlacement] filters plane hits by orientation:
+  /// - [PlacementType.floor] only allows horizontal planes
+  /// - [PlacementType.wall] only allows vertical planes
+  /// - [PlacementType.any] accepts any plane
   Future<_PlacedItem?> _placeNodeAtTap(
     List<ARHitTestResult> hits,
     ARNode node,
     String label, {
     String failureMessage = 'Could not place the item.',
+    PlacementType requiredPlacement = PlacementType.any,
   }) async {
     ARHitTestResult? hit;
+
+    // First try to find a plane hit matching the required orientation.
     for (final h in hits) {
-      if (h.type == ARHitTestResultType.plane) {
+      if (h.type != ARHitTestResultType.plane) continue;
+      if (requiredPlacement == PlacementType.any) {
+        hit = h;
+        break;
+      }
+      final isHorizontal = _isHorizontalPlane(h);
+      if (requiredPlacement == PlacementType.floor && isHorizontal) {
+        hit = h;
+        break;
+      }
+      if (requiredPlacement == PlacementType.wall && !isHorizontal) {
         hit = h;
         break;
       }
     }
+
+    // If no matching plane found, try any plane hit.
+    if (hit == null) {
+      for (final h in hits) {
+        if (h.type == ARHitTestResultType.plane) {
+          hit = h;
+          break;
+        }
+      }
+    }
+
+    // Last resort: use the first hit (feature point).
     hit ??= hits.first;
+
+    // Show a hint if the hit doesn't match the required placement.
+    if (requiredPlacement != PlacementType.any && hit.type == ARHitTestResultType.plane) {
+      final isHorizontal = _isHorizontalPlane(hit);
+      if (requiredPlacement == PlacementType.floor && !isHorizontal) {
+        _showMessage('This item should be placed on the floor — '
+            'point your phone at the ground.',
+            color: AppColors.warning,
+            duration: const Duration(seconds: 2));
+        return null;
+      }
+      if (requiredPlacement == PlacementType.wall && isHorizontal) {
+        _showMessage('This item should be placed on a wall — '
+            'point your phone at a wall.',
+            color: AppColors.warning,
+            duration: const Duration(seconds: 2));
+        return null;
+      }
+    }
 
     final anchor = ARPlaneAnchor(transformation: hit.worldTransform);
     final anchorOk = await _anchors?.addAnchor(anchor) ?? false;
@@ -773,11 +837,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         scale: Vector3.all(pending.scaleMeters),
         name: pending.nodeName,
       );
+      // Floor finishes must go on horizontal surfaces, wall finishes on vertical.
+      final requiredPlacement = pending.kindWord == 'floor'
+          ? PlacementType.floor
+          : PlacementType.wall;
       final placed = await _placeNodeAtTap(
         hits,
         node,
         pending.label,
         failureMessage: 'Could not load the ${pending.kindWord} finish.',
+        requiredPlacement: requiredPlacement,
       );
       if (placed == null) return;
       if (!mounted) return;
@@ -1046,9 +1115,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Note: some phones without Google services do not '
-              'support ARCore. Try another Android device if the '
-              'install fails.',
+              'Note: Honor/Huawei devices may not support ARCore '
+              'even after installation. Try another Android device '
+              'if AR does not work.',
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                   fontSize: 11, color: Colors.white38),
@@ -1144,70 +1213,75 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
 
-        // Top bar
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  tooltip: 'Back',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white),
+        // Top bar — anchored to the top of the Stack
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    tooltip: 'Back',
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
-                ),
-                // "N placed" counter — tapping it lists the placed items
-                // with per-item Remove (fix 20).
-                Semantics(
-                  button: true,
-                  label: _placed.isEmpty
-                      ? 'Nothing placed yet'
-                      : '${_placed.length} '
-                          '${_placed.length == 1 ? 'item' : 'items'} placed',
-                  child: InkWell(
-                    onTap: _placed.isEmpty ? null : _showPlacedSheet,
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('${_placed.length} placed',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 12, color: Colors.white)),
-                          if (_placed.isNotEmpty) ...[
-                            const SizedBox(width: 2),
-                            const Icon(Icons.expand_less,
-                                size: 14, color: Colors.white70),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white),
+                    ),
+                  ),
+                  // "N placed" counter — tapping it lists the placed items
+                  // with per-item Remove (fix 20).
+                  Semantics(
+                    button: true,
+                    label: _placed.isEmpty
+                        ? 'Nothing placed yet'
+                        : '${_placed.length} '
+                            '${_placed.length == 1 ? 'item' : 'items'} placed',
+                    child: InkWell(
+                      onTap: _placed.isEmpty ? null : _showPlacedSheet,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${_placed.length} placed',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 12, color: Colors.white)),
+                            if (_placed.isNotEmpty) ...[
+                              const SizedBox(width: 2),
+                              const Icon(Icons.expand_less,
+                                  size: 14, color: Colors.white70),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_sweep_outlined,
-                      color: Colors.white),
-                  tooltip: 'Clear all',
-                  onPressed: _placed.isEmpty ? null : _clearAll,
-                ),
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.delete_sweep_outlined,
+                        color: Colors.white),
+                    tooltip: 'Clear all',
+                    onPressed: _placed.isEmpty ? null : _clearAll,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1263,7 +1337,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                   const Icon(Icons.warning_amber,
                       color: AppColors.warning, size: 32),
                   const SizedBox(height: 8),
-                  Text('The camera is not tracking',
+                  Text('AR is not working on this device',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(
                           fontSize: 14,
@@ -1271,21 +1345,39 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                           color: Colors.white)),
                   const SizedBox(height: 6),
                   Text(
-                    'ARCore could not start on this device. Google only '
-                    'supports AR on an official list of phone models — '
-                    'this phone may not be on it.',
+                    'Some Honor/Huawei devices do not fully support '
+                    'Google ARCore. The camera may show but plane '
+                    'detection does not work.\n\n'
+                    'You can still browse and save furniture designs.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
-                        fontSize: 11, color: Colors.white70),
+                        fontSize: 11, color: Colors.white70, height: 1.4),
                   ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: () {
-                      setState(() => _arUnresponsive = false);
-                      _startWatchdog();
-                    },
-                    child: const Text('Try Again',
-                        style: TextStyle(color: AppColors.accent)),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          setState(() => _arUnresponsive = false);
+                          _startWatchdog();
+                        },
+                        child: const Text('Try Again',
+                            style: TextStyle(color: AppColors.accent)),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, size: 16),
+                        label: const Text('Close'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.error,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1542,7 +1634,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// "Floor" size chips (2 m / 3 m / 4 m) + the Place floor action.
+  /// "Floor" size chips (2 m / 3 m / 4 m / Custom) + the Place floor action.
   Widget _buildFloorSizeRow() {
     return SizedBox(
       height: 34,
@@ -1557,9 +1649,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                   for (final size
                       in RoomFinishCatalog.floorSizeOptionsM) ...[
                     _buildChoiceChip(
-                      label: '${size.toStringAsFixed(0)} m',
-                      selected: size == _floorSizeM,
-                      onTap: () => _selectFloorSize(size),
+                      label: size < 0 ? 'Custom' : '${size.toStringAsFixed(0)} m',
+                      selected: size < 0
+                          ? !_isPresetFloorSize(_floorSizeM)
+                          : size == _floorSizeM,
+                      onTap: () => size < 0
+                          ? _showCustomFloorSizeDialog()
+                          : _selectFloorSize(size),
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -1577,6 +1673,62 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         ],
       ),
     );
+  }
+
+  /// Returns true if [size] matches one of the preset options.
+  bool _isPresetFloorSize(double size) {
+    for (final preset in RoomFinishCatalog.floorSizeOptionsM) {
+      if (preset > 0 && (preset - size).abs() < 0.01) return true;
+    }
+    return false;
+  }
+
+  /// Shows a dialog for entering a custom floor size in meters.
+  Future<void> _showCustomFloorSizeDialog() async {
+    final controller = TextEditingController(
+      text: _isPresetFloorSize(_floorSizeM) ? '' : _floorSizeM.toStringAsFixed(1),
+    );
+    final result = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Custom Floor Size'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Size in meters',
+            hintText: 'e.g. 2.5',
+            suffixText: 'm',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text);
+              if (value != null && value > 0 && value <= 20) {
+                Navigator.pop(ctx, value);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Enter a size between 0.1 and 20 meters'),
+                    backgroundColor: AppColors.error,
+                  ),
+                );
+              }
+            },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && mounted) {
+      _selectFloorSize(result);
+    }
   }
 
   /// "Wall" row: type chips (Paint/Wood Panel/Brick) + swatches, with the
@@ -2008,12 +2160,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       return 'Preparing the true-size 3D model — keep moving your phone, '
           'then tap to place once it is ready';
     }
+    // Determine which surface type the selected item needs.
+    final placement = entry?.isProduct == true
+        ? PlacementType.floor
+        : entry?.item?.placement ?? PlacementType.floor;
+    final surfaceHint = placement == PlacementType.wall
+        ? 'a wall'
+        : 'the floor';
     if (!_planesFound) {
-      return 'Move your phone slowly to detect surfaces, then tap to place '
-          '$name';
+      return 'Move your phone slowly to detect surfaces, then tap '
+          '$surfaceHint to place $name';
     }
     if (_placed.isEmpty) {
-      return 'Tap a detected surface to place $name';
+      return 'Tap $surfaceHint to place $name';
     }
     return 'Tap to place $name • '
         'Drag to move • Twist to rotate • Tap model to remove';

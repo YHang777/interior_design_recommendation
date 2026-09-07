@@ -418,32 +418,29 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   // ── Info blocks ─────────────────────────────────────────────────────────
 
   Widget _buildBadgeRow(Product product) {
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
       children: [
-        if (product.isEcoFriendly) ...[
+        if (product.isEcoFriendly)
           _ChipBadge(
               text: 'Eco-Friendly',
               background: AppColors.success.withValues(alpha: 0.1),
               color: AppColors.success,
               icon: Icons.eco),
-          const SizedBox(width: 8),
-        ],
         _ChipBadge(
             text: product.category,
             background: AppColors.accent.withValues(alpha: 0.1),
             color: AppColors.accent),
-        const SizedBox(width: 8),
         _ChipBadge(
             text: product.designStyle,
             background: AppColors.primary.withValues(alpha: 0.08),
             color: AppColors.primary),
-        if (product.ratingCount == 0) ...[
-          const SizedBox(width: 8),
+        if (product.ratingCount == 0)
           _ChipBadge(
               text: 'New',
               background: AppColors.secondaryAccent.withValues(alpha: 0.1),
               color: AppColors.secondaryAccent),
-        ],
       ],
     );
   }

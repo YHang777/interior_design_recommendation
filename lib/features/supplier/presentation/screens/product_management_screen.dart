@@ -410,28 +410,34 @@ class _ProductManagementScreenState
       children: [
         Row(
           children: [
-            StatCard(
-              icon: Icons.inventory_2_outlined,
-              label: 'Total products',
-              value: '$total',
-              gradient: const [AppColors.primary, AppColors.primaryLight],
+            Expanded(
+              child: StatCard(
+                icon: Icons.inventory_2_outlined,
+                label: 'Total products',
+                value: '$total',
+                gradient: const [AppColors.primary, AppColors.primaryLight],
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.visibility_outlined,
-              label: 'Active',
-              value: '$active',
-              gradient: const [AppColors.accent, AppColors.gradientGreen],
+            Expanded(
+              child: StatCard(
+                icon: Icons.visibility_outlined,
+                label: 'Active',
+                value: '$active',
+                gradient: const [AppColors.accent, AppColors.gradientGreen],
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.priority_high_outlined,
-              label: 'Low stock',
-              value: '$low',
-              gradient: const [AppColors.warning, AppColors.gradientOrange],
-              onTap: low > 0
-                  ? () => setState(() => _filter = _ProductFilter.lowStock)
-                  : null,
+            Expanded(
+              child: StatCard(
+                icon: Icons.priority_high_outlined,
+                label: 'Low stock',
+                value: '$low',
+                gradient: const [AppColors.warning, AppColors.gradientOrange],
+                onTap: low > 0
+                    ? () => setState(() => _filter = _ProductFilter.lowStock)
+                    : null,
+              ),
             ),
           ],
         ),

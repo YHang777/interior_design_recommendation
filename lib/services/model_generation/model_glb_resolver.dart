@@ -150,22 +150,21 @@ class ModelGlbResolver {
     if (pTarget.existsSync() && pTarget.lengthSync() > 0) {
       return ResolvedGlb(file: pTarget, procedural: true);
     }
-    if (dims != null && dims.isComplete) {
-      final bytes = generateFurnitureGlb(
-        category: product.category,
-        name: product.name,
-        widthM: dims.widthM,
-        heightM: dims.heightM,
-        depthM: dims.depthM,
-      );
-      await _writeAndPrune(cacheDir, id, pTarget, bytes);
-      return ResolvedGlb(file: pTarget, procedural: true);
-    }
-
-    // 3) Nothing to work from.
-    throw const No3dAvailableException(
-        'add real-world dimensions (Width/Height/Depth) to auto-generate '
-        'the 3D model');
+    // Use real dimensions when available; otherwise fall back to
+    // category-based defaults so seeded / dimension-less products
+    // still get a procedural 3D model.
+    final effectiveDims = dims != null && dims.isComplete
+        ? dims
+        : _defaultDimensions(product.category);
+    final bytes = generateFurnitureGlb(
+      category: product.category,
+      name: product.name,
+      widthM: effectiveDims.widthM,
+      heightM: effectiveDims.heightM,
+      depthM: effectiveDims.depthM,
+    );
+    await _writeAndPrune(cacheDir, id, pTarget, bytes);
+    return ResolvedGlb(file: pTarget, procedural: true);
   }
 
   /// Validates the downloaded bytes parse as a GLB and rescales them to the
@@ -238,6 +237,62 @@ class ModelGlbResolver {
       }
     } catch (e) {
       debugPrint('[model-3d] cache prune for $productId failed: $e');
+    }
+  }
+
+  /// Returns sensible default dimensions for a product category.
+  /// Used when a product has no explicit dimensions (e.g. seeded data)
+  /// so the procedural generator can still produce a 3D model.
+  static ProductDimensions _defaultDimensions(String category) {
+    switch (category.toLowerCase()) {
+      case 'sofa':
+      case 'sofas':
+        return const ProductDimensions(widthM: 2.0, heightM: 0.85, depthM: 0.9);
+      case 'chair':
+      case 'chairs':
+      case 'dining chair':
+      case 'dining chairs':
+        return const ProductDimensions(widthM: 0.5, heightM: 0.9, depthM: 0.5);
+      case 'table':
+      case 'tables':
+      case 'dining table':
+      case 'dining tables':
+        return const ProductDimensions(widthM: 1.4, heightM: 0.75, depthM: 0.8);
+      case 'desk':
+      case 'desks':
+        return const ProductDimensions(widthM: 1.2, heightM: 0.75, depthM: 0.6);
+      case 'bed':
+      case 'beds':
+        return const ProductDimensions(widthM: 1.6, heightM: 0.5, depthM: 2.0);
+      case 'shelf':
+      case 'shelves':
+      case 'bookshelf':
+      case 'bookshelves':
+        return const ProductDimensions(widthM: 0.8, heightM: 1.8, depthM: 0.3);
+      case 'cabinet':
+      case 'cabinets':
+      case 'tv cabinet':
+      case 'tv cabinets':
+        return const ProductDimensions(widthM: 1.5, heightM: 0.5, depthM: 0.4);
+      case 'wardrobe':
+      case 'wardrobes':
+        return const ProductDimensions(widthM: 1.2, heightM: 2.0, depthM: 0.6);
+      case 'lamp':
+      case 'lamps':
+      case 'lighting':
+        return const ProductDimensions(widthM: 0.3, heightM: 1.5, depthM: 0.3);
+      case 'rug':
+      case 'rugs':
+      case 'carpet':
+      case 'carpets':
+        return const ProductDimensions(widthM: 2.0, heightM: 0.01, depthM: 1.5);
+      case 'painting':
+      case 'paintings':
+      case 'wall art':
+        return const ProductDimensions(widthM: 0.8, heightM: 0.6, depthM: 0.05);
+      default:
+        // Generic furniture default
+        return const ProductDimensions(widthM: 0.8, heightM: 0.8, depthM: 0.8);
     }
   }
 

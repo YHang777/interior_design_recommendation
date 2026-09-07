@@ -661,7 +661,10 @@ void _walkGrid(
 }
 
 void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng) {
-  const plankW = 0.15;
+  const plankW = 0.12;
+  const grainLine = 0.003; // width of visible grain lines
+  final darkGrain = _tone(base, 0.82);
+  final lightGrain = _tone(base, 1.08);
   var z = lo;
   while (z < -lo - 1e-9) {
     final z1 = math.min(z + plankW, -lo);
@@ -673,54 +676,113 @@ void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng) {
       final len = first ? rng.range(0.4, 1.0) : rng.range(0.9, 1.5);
       final x1 = math.min(x + len, -lo);
       if (x1 > x + 1e-6) {
-        final c = _tone(base, 1 + rng.range(-0.06, 0.06));
-        _floorQuad(m, x, z, x1, z1, c);
+        // Base plank color with moderate variation per plank.
+        final plankBase = _tone(base, 1 + rng.range(-0.08, 0.08));
+        _floorQuad(m, x, z, x1, z1, plankBase);
+        // Grain lines: thin strips running along X within the plank.
+        final grainCount = (plankW / 0.025).floor();
+        for (var g = 0; g < grainCount; g++) {
+          final gz = z + g * 0.025 + rng.range(0.002, 0.008);
+          if (gz + grainLine < z1) {
+            final gc = g.isEven ? darkGrain : lightGrain;
+            _floorQuad(m, x, gz, x1, gz + grainLine, gc);
+          }
+        }
+        // End joint line (dark seam between plank ends).
+        if (x1 < -lo - 0.01) {
+          _floorQuad(m, x1 - grainLine, z, x1, z1, _tone(base, 0.6));
+        }
       }
       if (x1 >= -lo - 1e-9) break;
       x = x1;
       first = false;
     }
+    // Row joint line (dark seam between plank rows).
+    _floorQuad(m, lo, z1 - grainLine, -lo, z1, _tone(base, 0.55));
     z = z1;
   }
 }
 
 void _floorCement(_Mesh m, int base, double lo, double size, _Rand rng) {
-  _walkGrid(size, 0.5,
-      (x0, z0, x1, z1) => _floorQuad(m, x0, z0, x1, z1,
-          _tone(base, 1 + rng.range(-0.02, 0.02))));
+  final crackColor = _tone(base, 0.75);
+  _walkGrid(size, 0.4, (x0, z0, x1, z1) {
+    // Base slab with moderate variation.
+    _floorQuad(m, x0, z0, x1, z1, _tone(base, 1 + rng.range(-0.04, 0.04)));
+    // Occasional crack lines (30% chance per cell).
+    if (rng.nextDouble() < 0.3) {
+      final cx = x0 + rng.range(0.05, 0.35);
+      final cz = z0 + rng.range(0.05, 0.35);
+      // Short crack segment.
+      final dx = rng.range(-0.15, 0.15);
+      final dz = rng.range(-0.15, 0.15);
+      _floorQuad(m, cx - 0.002, cz, cx + dx + 0.002, cz + dz, crackColor);
+    }
+  });
 }
 
 void _floorTiles(_Mesh m, int base, double lo, double size, _Rand rng) {
-  const tile = 0.6;
-  const inset = 0.01; // half the grout line width
-  final grout = _mix(base, _kGrey, 0.55);
+  const tile = 0.5;
+  const inset = 0.015; // half the grout line width (more visible)
+  final grout = _mix(base, _kGrey, 0.6);
+  final groutDark = _mix(base, _kGrey, 0.7);
   _walkGrid(size, tile, (x0, z0, x1, z1) {
-    // 9 quads per tile: center tile face + 8 grout-border quads.
-    _floorQuad(
-        m,
-        x0 + inset,
-        z0 + inset,
-        x1 - inset,
-        z1 - inset,
-        _tone(base, 1 + rng.range(-0.04, 0.04)));
-    _floorQuad(m, x0, z0, x0 + inset, z1, grout);
-    _floorQuad(m, x1 - inset, z0, x1, z1, grout);
+    // Tile face with slight per-tile variation and a subtle highlight.
+    final tileColor = _tone(base, 1 + rng.range(-0.05, 0.05));
+    _floorQuad(m, x0 + inset, z0 + inset, x1 - inset, z1 - inset, tileColor);
+    // Subtle highlight in the center of the tile (light reflection).
+    final cx = (x0 + x1) / 2;
+    final cz = (z0 + z1) / 2;
+    final hs = (x1 - x0 - inset * 2) * 0.3;
+    if (hs > 0.01) {
+      _floorQuad(m, cx - hs, cz - hs, cx + hs, cz + hs,
+          _tone(tileColor, 1.04));
+    }
+    // Grout lines (darker than before for visibility).
+    _floorQuad(m, x0, z0, x0 + inset, z1, groutDark);
+    _floorQuad(m, x1 - inset, z0, x1, z1, groutDark);
     _floorQuad(m, x0 + inset, z0, x1 - inset, z0 + inset, grout);
     _floorQuad(m, x0 + inset, z1 - inset, x1 - inset, z1, grout);
-    _floorQuad(m, x0, z0 + inset, x0 + inset, z1 - inset, grout);
-    _floorQuad(m, x1 - inset, z0 + inset, x1, z1 - inset, grout);
-    _floorQuad(m, x0, z0, x0 + inset, z0 + inset, grout);
-    _floorQuad(m, x1 - inset, z1 - inset, x1, z1, grout);
+    // Corner grout dots.
+    _floorQuad(m, x0, z0, x0 + inset, z0 + inset, groutDark);
+    _floorQuad(m, x1 - inset, z0, x1, z0 + inset, groutDark);
+    _floorQuad(m, x0, z1 - inset, x0 + inset, z1, groutDark);
+    _floorQuad(m, x1 - inset, z1 - inset, x1, z1, groutDark);
   });
 }
 
 void _floorParquet(_Mesh m, int base, double lo, double size, _Rand rng) {
-  // Small squares tinted in alternating 45° bands (x + z ≈ const).
-  _walkGrid(size, 0.075, (x0, z0, x1, z1) {
-    final even = ((x0 + z0) / 0.3).floor().isEven;
-    final p = 1 + (even ? rng.range(0.0, 0.02) : rng.range(-0.06, -0.02));
-    _floorQuad(m, x0, z0, x1, z1, _tone(base, p));
-  });
+  // Herringbone pattern: small rectangular blocks arranged in a V pattern.
+  const blockW = 0.06;
+  const blockH = 0.18;
+  const gap = 0.002;
+  final darkJoint = _tone(base, 0.6);
+  var row = 0;
+  for (var z = lo; z < -lo - 1e-9; z += blockW + gap) {
+    final z1 = math.min(z + blockW, -lo);
+    final offset = (row % 2 == 0) ? 0.0 : blockH / 2;
+    for (var x = lo + offset; x < -lo - 1e-9; x += blockH + gap) {
+      final x1 = math.min(x + blockH, -lo);
+      if (x1 > x + 1e-6 && z1 > z + 1e-6) {
+        // Alternate grain direction per block.
+        final even = ((x - lo) / (blockH + gap)).floor().isEven;
+        final p = 1 + rng.range(-0.06, 0.06);
+        _floorQuad(m, x, z, x1, z1, _tone(base, p));
+        // Thin grain line along the long axis of the block.
+        if (even) {
+          final midZ = (z + z1) / 2;
+          _floorQuad(m, x, midZ - 0.001, x1, midZ + 0.001, _tone(base, 0.85));
+        } else {
+          final midX = (x + x1) / 2;
+          _floorQuad(m, midX - 0.001, z, midX + 0.001, z1, _tone(base, 0.85));
+        }
+      }
+    }
+    // Joint line along the row.
+    if (z1 < -lo - 0.01) {
+      _floorQuad(m, lo, z1 - gap, -lo, z1, darkJoint);
+    }
+    row++;
+  }
 }
 
 /// Wall panel [widthM] × [heightM] × 0.05 m standing upright on y = 0
@@ -776,12 +838,34 @@ Uint8List generateWallGlb({
       }
       break;
     case WallFinishType.woodPanels:
-      const panelW = 0.2, seam = 0.006;
+      const panelW = 0.18, seam = 0.008;
+      final darkSeam = _tone(base, 0.35);
+      final grainDark = _tone(base, 0.8);
+      final grainLight = _tone(base, 1.1);
       for (var x = loX; x < -loX - 1e-9; x += panelW) {
         final x1 = math.min(x + panelW, -loX);
-        wallQuad(x + seam / 2, 0, x1 - seam / 2, heightM,
-            _tone(base, 1 + rng.range(-0.06, 0.06)));
-        wallQuad(x, 0, x + seam, heightM, _tone(base, 0.4));
+        if (x1 <= x + 1e-6) continue;
+        // Panel face with per-panel color variation.
+        final panelColor = _tone(base, 1 + rng.range(-0.08, 0.08));
+        wallQuad(x + seam / 2, 0, x1 - seam / 2, heightM, panelColor);
+        // Vertical seam between panels (dark groove).
+        wallQuad(x, 0, x + seam, heightM, darkSeam);
+        // Horizontal grain lines running across the panel.
+        final grainCount = (heightM / 0.04).floor();
+        for (var g = 0; g < grainCount; g++) {
+          final gy = g * 0.04 + rng.range(0.005, 0.015);
+          if (gy + 0.002 < heightM) {
+            final gc = g.isEven ? grainDark : grainLight;
+            wallQuad(x + seam / 2, gy, x1 - seam / 2, gy + 0.002, gc);
+          }
+        }
+        // Knot highlight (occasional, 20% of panels).
+        if (rng.nextDouble() < 0.2) {
+          final ky = rng.range(0.3, heightM - 0.3);
+          final kx = (x + x1) / 2;
+          final kr = 0.02;
+          wallQuad(kx - kr, ky - kr, kx + kr, ky + kr, _tone(base, 0.7));
+        }
       }
       break;
     case WallFinishType.brick:

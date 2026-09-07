@@ -83,27 +83,33 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
             // ── Budget Overview ──
             Row(
               children: [
-                StatCard(
-                  icon: Icons.account_balance_wallet,
-                  label: 'Total Budget',
-                  value: 'RM $_budget',
-                  gradient: const [Color(0xFF4CAF50), Color(0xFF66BB6A)],
+                Expanded(
+                  child: StatCard(
+                    icon: Icons.account_balance_wallet,
+                    label: 'Total Budget',
+                    value: 'RM $_budget',
+                    gradient: const [Color(0xFF4CAF50), Color(0xFF66BB6A)],
+                  ),
                 ),
                 const SizedBox(width: 10),
-                StatCard(
-                  icon: Icons.receipt,
-                  label: 'Total Cost',
-                  value: 'RM $_totalCost',
-                  gradient: const [Color(0xFF2196F3), Color(0xFF42A5F5)],
+                Expanded(
+                  child: StatCard(
+                    icon: Icons.receipt,
+                    label: 'Total Cost',
+                    value: 'RM $_totalCost',
+                    gradient: const [Color(0xFF2196F3), Color(0xFF42A5F5)],
+                  ),
                 ),
                 const SizedBox(width: 10),
-                StatCard(
-                  icon: _remaining >= 0 ? Icons.savings : Icons.warning,
-                  label: _remaining >= 0 ? 'Remaining' : 'Over Budget',
-                  value: 'RM ${_remaining.abs()}',
-                  gradient: _remaining >= 0
-                      ? const [Color(0xFFFF9800), Color(0xFFFFB74D)]
-                      : const [Color(0xFFFF5722), Color(0xFFFF7043)],
+                Expanded(
+                  child: StatCard(
+                    icon: _remaining >= 0 ? Icons.savings : Icons.warning,
+                    label: _remaining >= 0 ? 'Remaining' : 'Over Budget',
+                    value: 'RM ${_remaining.abs()}',
+                    gradient: _remaining >= 0
+                        ? const [Color(0xFFFF9800), Color(0xFFFFB74D)]
+                        : const [Color(0xFFFF5722), Color(0xFFFF7043)],
+                  ),
                 ),
               ],
             ),

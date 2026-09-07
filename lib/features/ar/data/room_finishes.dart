@@ -111,7 +111,8 @@ class RoomFinishCatalog {
   static const int defaultWallColorArgb = 0xFFF5F3EE;
 
   /// Floor side-length choices offered in the Room panel (meters).
-  static const List<double> floorSizeOptionsM = [2.0, 3.0, 4.0];
+  /// Includes a sentinel value (-1) for "Custom" which opens a text input.
+  static const List<double> floorSizeOptionsM = [2.0, 3.0, 4.0, -1.0];
   static const double defaultFloorSizeM = 3.0;
 
   /// Generated wall panels are [wallWidthM] wide × [wallHeightM] high — the

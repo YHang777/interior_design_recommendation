@@ -29,7 +29,7 @@ class LocalConfig {
   /// model). Tripo is pay-as-you-go (~US$0.30 per textured model after any
   /// free signup credits) — leave `null` to stay on the free built-in
   /// procedural generator. Set to `null` to use environment or default.
-  static const String? tripoApiKey = null; // e.g., "tripo_..."
+  static const String? tripoApiKey = 'tsk_-o-DBmZ285628E4tHWIXDHyBk8sNj2-gOWJZHqGDdTY';
 
   /// Tripo model version. Leave `null` to use the AppConfig default
   /// (`v3.1-20260211`, the current v3 release).

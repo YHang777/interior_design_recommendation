@@ -1,5 +1,17 @@
 import 'package:flutter/material.dart';
 
+/// Where an AR furniture item should be placed.
+enum PlacementType {
+  /// Must be placed on a horizontal (floor/table) surface.
+  floor,
+
+  /// Must be placed on a vertical (wall) surface.
+  wall,
+
+  /// Can be placed on any detected surface.
+  any,
+}
+
 /// An AR-placeable furniture item backed by a bundled .glb model.
 class ArFurnitureItem {
   const ArFurnitureItem({
@@ -7,6 +19,7 @@ class ArFurnitureItem {
     required this.modelFile,
     required this.widthMeters,
     this.icon = Icons.chair,
+    this.placement = PlacementType.floor,
   });
 
   /// Display name (shown in the AR catalog bar).
@@ -22,6 +35,9 @@ class ArFurnitureItem {
   final double widthMeters;
 
   final IconData icon;
+
+  /// Which surface type this item should be placed on.
+  final PlacementType placement;
 
   /// URI used with `NodeType.localGLTF2`. The plugin resolves these URIs
   /// through Flutter's `getLookupKeyForAsset`, i.e. against the app's
@@ -43,52 +59,62 @@ class ArFurnitureLibrary {
         name: 'Sofa',
         modelFile: 'three_seater_sofa.glb',
         widthMeters: 2.2,
-        icon: Icons.weekend),
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Corner Sofa',
         modelFile: 'corner_sofa.glb',
         widthMeters: 2.6,
-        icon: Icons.weekend_outlined),
+        icon: Icons.weekend_outlined,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Apartment Sofa',
         modelFile: 'apartment_sofa.glb',
         widthMeters: 2.0,
-        icon: Icons.weekend_outlined),
+        icon: Icons.weekend_outlined,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Tuxedo Sofa',
         modelFile: 'tuxedo_sofa.glb',
         widthMeters: 2.2,
-        icon: Icons.weekend_outlined),
+        icon: Icons.weekend_outlined,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Armchair',
         modelFile: 'bauhaus_chair.glb',
         widthMeters: 0.85,
-        icon: Icons.chair),
+        icon: Icons.chair,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Dining Table',
         modelFile: 'dining_table.glb',
         widthMeters: 1.6,
-        icon: Icons.table_restaurant),
+        icon: Icons.table_restaurant,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Dining Set',
         modelFile: 'dining_table_set.glb',
         widthMeters: 2.0,
-        icon: Icons.table_restaurant_outlined),
+        icon: Icons.table_restaurant_outlined,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Coffee Table',
         modelFile: 'folding_table.glb',
         widthMeters: 1.0,
-        icon: Icons.table_bar),
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Bed',
         modelFile: 'double_bed.glb',
         widthMeters: 2.1,
-        icon: Icons.bed),
+        icon: Icons.bed,
+        placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Standing Desk',
         modelFile: 'standing_desk.glb',
         widthMeters: 1.4,
-        icon: Icons.desk),
+        icon: Icons.desk,
+        placement: PlacementType.floor),
   ];
 
   /// Placeholder used when no matching 3D model exists for an item.
@@ -96,7 +122,8 @@ class ArFurnitureLibrary {
       name: 'Furniture',
       modelFile: 'folding_table.glb',
       widthMeters: 1.0,
-      icon: Icons.chair);
+      icon: Icons.chair,
+      placement: PlacementType.floor);
 
   /// Maps the room-scanner catalog `iconName`s to 3D models.
   /// Entries marked (placeholder) have no exact model and reuse the closest
@@ -106,63 +133,75 @@ class ArFurnitureLibrary {
         name: 'Sofa',
         modelFile: 'three_seater_sofa.glb',
         widthMeters: 2.2,
-        icon: Icons.weekend),
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
     'armchair': ArFurnitureItem(
         name: 'Armchair',
         modelFile: 'bauhaus_chair.glb',
         widthMeters: 0.85,
-        icon: Icons.chair),
+        icon: Icons.chair,
+        placement: PlacementType.floor),
     'coffee_table': ArFurnitureItem(
         name: 'Coffee Table',
         modelFile: 'folding_table.glb',
         widthMeters: 1.0,
-        icon: Icons.table_bar),
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
     'dining_table': ArFurnitureItem(
         name: 'Dining Table',
         modelFile: 'dining_table.glb',
         widthMeters: 1.6,
-        icon: Icons.table_restaurant),
+        icon: Icons.table_restaurant,
+        placement: PlacementType.floor),
     'bed': ArFurnitureItem(
         name: 'Bed',
         modelFile: 'double_bed.glb',
         widthMeters: 2.1,
-        icon: Icons.bed),
+        icon: Icons.bed,
+        placement: PlacementType.floor),
     'desk': ArFurnitureItem(
         name: 'Desk',
         modelFile: 'standing_desk.glb',
         widthMeters: 1.4,
-        icon: Icons.desk),
+        icon: Icons.desk,
+        placement: PlacementType.floor),
     // Placeholders — no exact model bundled yet
     'cabinet': ArFurnitureItem(
         name: 'Cabinet',
         modelFile: 'folding_table.glb',
         widthMeters: 1.0,
-        icon: Icons.inventory_2),
+        icon: Icons.inventory_2,
+        placement: PlacementType.floor),
     'bookshelf': ArFurnitureItem(
         name: 'Bookshelf',
         modelFile: 'standing_desk.glb',
         widthMeters: 1.4,
-        icon: Icons.menu_book),
+        icon: Icons.menu_book,
+        placement: PlacementType.floor),
     'floor_lamp': ArFurnitureItem(
         name: 'Floor Lamp',
         modelFile: 'standing_desk.glb',
         widthMeters: 0.6,
-        icon: Icons.lightbulb),
+        icon: Icons.lightbulb,
+        placement: PlacementType.floor),
     'plant': ArFurnitureItem(
         name: 'Plant',
         modelFile: 'bauhaus_chair.glb',
         widthMeters: 0.5,
-        icon: Icons.eco),
+        icon: Icons.eco,
+        placement: PlacementType.floor),
     'tv_stand': ArFurnitureItem(
         name: 'TV Stand',
         modelFile: 'folding_table.glb',
         widthMeters: 1.4,
-        icon: Icons.tv),
+        icon: Icons.tv,
+        placement: PlacementType.floor),
     'rug': ArFurnitureItem(
         name: 'Rug',
         modelFile: 'folding_table.glb',
         widthMeters: 1.2,
-        icon: Icons.view_agenda),
+        icon: Icons.view_agenda,
+        placement: PlacementType.floor),
   };
 
   /// Maps marketplace product categories to 3D models.
@@ -171,32 +210,38 @@ class ArFurnitureLibrary {
         name: 'Furniture',
         modelFile: 'three_seater_sofa.glb',
         widthMeters: 2.2,
-        icon: Icons.weekend),
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
     'lighting': ArFurnitureItem(
         name: 'Lighting',
         modelFile: 'standing_desk.glb',
         widthMeters: 1.4,
-        icon: Icons.lightbulb),
+        icon: Icons.lightbulb,
+        placement: PlacementType.floor),
     'decor': ArFurnitureItem(
         name: 'Decor',
         modelFile: 'bauhaus_chair.glb',
         widthMeters: 0.85,
-        icon: Icons.chair),
+        icon: Icons.chair,
+        placement: PlacementType.any),
     'flooring': ArFurnitureItem(
         name: 'Flooring',
         modelFile: 'folding_table.glb',
         widthMeters: 1.0,
-        icon: Icons.view_agenda),
+        icon: Icons.view_agenda,
+        placement: PlacementType.floor),
     'wall': ArFurnitureItem(
         name: 'Wall',
         modelFile: 'folding_table.glb',
         widthMeters: 1.0,
-        icon: Icons.view_agenda),
+        icon: Icons.view_agenda,
+        placement: PlacementType.wall),
     'textiles': ArFurnitureItem(
         name: 'Textiles',
         modelFile: 'corner_sofa.glb',
         widthMeters: 2.6,
-        icon: Icons.weekend_outlined),
+        icon: Icons.weekend_outlined,
+        placement: PlacementType.floor),
   };
 
   /// Returns the AR model for a room-scanner catalog `iconName`.

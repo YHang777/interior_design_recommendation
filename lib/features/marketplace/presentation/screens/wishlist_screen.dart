@@ -64,6 +64,7 @@ class WishlistScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
         elevation: 0,
         title: Text('Wishlist (${wishlist.length})'),
         centerTitle: false,

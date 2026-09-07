@@ -161,9 +161,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text("Don't have an account?",
-                        style: GoogleFonts.poppins(
-                            color: AppColors.textSecondary)),
+                    Flexible(
+                      child: Text("Don't have an account?",
+                          style: GoogleFonts.poppins(
+                              color: AppColors.textSecondary)),
+                    ),
                     TextButton(
                       onPressed: () => context.push('/register'),
                       child: Text('Sign Up',

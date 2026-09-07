@@ -54,5 +54,13 @@ service cloud.firestore {
     match /users/{uid}/wishlist/{productId} {
       allow read, write: if isOwner(uid);
     }
+
+    // ── Room designs: owner can CRUD their own designs ──
+    match /room_designs/{designId} {
+      allow read, update, delete: if signedIn() &&
+          request.auth.uid == resource.data.userId;
+      allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.userId;
+    }
   }
 }

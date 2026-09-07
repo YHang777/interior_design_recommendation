@@ -215,9 +215,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Already have an account?',
-                      style: GoogleFonts.poppins(
-                          color: AppColors.textSecondary)),
+                  Flexible(
+                    child: Text('Already have an account?',
+                        style: GoogleFonts.poppins(
+                            color: AppColors.textSecondary)),
+                  ),
                   TextButton(
                     onPressed: () => context.pop(),
                     child: Text('Sign In',
