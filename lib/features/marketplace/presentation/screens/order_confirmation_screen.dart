@@ -100,14 +100,25 @@ class _SuccessView extends ConsumerWidget {
               return Transform.scale(
                 scale: value,
                 child: Container(
-                  width: 84,
-                  height: 84,
+                  width: 100,
+                  height: 100,
                   decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.1),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [AppColors.accent, AppColors.gradientGreen],
+                    ),
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.accent.withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
                   child: const Icon(Icons.check_circle,
-                      size: 52, color: AppColors.success),
+                      size: 56, color: Colors.white),
                 ),
               );
             },
@@ -222,16 +233,30 @@ class _SuccessView extends ConsumerWidget {
         // Actions.
         SizedBox(
           width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => context.pushNamed(
-              RouteNames.homeownerOrderDetail,
-              pathParameters: {'id': order.id},
+          height: 52,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.accent, AppColors.gradientGreen],
+              ),
+              borderRadius: BorderRadius.circular(26),
             ),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+            child: ElevatedButton(
+              onPressed: () => context.pushNamed(
+                RouteNames.homeownerOrderDetail,
+                pathParameters: {'id': order.id},
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(26),
+                ),
+              ),
+              child: const Text('Track order',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
-            child: const Text('Track order',
-                style: TextStyle(fontSize: 16)),
           ),
         ),
         const SizedBox(height: 8),

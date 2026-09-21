@@ -167,11 +167,26 @@ class _BuyerOrderDetailScreenState
   Widget _actionBar(Order order) {
     final buttons = <Widget>[
       Expanded(
-        child: SizedBox(
-          height: 48,
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppColors.accent, AppColors.gradientGreen],
+            ),
+            borderRadius: BorderRadius.circular(14),
+          ),
           child: ElevatedButton(
             onPressed: _working ? null : () => _reorder(order),
-            child: const Text('Reorder'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: const Text('Reorder',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
           ),
         ),
       ),
@@ -180,24 +195,35 @@ class _BuyerOrderDetailScreenState
       buttons.insert(
         0,
         SizedBox(
-          height: 48,
-          width: 130,
+          height: 52,
+          width: 140,
           child: OutlinedButton(
             onPressed: _working ? null : () => _cancelOrder(order),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.error,
               side: BorderSide(color: AppColors.error.withValues(alpha: 0.5)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
-            child: const Text('Cancel order'),
+            child: const Text('Cancel order',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           ),
         ),
       );
       buttons.insert(1, const SizedBox(width: 10));
     }
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -327,6 +353,13 @@ class _OrderBody extends ConsumerWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,6 +431,13 @@ class _StatusCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,6 +576,7 @@ class _StatusTimeline extends StatelessWidget {
     required String? caption,
   }) {
     final isLast = index == _steps.length - 1;
+    final isCurrent = done && (index == order.status.index);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -555,6 +596,15 @@ class _StatusTimeline extends StatelessWidget {
                       color: done ? AppColors.accent : AppColors.border,
                       width: 2,
                     ),
+                    boxShadow: isCurrent
+                        ? [
+                            BoxShadow(
+                              color: AppColors.accent.withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ]
+                        : null,
                   ),
                   child: done
                       ? const Icon(Icons.check,

@@ -30,7 +30,10 @@ class RatingStars extends StatelessWidget {
           } else {
             icon = Icons.star_border;
           }
-          return Icon(icon, size: size, color: AppColors.warning);
+          return Padding(
+            padding: EdgeInsets.only(right: index < 4 ? 1 : 0),
+            child: Icon(icon, size: size, color: AppColors.warning),
+          );
         }),
         if (count != null) ...[
           const SizedBox(width: 4),
@@ -39,6 +42,7 @@ class RatingStars extends StatelessWidget {
             style: GoogleFonts.poppins(
               fontSize: size - 2,
               color: AppColors.textSecondary,
+              height: 1.3,
             ),
           ),
         ],

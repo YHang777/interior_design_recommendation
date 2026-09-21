@@ -71,24 +71,53 @@ class _AiRecommendationScreenState
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Choose Your Style'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _styles.map((s) {
-              return ListTile(
-                leading: Icon(s.$2, color: AppColors.primary),
-                title: Text(s.$1,
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                subtitle: Text(s.$3,
-                    style: GoogleFonts.poppins(fontSize: 12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Choose Your Style',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.4,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+            ),
+            itemCount: _styles.length,
+            itemBuilder: (_, i) {
+              final s = _styles[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
                 onTap: () {
                   setState(() => _selectedStyle = s.$1);
                   Navigator.pop(ctx);
                   _showRoomDialog();
                 },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(s.$2, color: AppColors.accent, size: 28),
+                      const SizedBox(height: 6),
+                      Text(s.$1,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
               );
-            }).toList(),
+            },
           ),
         ),
       ),
@@ -100,20 +129,54 @@ class _AiRecommendationScreenState
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Which Room?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _rooms.map((r) {
-            return ListTile(
-              leading: Icon(r.$2, color: AppColors.accent),
-              title: Text(r.$1, style: GoogleFonts.poppins()),
-              onTap: () {
-                setState(() => _selectedRoom = r.$1);
-                Navigator.pop(ctx);
-                _startChat();
-              },
-            );
-          }).toList(),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Which Room?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.6,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+            ),
+            itemCount: _rooms.length,
+            itemBuilder: (_, i) {
+              final r = _rooms[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  setState(() => _selectedRoom = r.$1);
+                  Navigator.pop(ctx);
+                  _startChat();
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(r.$2, color: AppColors.accent, size: 28),
+                      const SizedBox(height: 6),
+                      Text(r.$1,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -123,7 +186,8 @@ class _AiRecommendationScreenState
     setState(() {
       _msgs.add(_ChatMsg(
         sender: 'AI',
-        text: 'I will recommend $_selectedStyle designs for your $_selectedRoom. Ask me anything!',
+        text:
+            'I will recommend $_selectedStyle designs for your $_selectedRoom. Ask me anything!',
       ));
     });
   }
@@ -158,7 +222,8 @@ class _AiRecommendationScreenState
           _msgs.removeLast();
           _msgs.add(_ChatMsg(
               sender: 'AI',
-              text: 'Here is a $_selectedStyle recommendation for your $_selectedRoom: Try a neutral color palette with accent furniture pieces. Would you like specific product suggestions?'));
+              text:
+                  'Here is a $_selectedStyle recommendation for your $_selectedRoom: Try a neutral color palette with accent furniture pieces. Would you like specific product suggestions?'));
         });
       });
     }
@@ -177,7 +242,7 @@ class _AiRecommendationScreenState
             _selectedStyle != null
                 ? '$_selectedStyle Design'
                 : 'AI Recommendations',
-            style: GoogleFonts.poppins()),
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         actions: [
           if (_selectedStyle != null)
             TextButton.icon(
@@ -198,18 +263,32 @@ class _AiRecommendationScreenState
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.psychology,
-                            size: 64, color: AppColors.textPrimary),
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                AppColors.accent.withValues(alpha: 0.15),
+                                AppColors.accentLight.withValues(alpha: 0.08),
+                              ],
+                            ),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.psychology,
+                              size: 40, color: AppColors.accent),
+                        ),
                         const SizedBox(height: 16),
                         Text('AI Design Assistant',
                             style: GoogleFonts.poppins(
-                                fontSize: 20,
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white)),
                         const SizedBox(height: 8),
                         Text('Select a style to get started',
                             style: GoogleFonts.poppins(
-                                color: AppColors.textSecondary)),
+                                fontSize: 14,
+                                color: Colors.white.withValues(alpha: 0.7))),
                         const SizedBox(height: 24),
                         ElevatedButton.icon(
                           onPressed: _showStyleDialog,
@@ -218,6 +297,11 @@ class _AiRecommendationScreenState
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: AppColors.primary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 12),
                           ),
                         ),
                       ],
@@ -225,8 +309,8 @@ class _AiRecommendationScreenState
                   )
                 : ListView.builder(
                     controller: _scrollCtrl,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
                     itemCount: _msgs.length,
                     itemBuilder: (_, i) => _buildBubble(_msgs[i]),
                   ),
@@ -235,30 +319,62 @@ class _AiRecommendationScreenState
           // Input bar
           if (_selectedStyle != null)
             Container(
-              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Row(
-                children: [
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextField(
-                      controller: _msgCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Ask about designs...',
-                        border: InputBorder.none,
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.send,
-                        color: AppColors.accent),
-                    onPressed: _sendMessage,
+                color: AppColors.surface,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
                   ),
                 ],
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _msgCtrl,
+                        style: GoogleFonts.poppins(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Ask about designs...',
+                          hintStyle: GoogleFonts.poppins(
+                              color: AppColors.textHint, fontSize: 14),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                              vertical: 12),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [AppColors.accent, AppColors.accentLight],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.send,
+                            color: Colors.white, size: 20),
+                        onPressed: _sendMessage,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                ),
               ),
             ),
         ],
@@ -273,23 +389,52 @@ class _AiRecommendationScreenState
     return Align(
       alignment: isAI ? Alignment.centerLeft : Alignment.centerRight,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        margin: const EdgeInsets.symmetric(vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         constraints:
             BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         decoration: BoxDecoration(
-          color: isAI ? Colors.brown.shade50 : Colors.brown.shade100,
-          borderRadius: BorderRadius.circular(18),
+          gradient: isAI
+              ? LinearGradient(
+                  colors: [
+                    AppColors.accent.withValues(alpha: 0.08),
+                    AppColors.accentLight.withValues(alpha: 0.04),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isAI ? null : AppColors.accent,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isAI ? 4 : 18),
+            bottomRight: Radius.circular(isAI ? 18 : 4),
+          ),
         ),
         child: isLoading
-            ? const SizedBox(
-                height: 18,
-                width: 30,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            ? SizedBox(
+                height: 20,
+                width: 40,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: List.generate(3, (i) {
+                    return Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                ),
               )
             : Text(msg.text,
                 style: GoogleFonts.poppins(
-                    fontSize: 14, color: Colors.brown.shade900)),
+                    fontSize: 14,
+                    color: isAI ? AppColors.textPrimary : Colors.white,
+                    height: 1.4)),
       ),
     );
   }

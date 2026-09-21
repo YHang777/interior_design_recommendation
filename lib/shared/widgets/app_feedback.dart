@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
 /// Uniform floating-snackbar helpers used across the marketplace screens.
@@ -50,13 +51,37 @@ void showAppSnackbarOn(
 }) {
   final effectiveColor = isError ? AppColors.error : color;
   final text = detail == null ? message : '$message ($detail)';
+
+  // Pick icon prefix based on type
+  final iconData = isError ? Icons.error : Icons.check_circle;
+  final iconColor = isError ? AppColors.errorLight : AppColors.successLight;
+
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(
     SnackBar(
-      content: Text(text),
-      backgroundColor: effectiveColor,
       behavior: SnackBarBehavior.floating,
       duration: duration,
+      backgroundColor: effectiveColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      content: Row(
+        children: [
+          Icon(iconData, color: Colors.white, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
       action: actionLabel == null || onAction == null
           ? null
           : SnackBarAction(

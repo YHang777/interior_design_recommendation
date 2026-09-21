@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
@@ -154,7 +155,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         },
                       ),
                     ),
-                    // Animated dot indicator
+                    // Animated dot indicator — pill-shaped active dot
                     if (images.length > 1)
                       Positioned(
                         bottom: 14,
@@ -163,26 +164,33 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         child: Center(
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.3),
+                              color: Colors.black.withValues(alpha: 0.4),
                               borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 for (var i = 0; i < images.length; i++)
                                   AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    curve: Curves.easeOut,
-                                    width: i == _page ? 20 : 7,
-                                    height: 7,
+                                    duration: const Duration(milliseconds: 250),
+                                    curve: Curves.easeInOut,
+                                    width: i == _page ? 24 : 8,
+                                    height: 8,
                                     margin:
                                         const EdgeInsets.symmetric(horizontal: 2),
                                     decoration: BoxDecoration(
                                       color: i == _page
                                           ? Colors.white
-                                          : Colors.white54,
+                                          : Colors.white.withValues(alpha: 0.5),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                   ),
@@ -371,6 +379,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         decoration: const BoxDecoration(
           color: AppColors.surface,
           border: Border(top: BorderSide(color: AppColors.border)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 12,
+              offset: Offset(0, -4),
+            ),
+          ],
         ),
         child: SafeArea(
           child: Padding(
@@ -388,23 +403,39 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: ElevatedButton.icon(
-                    // Buy Now is a SINGLE-ITEM checkout: the cart is not
-                    // touched — checkout receives the product + quantity as
-                    // the route extra instead.
-                    onPressed: buyable
-                        ? () => context.pushNamed(
-                              RouteNames.homeownerCheckout,
-                              extra: BuyNowRequest(
-                                product: product,
-                                quantity: _clampedQty(product),
-                              ),
+                  child: Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: buyable
+                          ? const LinearGradient(
+                              colors: [AppColors.accent, AppColors.gradientGreen],
                             )
-                        : null,
-                    icon: const Icon(Icons.bolt, size: 20),
-                    label: Text(product.isOutOfStock
-                        ? 'Out of Stock'
-                        : 'Buy Now'),
+                          : null,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: ElevatedButton.icon(
+                      onPressed: buyable
+                          ? () => context.pushNamed(
+                                RouteNames.homeownerCheckout,
+                                extra: BuyNowRequest(
+                                  product: product,
+                                  quantity: _clampedQty(product),
+                                ),
+                              )
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      icon: const Icon(Icons.bolt, size: 20),
+                      label: Text(product.isOutOfStock
+                          ? 'Out of Stock'
+                          : 'Buy Now'),
+                    ),
                   ),
                 ),
               ],
@@ -420,7 +451,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   Widget _buildBadgeRow(Product product) {
     return Wrap(
       spacing: 8,
-      runSpacing: 4,
+      runSpacing: 6,
       children: [
         if (product.isEcoFriendly)
           _ChipBadge(
@@ -465,9 +496,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(Formatters.myr(product.price),
-            style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
+            style: GoogleFonts.poppins(
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
                 color: AppColors.accent)),
         if (product.originalPrice != null) ...[
           const SizedBox(width: 8),
@@ -552,8 +583,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -735,20 +773,20 @@ class _FloatButton extends StatelessWidget {
         child: Tooltip(
           message: tooltip,
           child: Container(
-            width: 42,
-            height: 42,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: background,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
-            child: Icon(icon, size: 21, color: iconColor),
+            child: Icon(icon, size: 22, color: iconColor),
           ),
         ),
       ),
@@ -772,10 +810,17 @@ class _ChipBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -948,11 +993,18 @@ class _ReviewTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -960,11 +1012,11 @@ class _ReviewTile extends StatelessWidget {
           Row(
             children: [
               CircleAvatar(
-                radius: 16,
+                radius: 18,
                 backgroundColor: AppColors.accent.withValues(alpha: 0.12),
                 child: Text(_initial,
                     style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: AppColors.accent)),
               ),
@@ -977,7 +1029,7 @@ class _ReviewTile extends StatelessWidget {
                       review.userName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: GoogleFonts.poppins(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary),
@@ -988,10 +1040,10 @@ class _ReviewTile extends StatelessWidget {
                   ],
                 ),
               ),
-              RatingStars(rating: review.rating.toDouble(), size: 13),
+              RatingStars(rating: review.rating.toDouble(), size: 14),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           if (review.comment.trim().isNotEmpty)
             _ExpandableComment(text: review.comment),
         ],

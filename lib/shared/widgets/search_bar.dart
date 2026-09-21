@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
 /// Debounced search bar with prefix icon and clear button.
@@ -39,7 +40,8 @@ class _SearchBarState extends State<SearchBar> {
   TextEditingController get _controller =>
       widget.controller ?? (_ownedController ??= TextEditingController());
 
-  FocusNode get _focusNode => widget.focusNode ?? (_ownedFocusNode ??= FocusNode());
+  FocusNode get _focusNode =>
+      widget.focusNode ?? (_ownedFocusNode ??= FocusNode());
 
   @override
   void initState() {
@@ -82,8 +84,8 @@ class _SearchBarState extends State<SearchBar> {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
       child: TextField(
@@ -92,17 +94,22 @@ class _SearchBarState extends State<SearchBar> {
         onChanged: _onChanged,
         onSubmitted: (value) => widget.onSubmitted?.call(value),
         textInputAction: TextInputAction.search,
-        style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+        style: GoogleFonts.poppins(
+          fontSize: 14,
+          color: AppColors.textPrimary,
+        ),
         decoration: InputDecoration(
           hintText: widget.hintText,
-          hintStyle:
-              const TextStyle(fontSize: 14, color: AppColors.textHint),
-          prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary,
-              size: 20),
+          hintStyle: GoogleFonts.poppins(
+            fontSize: 14,
+            color: AppColors.textHint,
+          ),
+          prefixIcon: const Icon(Icons.search,
+              color: AppColors.textSecondary, size: 20),
           suffixIcon: _controller.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.close, size: 18,
-                      color: AppColors.textSecondary),
+                  icon: const Icon(Icons.close,
+                      size: 18, color: AppColors.textSecondary),
                   onPressed: _clear,
                 )
               : null,

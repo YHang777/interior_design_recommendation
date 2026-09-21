@@ -49,12 +49,34 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       address: _isSupplier ? _addressCtrl.text.trim() : null,
     );
     if (created == null || !mounted) return;
-    // The user is signed out pending email verification; the Verify screen
-    // receives the email + uid so its Resend can re-request the link.
     context.push(Uri(
       path: '/verify-email',
       queryParameters: {'email': created.email, 'uid': created.uid},
     ).toString());
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 24, bottom: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 18,
+            decoration: BoxDecoration(
+              color: AppColors.accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(text,
+              style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -74,10 +96,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
 
     return Scaffold(
-      backgroundColor: AppColors.surface,
-      appBar: AppBar(title: const Text('Create Account')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text('Create Account',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+      ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Form(
           key: _formKey,
           child: Column(
@@ -85,15 +112,16 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             children: [
               Text('Get started',
                   style: GoogleFonts.poppins(
-                      fontSize: 22, fontWeight: FontWeight.bold,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
                       color: AppColors.textPrimary)),
               const SizedBox(height: 4),
               Text('Fill in your details below',
                   style: GoogleFonts.poppins(
-                      color: AppColors.textSecondary)),
+                      fontSize: 14, color: AppColors.textSecondary)),
               const SizedBox(height: 20),
 
-              // ── Role selector ──
+              // -- Role selector --
               SegmentedButton<UserRole>(
                 segments: const [
                   ButtonSegment(
@@ -115,15 +143,27 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   selectedBackgroundColor: AppColors.accent,
                   selectedForegroundColor: Colors.white,
                   side: const BorderSide(color: AppColors.border),
+                  textStyle: GoogleFonts.poppins(fontSize: 14),
                 ),
               ),
-              const SizedBox(height: 8),
-              if (_isSupplier)
-                Text('Supplier listings publish instantly once your email is verified.',
-                    style: GoogleFonts.poppins(
-                        fontSize: 12, color: AppColors.textSecondary)),
-              const SizedBox(height: 20),
+              if (_isSupplier) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                      'Supplier listings publish instantly once your email is verified.',
+                      style: GoogleFonts.poppins(
+                          fontSize: 12, color: AppColors.accent)),
+                ),
+              ],
 
+              // -- Account section --
+              _sectionLabel('Account Details'),
               TextFormField(
                 controller: _nameCtrl,
                 keyboardType: TextInputType.name,
@@ -137,7 +177,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               const SizedBox(height: 16),
 
-              // ── Supplier-only business contact fields ──
+              // -- Supplier-only business contact fields --
               if (_isSupplier) ...[
                 TextFormField(
                   controller: _phoneCtrl,
@@ -159,9 +199,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       labelText: 'Business Address',
                       prefixIcon: Icon(Icons.location_on_outlined)),
                 ),
-                const SizedBox(height: 16),
               ],
 
+              // -- Contact section --
+              _sectionLabel('Login Credentials'),
               TextFormField(
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
@@ -181,7 +222,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   labelText: 'Password',
                   prefixIcon: const Icon(Icons.lock_outlined),
                   suffixIcon: IconButton(
-                    icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    icon: Icon(_obscure
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined),
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
                 ),
@@ -197,18 +240,30 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     labelText: 'Confirm Password',
                     prefixIcon: Icon(Icons.lock_outlined)),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 32),
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
                   onPressed: loading ? null : _register,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 2,
+                    shadowColor: AppColors.accent.withValues(alpha: 0.4),
+                  ),
                   child: loading
-                      ? const SizedBox(width: 22, height: 22,
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: AppColors.textPrimary))
-                      : Text(_isSupplier
-                          ? 'Register as Supplier'
-                          : 'Create Account'),
+                              strokeWidth: 2.5, color: Colors.white))
+                      : Text(
+                          _isSupplier ? 'Register as Supplier' : 'Create Account',
+                          style: GoogleFonts.poppins(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(height: 20),
@@ -218,17 +273,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   Flexible(
                     child: Text('Already have an account?',
                         style: GoogleFonts.poppins(
-                            color: AppColors.textSecondary)),
+                            fontSize: 14, color: AppColors.textSecondary)),
                   ),
                   TextButton(
                     onPressed: () => context.pop(),
                     child: Text('Sign In',
                         style: GoogleFonts.poppins(
                             color: AppColors.accent,
-                            fontWeight: FontWeight.w700)),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14)),
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
             ],
           ),
         ),

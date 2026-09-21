@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
 /// Horizontal scrollable row of selectable filter chips.
@@ -27,7 +28,7 @@ class FilterChipBar<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 40,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -36,28 +37,41 @@ class FilterChipBar<T> extends StatelessWidget {
         itemBuilder: (context, index) {
           final option = options[index];
           final isSelected = option == selected;
-          return ChoiceChip(
-            label: Text(
-              _label(option),
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: isSelected ? Colors.white : AppColors.textSecondary,
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            child: ChoiceChip(
+              avatar: prefixIcon != null && isSelected
+                  ? prefixIcon
+                  : null,
+              label: Text(
+                _label(option),
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? Colors.white : AppColors.textSecondary,
+                ),
               ),
+              selected: isSelected,
+              onSelected: (_) => onSelected(option),
+              selectedColor: AppColors.accent,
+              backgroundColor: AppColors.surfaceElevated,
+              side: BorderSide(
+                color: isSelected
+                    ? AppColors.accent
+                    : AppColors.border,
+                width: isSelected ? 1.5 : 1,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              elevation: isSelected ? 1 : 0,
+              shadowColor: AppColors.accent.withValues(alpha: 0.2),
             ),
-            selected: isSelected,
-            onSelected: (_) => onSelected(option),
-            selectedColor: AppColors.accent,
-            backgroundColor: AppColors.surface,
-            side: BorderSide(
-              color: isSelected ? AppColors.accent : AppColors.border,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
           );
         },
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/constants/app_colors.dart';
 
 /// Circular gradient action button used in dashboard quick actions.
 /// Replaces _EnhancedShortcutButton and _QuickActionButton.
@@ -36,9 +37,9 @@ class QuickActionButton extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: gradient.first.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: gradient.first.withValues(alpha: 0.35),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
@@ -47,16 +48,17 @@ class QuickActionButton extends StatelessWidget {
               onPressed: onTap,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             label,
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.poppins(
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: FontWeight.w500,
-              color: Colors.brown.shade700,
+              color: AppColors.textPrimary,
+              height: 1.3,
             ),
           ),
         ],

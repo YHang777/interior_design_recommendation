@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/validators.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -54,7 +55,12 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Reset Password')),
+      appBar: AppBar(
+        title: Text('Reset Password',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -79,24 +85,47 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(
-            Icons.lock_reset,
-            size: 56,
-            color: AppColors.primary,
+          // Hero icon with gradient circle background
+          Center(
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.accent, AppColors.accentLight],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.accent.withValues(alpha: 0.3),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.lock_reset,
+                  size: 48, color: Colors.white),
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 28),
           Text(
             'Forgot Your Password?',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineMedium,
+            style: GoogleFonts.poppins(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             'Enter your email address and we will send you a reset link.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
+            style: GoogleFonts.poppins(
+                fontSize: 14, color: AppColors.textSecondary),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 36),
           AuthTextField(
             controller: _emailController,
             label: 'Email',
@@ -105,15 +134,22 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             textInputAction: TextInputAction.done,
             validator: Validators.email,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
           AuthButton(
             label: 'Send Reset Link',
             onPressed: _handleReset,
           ),
-          const SizedBox(height: 16),
-          TextButton(
+          const SizedBox(height: 20),
+          // Prominent back to login
+          TextButton.icon(
             onPressed: () => context.pop(),
-            child: const Text('Back to Login'),
+            icon: const Icon(Icons.arrow_back_ios,
+                size: 16, color: AppColors.accent),
+            label: Text('Back to Login',
+                style: GoogleFonts.poppins(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14)),
           ),
         ],
       ),
@@ -124,20 +160,67 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.check_circle_outline, size: 64, color: AppColors.success),
-        const SizedBox(height: 20),
+        // Animated success icon with gradient circle
+        Center(
+          child: Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.success, AppColors.gradientGreen],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.success.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.check_rounded,
+                size: 52, color: Colors.white),
+          ),
+        ),
+        const SizedBox(height: 28),
         Text(
           'Reset Link Sent!',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineMedium,
+          style: GoogleFonts.poppins(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
-          'Check your inbox at ${_emailController.text.trim()} for the password reset link.',
+          'Check your inbox for the password reset link.',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium,
+          style: GoogleFonts.poppins(
+              fontSize: 14, color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 12),
+        // Highlighted email display
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Text(
+            _emailController.text.trim(),
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.accent,
+            ),
+          ),
+        ),
+        const SizedBox(height: 36),
         AuthButton(
           label: 'Back to Login',
           onPressed: () => context.pop(),

@@ -145,6 +145,13 @@ class _SupplierDashboardScreenState
               colors: [AppColors.primary, AppColors.primaryLight],
             ),
             borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,6 +364,13 @@ class _SupplierDashboardScreenState
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -413,6 +427,13 @@ class _RecentOrderTile extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: InkWell(
         onTap: onTap,
@@ -479,6 +500,13 @@ class _LowStockTile extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: InkWell(
         onTap: onTap,

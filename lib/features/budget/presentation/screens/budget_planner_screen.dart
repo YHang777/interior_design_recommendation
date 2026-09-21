@@ -88,7 +88,7 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                     icon: Icons.account_balance_wallet,
                     label: 'Total Budget',
                     value: 'RM $_budget',
-                    gradient: const [Color(0xFF4CAF50), Color(0xFF66BB6A)],
+                    gradient: const [AppColors.accent, AppColors.gradientGreen],
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -97,7 +97,7 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                     icon: Icons.receipt,
                     label: 'Total Cost',
                     value: 'RM $_totalCost',
-                    gradient: const [Color(0xFF2196F3), Color(0xFF42A5F5)],
+                    gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -107,8 +107,8 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                     label: _remaining >= 0 ? 'Remaining' : 'Over Budget',
                     value: 'RM ${_remaining.abs()}',
                     gradient: _remaining >= 0
-                        ? const [Color(0xFFFF9800), Color(0xFFFFB74D)]
-                        : const [Color(0xFFFF5722), Color(0xFFFF7043)],
+                        ? const [AppColors.warning, AppColors.gradientOrange]
+                        : const [AppColors.error, AppColors.error],
                   ),
                 ),
               ],
@@ -161,19 +161,19 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                   child: Row(
                     children: [
                       Icon(categories[i].$2,
-                          size: 22, color: Colors.brown.shade400),
+                          size: 22, color: AppColors.textSecondary),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(categories[i].$1,
                             style: GoogleFonts.poppins(
                                 fontSize: 14,
-                                color: Colors.brown.shade700)),
+                                color: AppColors.textPrimary)),
                       ),
                       Text('RM ${costs[i]}',
                           style: GoogleFonts.poppins(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Colors.brown.shade900)),
+                              color: AppColors.textPrimary)),
                     ],
                   ),
                 ),
@@ -190,8 +190,8 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: _remaining < 0
-                              ? Colors.red
-                              : const Color(0xFF4CAF50))),
+                              ? AppColors.error
+                              : AppColors.accent)),
                 ],
               ),
               if (_remaining < 0) ...[
@@ -199,19 +199,19 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade50,
+                    color: AppColors.error.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200),
+                    border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.warning, color: Colors.red),
+                      const Icon(Icons.warning, color: AppColors.error),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           'Over budget by RM ${_remaining.abs()}!',
                           style: GoogleFonts.poppins(
-                              color: Colors.red, fontWeight: FontWeight.w600),
+                              color: AppColors.error, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
@@ -224,18 +224,32 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
             // ── Export ──
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Report exported (mocked)')),
-                  );
-                },
-                icon: const Icon(Icons.picture_as_pdf),
-                label: const Text('Export Report'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+              height: 52,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppColors.accent, AppColors.gradientGreen],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Report exported (mocked)')),
+                    );
+                  },
+                  icon: const Icon(Icons.picture_as_pdf),
+                  label: const Text('Export Report',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 14)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -257,13 +271,14 @@ class _SectionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -274,7 +289,7 @@ class _SectionCard extends StatelessWidget {
               style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: Colors.brown.shade900)),
+                  color: AppColors.textPrimary)),
           const SizedBox(height: 14),
           ...children,
         ],

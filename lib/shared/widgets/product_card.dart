@@ -35,260 +35,271 @@ class ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Image with overlays ──
-            Expanded(
-              flex: 3,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Hero(
-                    tag: 'product-${product.id}',
-                    child: ClipRRect(
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(16)),
-                      child: ProductImage(
-                        product: product,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorIconSize: 32,
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      elevation: 0,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: AppColors.accent.withValues(alpha: 0.06),
+        highlightColor: AppColors.accent.withValues(alpha: 0.03),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Image with overlays ──
+              Expanded(
+                flex: 3,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Hero(
+                      tag: 'product-${product.id}',
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(16)),
+                        child: ProductImage(
+                          product: product,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorIconSize: 32,
+                        ),
                       ),
                     ),
-                  ),
 
-                  // Top-left badges: discount first, eco underneath.
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (product.discountPercent != null)
-                          _Badge(
-                            text: '-${product.discountPercent}%',
-                            background: AppColors.error,
-                          ),
-                        if (product.discountPercent != null &&
-                            product.isEcoFriendly)
-                          const SizedBox(height: 4),
-                        if (product.isEcoFriendly)
-                          const _Badge(
-                            text: 'Eco',
-                            icon: Icons.eco,
-                            background: AppColors.success,
-                          ),
-                      ],
-                    ),
-                  ),
-
-                  // Wishlist heart (top-right)
-                  if (onToggleWishlist != null)
+                    // Top-left badges: discount first, eco underneath.
                     Positioned(
-                      top: 6,
-                      right: 6,
-                      child: Semantics(
-                        button: true,
-                        label: isWishlisted
-                            ? 'Remove from wishlist'
-                            : 'Add to wishlist',
-                        child: Tooltip(
-                          message: isWishlisted
+                      top: 8,
+                      left: 8,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (product.discountPercent != null)
+                            _Badge(
+                              text: '-${product.discountPercent}%',
+                              background: AppColors.error,
+                            ),
+                          if (product.discountPercent != null &&
+                              product.isEcoFriendly)
+                            const SizedBox(height: 4),
+                          if (product.isEcoFriendly)
+                            const _Badge(
+                              text: 'Eco',
+                              icon: Icons.eco,
+                              background: AppColors.success,
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    // Wishlist heart (top-right)
+                    if (onToggleWishlist != null)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Semantics(
+                          button: true,
+                          label: isWishlisted
                               ? 'Remove from wishlist'
                               : 'Add to wishlist',
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: onToggleWishlist,
-                              borderRadius: BorderRadius.circular(20),
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  isWishlisted
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  size: 18,
-                                  color: isWishlisted
-                                      ? AppColors.error
-                                      : AppColors.textSecondary,
+                          child: Tooltip(
+                            message: isWishlisted
+                                ? 'Remove from wishlist'
+                                : 'Add to wishlist',
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: onToggleWishlist,
+                                borderRadius: BorderRadius.circular(20),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Colors.white.withValues(alpha: 0.9),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    isWishlisted
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    size: 18,
+                                    color: isWishlisted
+                                        ? AppColors.error
+                                        : AppColors.textSecondary,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
 
-                  // Low stock chip (bottom-left)
-                  if (product.isLowStock)
-                    Positioned(
-                      left: 8,
-                      bottom: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text('Only ${product.stock} left',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-
-                  // Out of stock scrim + label
-                  if (product.isOutOfStock)
-                    Positioned.fill(
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        alignment: Alignment.center,
+                    // Low stock chip (bottom-left)
+                    if (product.isLowStock)
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
+                              horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.55),
-                            borderRadius: BorderRadius.circular(12),
+                            color: AppColors.warning.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(6),
                           ),
-                          child: const Text('Out of Stock',
-                              style: TextStyle(
+                          child: Text('Only ${product.stock} left',
+                              style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 12,
+                                  fontSize: 9,
                                   fontWeight: FontWeight.w600)),
                         ),
                       ),
-                    ),
 
-                  // Bottom-right quick actions: AR preview above add-to-cart.
-                  Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (onArPreview != null && !product.isOutOfStock) ...[
-                          _CircleAction(
-                            tooltip: 'View in AR',
-                            icon: Icons.view_in_ar,
-                            iconColor: AppColors.primary,
-                            onTap: onArPreview,
-                          ),
-                          const SizedBox(height: 6),
-                        ],
-                        if (onAddToCart != null && !product.isOutOfStock)
-                          _CircleAction(
-                            tooltip: 'Add to cart',
-                            icon: Icons.add_shopping_cart,
-                            iconColor: AppColors.accent,
-                            onTap: onAddToCart,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Info section ──
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: EdgeInsets.all(compact ? 8 : 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Name
-                    Text(
-                      product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: compact ? 11 : 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const Spacer(),
-
-                    // Rating (or "New" for unreviewed items)
-                    if (!compact) ...[
-                      const SizedBox(height: 3),
-                      if (product.ratingCount > 0)
-                        RatingStars(
-                          rating: product.rating,
-                          count: product.ratingCount,
-                          size: 11,
-                        )
-                      else
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text('New',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.accent)),
-                        ),
-                    ],
-
-                    // Price row
-                    Row(
-                      children: [
-                        Text(
-                          Formatters.myr(product.price),
-                          style: GoogleFonts.poppins(
-                            fontSize: compact ? 13 : 15,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.accent,
-                          ),
-                        ),
-                        if (product.originalPrice != null) ...[
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              Formatters.myr(product.originalPrice!),
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.poppins(
-                                fontSize: compact ? 10 : 11,
-                                decoration: TextDecoration.lineThrough,
-                                color: AppColors.textHint,
-                              ),
+                    // Out of stock scrim + label
+                    if (product.isOutOfStock)
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          alignment: Alignment.center,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(12),
                             ),
+                            child: const Text('Out of Stock',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600)),
                           ),
+                        ),
+                      ),
+
+                    // Bottom-right quick actions: AR preview above add-to-cart.
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (onArPreview != null &&
+                              !product.isOutOfStock) ...[
+                            _CircleAction(
+                              tooltip: 'View in AR',
+                              icon: Icons.view_in_ar,
+                              iconColor: AppColors.primary,
+                              onTap: onArPreview,
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          if (onAddToCart != null && !product.isOutOfStock)
+                            _CircleAction(
+                              tooltip: 'Add to cart',
+                              icon: Icons.add_shopping_cart,
+                              iconColor: AppColors.accent,
+                              onTap: onAddToCart,
+                            ),
                         ],
-                      ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
+
+              // ── Info section ──
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: EdgeInsets.all(compact ? 8 : 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Name
+                      Text(
+                        product.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: compact ? 11 : 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                          height: 1.3,
+                        ),
+                      ),
+                      const Spacer(),
+
+                      // Rating (or "New" for unreviewed items)
+                      if (!compact) ...[
+                        const SizedBox(height: 3),
+                        if (product.ratingCount > 0)
+                          RatingStars(
+                            rating: product.rating,
+                            count: product.ratingCount,
+                            size: 11,
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color:
+                                  AppColors.accent.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('New',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.accent)),
+                          ),
+                      ],
+
+                      // Price row
+                      Row(
+                        children: [
+                          Text(
+                            Formatters.myr(product.price),
+                            style: GoogleFonts.poppins(
+                              fontSize: compact ? 13 : 15,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.accent,
+                            ),
+                          ),
+                          if (product.originalPrice != null) ...[
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                Formatters.myr(product.originalPrice!),
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  fontSize: compact ? 10 : 11,
+                                  decoration: TextDecoration.lineThrough,
+                                  color: AppColors.textHint,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -360,20 +371,20 @@ class _CircleAction extends StatelessWidget {
         child: Tooltip(
           message: tooltip,
           child: Container(
-            width: 30,
-            height: 30,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.92),
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 4,
-                  offset: const Offset(0, 1),
+                  color: Colors.black.withValues(alpha: 0.15),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-            child: Icon(icon, size: 15, color: iconColor),
+            child: Icon(icon, size: 16, color: iconColor),
           ),
         ),
       ),

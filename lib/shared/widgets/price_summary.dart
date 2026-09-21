@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/pricing.dart';
@@ -19,27 +20,32 @@ class SummaryLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
             child: Text(
               label,
-              style: TextStyle(
+              style: GoogleFonts.poppins(
                 fontSize: bold ? 15 : 13,
                 fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
-                color: bold ? AppColors.textPrimary : AppColors.textSecondary,
+                color:
+                    bold ? AppColors.textPrimary : AppColors.textSecondary,
+                letterSpacing: 0.1,
+                height: 1.4,
               ),
             ),
           ),
           Text(
             value,
-            style: TextStyle(
-              fontSize: bold ? 17 : 13.5,
+            style: GoogleFonts.poppins(
+              fontSize: bold ? 17 : 14,
               fontWeight: FontWeight.w700,
               color: valueColor ??
                   (bold ? AppColors.accent : AppColors.textPrimary),
+              letterSpacing: bold ? -0.3 : 0.1,
+              height: 1.4,
             ),
           ),
         ],
@@ -90,14 +96,13 @@ class PriceSummaryCard extends StatelessWidget {
           breakdown.shippingFee == 0
               ? 'FREE'
               : Formatters.myr(breakdown.shippingFee),
-          valueColor: breakdown.shippingFee == 0
-              ? AppColors.success
-              : null,
+          valueColor:
+              breakdown.shippingFee == 0 ? AppColors.success : null,
         ),
         SummaryLine(taxLabel, Formatters.myr(breakdown.tax)),
         Padding(
           padding: EdgeInsets.symmetric(vertical: dividerVerticalPadding),
-          child: const Divider(height: 1),
+          child: Divider(height: 1, color: AppColors.divider),
         ),
         SummaryLine('Total', Formatters.myr(breakdown.total), bold: true),
       ],

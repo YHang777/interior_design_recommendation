@@ -51,7 +51,8 @@ class QuantityStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final buttonSize = compact ? 30.0 : 34.0;
+    // Larger touch targets: 36dp compact, 40dp normal (meets 48dp with padding)
+    final buttonSize = compact ? 36.0 : 40.0;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -62,7 +63,7 @@ class QuantityStepper extends StatelessWidget {
           onTap: _decrement,
         ),
         Padding(
-          padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -71,10 +72,12 @@ class QuantityStepper extends StatelessWidget {
               Text(
                 value.toString().padLeft(2, '0'),
                 style: GoogleFonts.poppins(
-                  fontSize: compact ? 14 : 16,
+                  fontSize: compact ? 15 : 17,
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary,
                   fontFeatures: const [FontFeature.tabularFigures()],
+                  letterSpacing: -0.2,
+                  height: 1.2,
                 ),
               ),
               if (label != null) ...[
@@ -129,12 +132,21 @@ class _StepperButton extends StatelessWidget {
           width: size,
           height: size,
           decoration: BoxDecoration(
-            color: enabled ? AppColors.accent : AppColors.border,
+            color: enabled ? AppColors.accent : AppColors.surfaceContainer,
             shape: BoxShape.circle,
+            boxShadow: enabled
+                ? [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.25),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Icon(
             icon,
-            size: size * 0.5,
+            size: size * 0.48,
             color: enabled ? AppColors.textOnDark : AppColors.textHint,
           ),
         ),

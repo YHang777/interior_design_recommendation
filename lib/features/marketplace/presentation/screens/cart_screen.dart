@@ -135,6 +135,7 @@ class CartScreen extends ConsumerWidget {
                               background: Container(
                                 alignment: Alignment.centerRight,
                                 padding: const EdgeInsets.only(right: 20),
+                                margin: const EdgeInsets.only(bottom: 10),
                                 decoration: BoxDecoration(
                                   color: AppColors.error,
                                   borderRadius: BorderRadius.circular(14),
@@ -235,10 +236,10 @@ class _FreeShippingCard extends StatelessWidget {
           if (!unlocked) ...[
             const SizedBox(height: 10),
             ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
                 value: (bd.chargeable / threshold).clamp(0.0, 1.0),
-                minHeight: 6,
+                minHeight: 8,
                 backgroundColor: AppColors.divider,
                 color: AppColors.accent,
               ),
@@ -340,6 +341,13 @@ class _CartItemCard extends ConsumerWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -582,13 +590,29 @@ class _CheckoutBar extends StatelessWidget {
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: canCheckout ? onCheckout : null,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 15),
+                height: 52,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: canCheckout
+                        ? const LinearGradient(
+                            colors: [AppColors.accent, AppColors.gradientGreen],
+                          )
+                        : null,
+                    borderRadius: BorderRadius.circular(26),
                   ),
-                  child: const Text('Checkout',
-                      style: TextStyle(fontSize: 15.5)),
+                  child: ElevatedButton(
+                    onPressed: canCheckout ? onCheckout : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(26),
+                      ),
+                    ),
+                    child: const Text('Checkout',
+                        style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+                  ),
                 ),
               ),
             ],

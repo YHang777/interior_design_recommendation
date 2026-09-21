@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
@@ -553,23 +554,39 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 // ── Place order ──
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: canPlace ? _placeOrder : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                  height: 52,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: canPlace
+                          ? const LinearGradient(
+                              colors: [AppColors.accent, AppColors.gradientGreen],
+                            )
+                          : null,
+                      borderRadius: BorderRadius.circular(26),
                     ),
-                    child: _submitting
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text(
-                            'Place order'
-                            '${breakdown == null ? '' : ' · ${Formatters.myr(breakdown.total)}'}',
-                            style: const TextStyle(fontSize: 16),
-                          ),
+                    child: ElevatedButton(
+                      onPressed: canPlace ? _placeOrder : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(26),
+                        ),
+                      ),
+                      child: _submitting
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : Text(
+                              'Place order'
+                              '${breakdown == null ? '' : ' · ${Formatters.myr(breakdown.total)}'}',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                            ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -671,14 +688,41 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 17,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textPrimary,
-      ),
+    return Row(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: AppColors.accent.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            '${_stepNumber(title)}',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.accent,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ],
     );
+  }
+
+  static int _stepNumber(String title) {
+    const steps = {'Delivery details': 1, 'Payment method': 2, 'Order summary': 3, 'Buy now': 3};
+    return steps[title] ?? 0;
   }
 }
 
@@ -771,12 +815,23 @@ class _PaymentOption extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: selected
+            ? AppColors.accent.withValues(alpha: 0.03)
+            : AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: selected ? AppColors.accent : AppColors.border,
           width: selected ? 2 : 1,
         ),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: AppColors.accent.withValues(alpha: 0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: RadioListTile<String>(
         value: value,

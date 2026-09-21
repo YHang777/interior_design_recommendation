@@ -1610,9 +1610,16 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                 ? 'Save changes'
                 : 'Publish product';
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -1621,25 +1628,48 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
           child: SizedBox(
             width: double.infinity,
             height: 52,
-            child: ElevatedButton(
-              onPressed: (busy || uploading) ? null : _submit,
-              child: busy
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: (busy || uploading)
+                    ? null
+                    : const LinearGradient(
+                        colors: [AppColors.accent, AppColors.gradientGreen],
+                      ),
+                borderRadius: BorderRadius.circular(14),
+                color: (busy || uploading) ? AppColors.border : null,
+              ),
+              child: ElevatedButton(
+                onPressed: (busy || uploading) ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.transparent,
+                  disabledForegroundColor: AppColors.textHint,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: busy
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(label),
-                      ],
-                    )
-                  : Text(label),
+                          const SizedBox(width: 10),
+                          Text(label),
+                        ],
+                      )
+                    : Text(label,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+              ),
             ),
           ),
         ),

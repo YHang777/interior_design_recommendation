@@ -79,11 +79,11 @@ class ProductImage extends StatelessWidget {
     return Container(
       width: width,
       height: height,
-      color: AppColors.divider,
+      color: AppColors.surfaceContainer,
       alignment: Alignment.center,
       child: const SizedBox(
-        width: 18,
-        height: 18,
+        width: 20,
+        height: 20,
         child: CircularProgressIndicator(
           strokeWidth: 2,
           color: AppColors.textHint,
@@ -96,7 +96,7 @@ class ProductImage extends StatelessWidget {
     return Container(
       width: width,
       height: height,
-      color: AppColors.divider,
+      color: AppColors.surfaceContainer,
       alignment: Alignment.center,
       child: Icon(Icons.image, size: errorIconSize, color: AppColors.textHint),
     );

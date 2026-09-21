@@ -383,6 +383,13 @@ class _SupplierOrderDetailScreenState
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,9 +438,16 @@ class _SupplierOrderDetailScreenState
     }
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -458,24 +472,50 @@ class _SupplierOrderDetailScreenState
     required VoidCallback? onTap,
   }) {
     return SizedBox(
-      height: 48,
+      height: 52,
       child: filled
-          ? ElevatedButton(
-              onPressed: onTap,
-              child: onTap == null
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Text(label),
+          ? Container(
+              decoration: BoxDecoration(
+                gradient: onTap != null
+                    ? const LinearGradient(
+                        colors: [AppColors.accent, AppColors.gradientGreen],
+                      )
+                    : null,
+                borderRadius: BorderRadius.circular(14),
+                color: onTap == null ? AppColors.border : null,
+              ),
+              child: ElevatedButton(
+                onPressed: onTap,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.transparent,
+                  disabledForegroundColor: AppColors.textHint,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: onTap == null
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(label,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+              ),
             )
           : OutlinedButton(
               onPressed: onTap,
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
                 side: BorderSide(color: AppColors.error.withValues(alpha: .5)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               child: onTap == null
                   ? const SizedBox(
@@ -484,7 +524,9 @@ class _SupplierOrderDetailScreenState
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: AppColors.error),
                     )
-                  : Text(label),
+                  : Text(label,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13)),
             ),
     );
   }
@@ -671,6 +713,15 @@ class _StatusTimeline extends StatelessWidget {
         color: bg,
         shape: BoxShape.circle,
         border: Border.all(color: borderColor, width: 2),
+        boxShadow: isCurrent
+            ? [
+                BoxShadow(
+                  color: AppColors.accent.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  spreadRadius: 2,
+                ),
+              ]
+            : null,
       ),
       child: Center(child: child),
     );
@@ -691,10 +742,10 @@ class _PillPending extends StatelessWidget {
       _ => '',
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: AppColors.accent.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         label,

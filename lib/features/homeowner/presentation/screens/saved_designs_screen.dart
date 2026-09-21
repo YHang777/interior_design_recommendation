@@ -5,7 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../models/room_design.dart';
 import '../../../ar/data/furniture_model_library.dart';
-import '../../../../shared/widgets/empty_state.dart';
+
 import '../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../shared/widgets/section_header.dart';
 import '../../presentation/providers/design_providers.dart';
@@ -36,15 +36,31 @@ class SavedDesignsScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cloud_off, size: 48, color: AppColors.textHint),
-              const SizedBox(height: 12),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.cloud_off,
+                    size: 32, color: AppColors.error),
+              ),
+              const SizedBox(height: 16),
               Text('Could not load designs',
                   style: GoogleFonts.poppins(
-                      color: AppColors.textSecondary)),
-              const SizedBox(height: 8),
-              TextButton(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              Text('Please check your connection',
+                  style: GoogleFonts.poppins(
+                      fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+              TextButton.icon(
                 onPressed: () => ref.invalidate(savedDesignsProvider),
-                child: const Text('Retry'),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
               ),
             ],
           ),
@@ -61,13 +77,53 @@ class SavedDesignsScreen extends ConsumerWidget {
       child: Column(
         children: [
           const SizedBox(height: 20),
-          EmptyState(
-            icon: Icons.bookmark_outline,
-            title: 'No saved designs yet',
-            subtitle:
+          // Enhanced empty state
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.accent.withValues(alpha: 0.1),
+                  AppColors.accentLight.withValues(alpha: 0.05),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.bookmark_outline,
+                size: 48, color: AppColors.accent),
+          ),
+          const SizedBox(height: 20),
+          Text('No saved designs yet',
+              style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
                 'Scan a room and save your design to see it here',
-            actionLabel: 'Start Scanning',
-            onAction: () => context.push('/design-editor'),
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                    fontSize: 14, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () => context.push('/design-editor'),
+            icon: const Icon(Icons.camera_alt, size: 18),
+            label: const Text('Start Scanning'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 24, vertical: 12),
+            ),
           ),
           const SizedBox(height: 32),
           _buildStyleLibrary(context),
@@ -79,7 +135,7 @@ class SavedDesignsScreen extends ConsumerWidget {
   Widget _buildContent(
       BuildContext context, WidgetRef ref, List<RoomDesign> designs) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -114,22 +170,14 @@ class SavedDesignsScreen extends ConsumerWidget {
 
   Widget _buildDesignCard(
       BuildContext context, WidgetRef ref, RoomDesign design) {
-    return GestureDetector(
-      onTap: () =>
-          context.push('/design-editor', extra: design),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => context.push('/design-editor', extra: design),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -142,15 +190,32 @@ class SavedDesignsScreen extends ConsumerWidget {
                     borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(14)),
                     child: Container(
-                      color: AppColors.primary
-                          .withValues(alpha: 0.06),
+                      color: AppColors.primary.withValues(alpha: 0.06),
                       width: double.infinity,
                       child: Center(
                         child: Icon(
                           _roomIcon(design.roomType),
                           size: 48,
-                          color: AppColors.accent
-                              .withValues(alpha: 0.5),
+                          color: AppColors.accent.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Gradient overlay at bottom
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 32,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.15),
+                          ],
                         ),
                       ),
                     ),
@@ -158,15 +223,22 @@ class SavedDesignsScreen extends ConsumerWidget {
                   // Furniture count badge
                   if (design.furniture.isNotEmpty)
                     Positioned(
-                      right: 6,
-                      top: 6,
+                      right: 8,
+                      top: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.accent,
-                          borderRadius:
-                              BorderRadius.circular(12),
+                          gradient: const LinearGradient(
+                            colors: [AppColors.accent, AppColors.accentLight],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.accent.withValues(alpha: 0.3),
+                              blurRadius: 6,
+                            ),
+                          ],
                         ),
                         child: Text(
                           '${design.furniture.length}',
@@ -179,8 +251,8 @@ class SavedDesignsScreen extends ConsumerWidget {
                     ),
                   // Action buttons
                   Positioned(
-                    right: 4,
-                    top: 4,
+                    left: 6,
+                    top: 6,
                     child: Row(
                       children: [
                         _actionBtn(Icons.view_in_ar_outlined,
@@ -193,42 +265,39 @@ class SavedDesignsScreen extends ConsumerWidget {
                                     .toList()),
                           );
                         }),
+                        const SizedBox(width: 4),
                         _actionBtn(Icons.edit_outlined,
                             AppColors.secondaryAccent, () {
-                          context.push('/design-editor',
-                              extra: design);
+                          context.push('/design-editor', extra: design);
                         }),
-                        _actionBtn(
-                            Icons.delete_outline, AppColors.error,
+                        const SizedBox(width: 4),
+                        _actionBtn(Icons.delete_outline, AppColors.error,
                             () async {
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (ctx) => AlertDialog(
-                              title:
-                                  const Text('Delete Design'),
-                              content: Text(
-                                  'Delete "${design.name}"?'),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16)),
+                              title: const Text('Delete Design'),
+                              content: Text('Delete "${design.name}"?'),
                               actions: [
                                 TextButton(
                                   onPressed: () =>
-                                      Navigator.pop(ctx,
-                                          false),
-                                  child:
-                                      const Text('Cancel'),
+                                      Navigator.pop(ctx, false),
+                                  child: const Text('Cancel'),
                                 ),
                                 ElevatedButton(
                                   onPressed: () =>
-                                      Navigator.pop(
-                                          ctx, true),
-                                  style: ElevatedButton
-                                      .styleFrom(
-                                    backgroundColor:
-                                        AppColors.error,
-                                    foregroundColor:
-                                        Colors.white,
+                                      Navigator.pop(ctx, true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.error,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
                                   ),
-                                  child:
-                                      const Text('Delete'),
+                                  child: const Text('Delete'),
                                 ),
                               ],
                             ),
@@ -237,8 +306,7 @@ class SavedDesignsScreen extends ConsumerWidget {
                             final ds = ref.read(
                                 roomDesignDatasourceProvider);
                             await ds.deleteDesign(design.id);
-                            ref.invalidate(
-                                savedDesignsProvider);
+                            ref.invalidate(savedDesignsProvider);
                           }
                         }),
                       ],
@@ -265,14 +333,12 @@ class SavedDesignsScreen extends ConsumerWidget {
                     const SizedBox(height: 2),
                     Text(design.roomTypeLabel,
                         style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            color: AppColors.textHint)),
+                            fontSize: 11, color: AppColors.textHint)),
                     const Spacer(),
                     Text(
                       _formatDate(design.updatedAt),
                       style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          color: AppColors.textHint),
+                          fontSize: 10, color: AppColors.textHint),
                     ),
                   ],
                 ),
@@ -293,8 +359,7 @@ class SavedDesignsScreen extends ConsumerWidget {
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate:
-              const SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             childAspectRatio: 1.0,
             crossAxisSpacing: 12,
@@ -310,46 +375,62 @@ class SavedDesignsScreen extends ConsumerWidget {
 
   Widget _buildStyleCard(
       BuildContext context, String name, String image) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Expanded(
-            flex: 3,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(14)),
-              child: Image.asset(image,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                      color: AppColors.divider,
-                      child: const Icon(Icons.image,
-                          color: AppColors.textHint))),
+        onTap: () {},
+        child: Column(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(14)),
+                    child: Image.asset(image,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                            color: AppColors.divider,
+                            child: const Icon(Icons.image,
+                                color: AppColors.textHint))),
+                  ),
+                  // Gradient overlay at bottom for text readability
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.5),
+                          ],
+                        ),
+                      ),
+                      child: Text(name,
+                          style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white)),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(name,
-                  style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -358,19 +439,19 @@ class SavedDesignsScreen extends ConsumerWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.all(2),
-        padding: const EdgeInsets.all(5),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          color: AppColors.surface.withValues(alpha: 0.9),
+          color: AppColors.surface.withValues(alpha: 0.92),
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 3,
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
             ),
           ],
         ),
-        child: Icon(icon, size: 15, color: color),
+        child: Icon(icon, size: 14, color: color),
       ),
     );
   }

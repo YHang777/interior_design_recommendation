@@ -14,29 +14,55 @@ class ProfileScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: Text('Profile',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // Avatar + name
+          // Avatar with gradient ring
           Center(
             child: Column(
               children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: AppColors.primary,
-                  child: Text(
-                    (user?.name ?? 'U')[0].toUpperCase(),
-                    style: GoogleFonts.poppins(
-                        fontSize: 28, fontWeight: FontWeight.bold,
-                        color: AppColors.textOnDark),
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [AppColors.accent, AppColors.accentLight],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.accent.withValues(alpha: 0.25),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: CircleAvatar(
+                    radius: 38,
+                    backgroundColor: AppColors.primary,
+                    child: Text(
+                      (user?.name ?? 'U')[0].toUpperCase(),
+                      style: GoogleFonts.poppins(
+                          fontSize: 30,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textOnDark),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Text(user?.name ?? 'User',
                     style: GoogleFonts.poppins(
-                        fontSize: 20, fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
                         color: AppColors.textPrimary)),
+                const SizedBox(height: 4),
                 Text(user?.email ?? '',
                     style: GoogleFonts.poppins(
                         fontSize: 14, color: AppColors.textSecondary)),
@@ -46,46 +72,96 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: 28),
 
           // Personal Info Card
-          _SectionCard(title: 'Personal Information', children: [
-            _Field('Full Name', user?.name ?? 'User'),
-            _Field('Email', user?.email ?? ''),
-            _Field('Phone', user?.phone ?? 'Not set'),
-            _Field('Address', user?.address ?? 'Not set'),
-          ]),
+          _SectionCard(
+            title: 'Personal Information',
+            accentColor: AppColors.accent,
+            children: [
+              _Field(Icons.person_outline, 'Full Name', user?.name ?? 'User'),
+              _Field(Icons.email_outlined, 'Email', user?.email ?? ''),
+              _Field(Icons.phone_outlined, 'Phone', user?.phone ?? 'Not set'),
+              _Field(Icons.location_on_outlined, 'Address',
+                  user?.address ?? 'Not set'),
+            ],
+          ),
           const SizedBox(height: 16),
 
           // Quick Links
-          _SectionCard(title: 'Tools', children: [
-            _LinkRow(Icons.account_balance_wallet, 'Budget Planner',
-                () => context.push('/budget')),
-            _LinkRow(Icons.assessment, 'Reports', () {}),
-          ]),
+          _SectionCard(
+            title: 'Tools',
+            accentColor: AppColors.secondaryAccent,
+            children: [
+              _LinkRow(Icons.account_balance_wallet, 'Budget Planner',
+                  () => context.push('/budget')),
+              _LinkRow(Icons.assessment, 'Reports', () {}),
+            ],
+          ),
           const SizedBox(height: 16),
 
           // Settings
-          _SectionCard(title: 'Settings', children: [
-            _LinkRow(Icons.lock_outline, 'Change Password', () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Password change emailed (mocked)')),
-              );
-            }),
-          ]),
-          const SizedBox(height: 16),
+          _SectionCard(
+            title: 'Settings',
+            accentColor: AppColors.textHint,
+            children: [
+              _LinkRow(Icons.lock_outline, 'Change Password', () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Password change emailed (mocked)')),
+                );
+              }),
+            ],
+          ),
+          const SizedBox(height: 20),
 
-          // Logout
+          // Logout with confirmation
           SizedBox(
             height: 52,
             child: OutlinedButton.icon(
-              onPressed: () => ref.read(authStateProvider.notifier).logout(),
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    title: const Text('Logout?'),
+                    content:
+                        const Text('Are you sure you want to log out?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          ref
+                              .read(authStateProvider.notifier)
+                              .logout();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.accent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text('Logout'),
+                      ),
+                    ],
+                  ),
+                );
+              },
               icon: const Icon(Icons.logout, color: AppColors.error),
               label: const Text('Logout',
                   style: TextStyle(color: AppColors.error)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.error),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
 
           // Delete
           TextButton(
@@ -93,10 +169,14 @@ class ProfileScreen extends ConsumerWidget {
               showDialog(
                 context: context,
                 builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
                   title: const Text('Delete Account?'),
-                  content: const Text('This cannot be undone.'),
+                  content: const Text(
+                      'This action cannot be undone. All your data will be permanently removed.'),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx),
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx),
                         child: const Text('Cancel')),
                     ElevatedButton(
                       onPressed: () {
@@ -104,9 +184,12 @@ class ProfileScreen extends ConsumerWidget {
                         ref.read(authStateProvider.notifier).logout();
                       },
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.error),
-                      child: const Text('Delete',
-                          style: TextStyle(color: Colors.white)),
+                          backgroundColor: AppColors.error,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          )),
+                      child: const Text('Delete'),
                     ),
                   ],
                 ),
@@ -124,9 +207,14 @@ class ProfileScreen extends ConsumerWidget {
 }
 
 class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.children});
+  const _SectionCard({
+    required this.title,
+    required this.children,
+    this.accentColor = AppColors.accent,
+  });
   final String title;
   final List<Widget> children;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -134,16 +222,25 @@ class _SectionCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03), blurRadius: 6)],
+        borderRadius: BorderRadius.circular(14),
+        border: Border(
+          left: BorderSide(color: accentColor, width: 3),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
               style: GoogleFonts.poppins(
-                  fontSize: 16, fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 12),
           ...children,
@@ -154,25 +251,30 @@ class _SectionCard extends StatelessWidget {
 }
 
 class _Field extends StatelessWidget {
-  const _Field(this.label, this.value);
+  const _Field(this.icon, this.label, this.value);
+  final IconData icon;
   final String label, value;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
+          Icon(icon, size: 18, color: AppColors.textHint),
+          const SizedBox(width: 10),
           SizedBox(
-            width: 80,
+            width: 72,
             child: Text(label,
                 style: GoogleFonts.poppins(
-                    fontSize: 13, color: AppColors.textSecondary)),
+                    fontSize: 12, color: AppColors.textSecondary)),
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(value,
                 style: GoogleFonts.poppins(
-                    fontSize: 13, fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary)),
           ),
         ],
@@ -189,16 +291,24 @@ class _LinkRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: AppColors.accent, size: 22),
-        title: Text(label,
-            style: GoogleFonts.poppins(
-                fontSize: 14, color: AppColors.textPrimary)),
-        trailing: const Icon(Icons.chevron_right, color: AppColors.textHint),
-        onTap: onTap,
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.accent, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label,
+                  style: GoogleFonts.poppins(
+                      fontSize: 14, color: AppColors.textPrimary)),
+            ),
+            const Icon(Icons.chevron_right,
+                color: AppColors.textHint, size: 20),
+          ],
+        ),
       ),
     );
   }

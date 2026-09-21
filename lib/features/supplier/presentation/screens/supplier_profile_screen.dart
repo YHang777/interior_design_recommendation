@@ -188,6 +188,13 @@ class _SupplierProfileScreenState
                         colors: [AppColors.primary, AppColors.primaryLight],
                       ),
                       borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.25),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
                     ),
                     child: Row(
                       children: [
@@ -309,20 +316,43 @@ class _SupplierProfileScreenState
                           const SizedBox(height: 14),
                           SizedBox(
                             width: double.infinity,
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: _saving
-                                  ? null
-                                  : () => _save(user),
-                              child: _saving
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white),
-                                    )
-                                  : const Text('Save changes'),
+                            height: 52,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: _saving
+                                    ? null
+                                    : const LinearGradient(
+                                        colors: [AppColors.accent, AppColors.gradientGreen],
+                                      ),
+                                borderRadius: BorderRadius.circular(14),
+                                color: _saving ? AppColors.border : null,
+                              ),
+                              child: ElevatedButton(
+                                onPressed: _saving
+                                    ? null
+                                    : () => _save(user),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  shadowColor: Colors.transparent,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: Colors.transparent,
+                                  disabledForegroundColor: AppColors.textHint,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                child: _saving
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white),
+                                      )
+                                    : const Text('Save changes',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600, fontSize: 14)),
+                              ),
                             ),
                           ),
                         ],
@@ -399,6 +429,13 @@ class _SupplierProfileScreenState
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

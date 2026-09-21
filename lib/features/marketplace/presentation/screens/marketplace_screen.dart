@@ -308,17 +308,30 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        sw.SearchBar(
-          hintText: 'Search sofas, lamps, paint…',
-          debounceMs: 300,
-          controller: _searchCtrl,
-          focusNode: _searchFocus,
-          onChanged: _applySearch,
-          onSubmitted: (q) {
-            _applySearch(q);
-            _recordSearch(q);
-          },
-          onFocusChanged: (_) => setState(() {}),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.textPrimary.withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: sw.SearchBar(
+            hintText: 'Search sofas, lamps, paint…',
+            debounceMs: 300,
+            controller: _searchCtrl,
+            focusNode: _searchFocus,
+            onChanged: _applySearch,
+            onSubmitted: (q) {
+              _applySearch(q);
+              _recordSearch(q);
+            },
+            onFocusChanged: (_) => setState(() {}),
+          ),
         ),
         // Focus panels: recents when empty, live suggestions while typing.
         if (hasFocus && query.isEmpty)
@@ -537,15 +550,22 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
         GestureDetector(
           onTap: () => ref.read(ecoOnlyProvider.notifier).state = !ecoOnly,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               color: ecoOnly
                   ? AppColors.success.withValues(alpha: 0.12)
                   : AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
                 color: ecoOnly ? AppColors.success : AppColors.border,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.textPrimary.withValues(alpha: 0.05),
+                  blurRadius: 6,
+                  offset: const Offset(0, 1),
+                ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -571,11 +591,18 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
           child: GestureDetector(
             onTap: _showSortSheet,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: AppColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.textPrimary.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -604,17 +631,24 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
         GestureDetector(
           onTap: _showFiltersSheet,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               color: sheetFilterCount > 0
                   ? AppColors.accent.withValues(alpha: 0.1)
                   : AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
                 color: sheetFilterCount > 0
                     ? AppColors.accent
                     : AppColors.border,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.textPrimary.withValues(alpha: 0.05),
+                  blurRadius: 6,
+                  offset: const Offset(0, 1),
+                ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -807,13 +841,24 @@ class _SortSheet extends ConsumerWidget {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Text('Sort by',
                   style: TextStyle(
                       fontSize: 16,
@@ -876,7 +921,7 @@ class _FiltersSheet extends ConsumerWidget {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: ConstrainedBox(
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.85,
@@ -886,6 +931,17 @@ class _FiltersSheet extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
                 Row(
                   children: [
                     const Text('Filters',
@@ -1111,10 +1167,18 @@ class _FiltersSheet extends ConsumerWidget {
               ],
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeTrackColor: AppColors.accent,
+          Container(
+            decoration: BoxDecoration(
+              color: value
+                  ? AppColors.accent.withValues(alpha: 0.1)
+                  : AppColors.background,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Switch(
+              value: value,
+              onChanged: onChanged,
+              activeTrackColor: AppColors.accent,
+            ),
           ),
         ],
       ),
@@ -1130,7 +1194,7 @@ class _SheetLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 10, bottom: 8),
+      padding: const EdgeInsets.only(top: 14, bottom: 10),
       child: Text(label,
           style: const TextStyle(
               fontSize: 13,

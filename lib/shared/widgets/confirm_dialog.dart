@@ -19,8 +19,18 @@ Future<bool> showConfirmDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.surface,
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      icon: Icon(
+        destructive ? Icons.warning_rounded : Icons.help_outline_rounded,
+        size: 40,
+        color: destructive ? AppColors.error : AppColors.accent,
+      ),
       title: Text(
         title,
+        textAlign: TextAlign.center,
         style: GoogleFonts.poppins(
           fontSize: 17,
           fontWeight: FontWeight.w600,
@@ -29,31 +39,51 @@ Future<bool> showConfirmDialog(
       ),
       content: Text(
         message,
+        textAlign: TextAlign.center,
         style: GoogleFonts.poppins(
           fontSize: 13.5,
           color: AppColors.textSecondary,
           height: 1.4,
         ),
       ),
+      actionsAlignment: MainAxisAlignment.center,
+      actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: Text(
-            'Cancel',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
+        SizedBox(
+          width: 110,
+          height: 44,
+          child: OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: OutlinedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
             ),
           ),
         ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: destructive ? AppColors.error : AppColors.accent,
-            foregroundColor: AppColors.textOnDark,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 110,
+          height: 44,
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: destructive ? AppColors.error : AppColors.accent,
+              foregroundColor: AppColors.textOnDark,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(confirmLabel),
           ),
-          child: Text(confirmLabel),
         ),
       ],
     ),

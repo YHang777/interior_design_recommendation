@@ -196,6 +196,13 @@ class _OrderTile extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: InkWell(
         onTap: onTap,
@@ -308,6 +315,13 @@ class _OrdersSkeletonList extends StatelessWidget {
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         padding: const EdgeInsets.all(14),
         child: Column(

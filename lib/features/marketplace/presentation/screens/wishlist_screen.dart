@@ -143,9 +143,16 @@ class WishlistScreen extends ConsumerWidget {
               ),
               // Pinned "add all" bar
               Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppColors.surface,
-                  border: Border(top: BorderSide(color: AppColors.border)),
+                  border: const Border(top: BorderSide(color: AppColors.border)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
                 ),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                 child: SafeArea(
@@ -166,19 +173,42 @@ class WishlistScreen extends ConsumerWidget {
                         ),
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: addableCount == 0
-                              ? null
-                              : () =>
-                                  _addAllToCart(ref, context, items),
-                          icon: const Icon(Icons.shopping_cart_outlined,
-                              size: 20),
-                          label: Text(addableCount == 0
-                              ? 'Nothing in stock'
-                              : addableCount == items.length
-                                  ? 'Add all to cart ($addableCount)'
-                                  : 'Add in-stock to cart ($addableCount)'),
-                        ),
+                        height: 52,
+                        child: addableCount == 0
+                            ? ElevatedButton.icon(
+                                onPressed: null,
+                                icon: const Icon(Icons.shopping_cart_outlined,
+                                    size: 20),
+                                label: const Text('Nothing in stock'),
+                              )
+                            : Container(
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [AppColors.accent, AppColors.gradientGreen],
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _addAllToCart(ref, context, items),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    shadowColor: Colors.transparent,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.shopping_cart_outlined,
+                                      size: 20),
+                                  label: Text(
+                                    addableCount == items.length
+                                        ? 'Add all to cart ($addableCount)'
+                                        : 'Add in-stock to cart ($addableCount)',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600, fontSize: 14),
+                                  ),
+                                ),
+                              ),
                       ),
                     ],
                   ),
@@ -252,6 +282,13 @@ class _WishlistRow extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.divider),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -348,21 +385,42 @@ class _WishlistRow extends StatelessWidget {
                       ),
                     const SizedBox(height: 4),
                     SizedBox(
-                      height: 30,
-                      child: OutlinedButton.icon(
-                        onPressed: onMoveToCart,
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10),
-                          textStyle: const TextStyle(fontSize: 11.5),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        icon: const Icon(Icons.add_shopping_cart, size: 14),
-                        label: Text(product.isOutOfStock
-                            ? 'Out of stock'
-                            : 'Move to cart'),
-                      ),
+                      height: 32,
+                      child: product.isOutOfStock
+                          ? OutlinedButton.icon(
+                              onPressed: null,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10),
+                                textStyle: const TextStyle(fontSize: 11.5),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.add_shopping_cart, size: 14),
+                              label: const Text('Out of stock'),
+                            )
+                          : Container(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [AppColors.accent, AppColors.gradientGreen],
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: ElevatedButton.icon(
+                                onPressed: onMoveToCart,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.transparent,
+                                  shadowColor: Colors.transparent,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  textStyle: const TextStyle(fontSize: 11.5),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ),
+                                icon: const Icon(Icons.add_shopping_cart, size: 14),
+                                label: const Text('Move to cart'),
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -386,6 +444,13 @@ class _RowSkeleton extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.divider),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
