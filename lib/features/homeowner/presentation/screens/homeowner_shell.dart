@@ -1,36 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// Homeowner shell with 6-tab NavigationBar (Material 3).
 /// Uses GoRouter's StatefulNavigationShell for tab persistence.
-class HomeownerShell extends ConsumerWidget {
+class HomeownerShell extends StatelessWidget {
   const HomeownerShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(currentUserProvider);
-
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(user?.name ?? 'Dashboard',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              // TODO: notifications
-            },
-          ),
-        ],
-      ),
       body: navigationShell,
       bottomNavigationBar: Container(
         decoration: BoxDecoration(

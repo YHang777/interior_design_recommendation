@@ -1,15 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../models/room_design.dart';
-import '../../data/datasources/room_design_datasource.dart';
+import '../../data/datasources/supabase_room_design_datasource.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
 // ─── Datasource ────────────────────────────────────────────────────────────────
 
-final roomDesignDatasourceProvider = Provider<RoomDesignDatasource>((ref) {
-  return RoomDesignDatasource();
+final roomDesignDatasourceProvider =
+    Provider<SupabaseRoomDesignDatasource>((ref) {
+  return SupabaseRoomDesignDatasource();
 });
 
-// ─── Saved Designs (real-time from Firestore) ─────────────────────────────────
+// ─── Saved Designs (polling from Supabase) ────────────────────────────────────
 
 final savedDesignsProvider = StreamProvider<List<RoomDesign>>((ref) {
   final user = ref.watch(currentUserProvider);
@@ -17,16 +20,7 @@ final savedDesignsProvider = StreamProvider<List<RoomDesign>>((ref) {
   if (userId == null) return const Stream.empty();
 
   final ds = ref.watch(roomDesignDatasourceProvider);
-  return ds.watchDesigns(userId).map((snapshot) {
-    final designs = snapshot.docs.map((doc) {
-      final data = Map<String, dynamic>.from(doc.data() as Map);
-      data['id'] = doc.id;
-      return RoomDesign.fromJson(data);
-    }).toList();
-    // Sort client-side by updatedAt descending
-    designs.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return designs;
-  });
+  return ds.watchDesigns(userId);
 });
 
 // ─── Current design being edited ──────────────────────────────────────────────

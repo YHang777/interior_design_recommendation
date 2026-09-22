@@ -22,7 +22,6 @@ class _AiRecommendationScreenState
   String? _selectedStyle;
   String? _selectedRoom;
   late final GeminiChatService? _gemini;
-  bool _initialized = false;
 
   @override
   void initState() {
@@ -33,15 +32,6 @@ class _AiRecommendationScreenState
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_initialized) {
-      _initialized = true;
-      Future.microtask(() => _showStyleDialog());
-    }
-  }
-
-  @override
   void dispose() {
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
@@ -49,12 +39,12 @@ class _AiRecommendationScreenState
   }
 
   static const _styles = [
-    ('Modern', Icons.apartment, 'Clean lines, neutral colors, minimal'),
-    ('Classic', Icons.chair, 'Elegant, ornate details, timeless'),
-    ('Minimalist', Icons.crop_square, 'Simple, uncluttered, functional'),
-    ('Bohemian', Icons.palette, 'Colorful, eclectic, free-spirited'),
-    ('Scandinavian', Icons.ac_unit, 'Light, cozy, natural materials'),
-    ('Industrial', Icons.factory, 'Raw, exposed, urban aesthetic'),
+    ('Modern', Icons.apartment),
+    ('Classic', Icons.chair),
+    ('Minimalist', Icons.crop_square),
+    ('Bohemian', Icons.palette),
+    ('Scandinavian', Icons.ac_unit),
+    ('Industrial', Icons.factory),
   ];
 
   static const _rooms = [
@@ -66,120 +56,18 @@ class _AiRecommendationScreenState
     ('Home Office', Icons.computer),
   ];
 
-  void _showStyleDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Choose Your Style',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 1.4,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: _styles.length,
-            itemBuilder: (_, i) {
-              final s = _styles[i];
-              return InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () {
-                  setState(() => _selectedStyle = s.$1);
-                  Navigator.pop(ctx);
-                  _showRoomDialog();
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.background,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(s.$2, color: AppColors.accent, size: 28),
-                      const SizedBox(height: 6),
-                      Text(s.$1,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
+  bool get _readyToChat => _selectedStyle != null && _selectedRoom != null;
+
+  void _selectStyle(String style) {
+    setState(() => _selectedStyle = style);
+    // If room already selected, start the chat
+    if (_selectedRoom != null) _startChat();
   }
 
-  void _showRoomDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Which Room?',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 1.6,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: _rooms.length,
-            itemBuilder: (_, i) {
-              final r = _rooms[i];
-              return InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () {
-                  setState(() => _selectedRoom = r.$1);
-                  Navigator.pop(ctx);
-                  _startChat();
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.background,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(r.$2, color: AppColors.accent, size: 28),
-                      const SizedBox(height: 6),
-                      Text(r.$1,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
+  void _selectRoom(String room) {
+    setState(() => _selectedRoom = room);
+    // If style already selected, start the chat
+    if (_selectedStyle != null) _startChat();
   }
 
   void _startChat() {
@@ -244,11 +132,15 @@ class _AiRecommendationScreenState
                 : 'AI Recommendations',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         actions: [
-          if (_selectedStyle != null)
+          if (_selectedStyle != null && _selectedRoom != null)
             TextButton.icon(
-              onPressed: _showStyleDialog,
-              icon: const Icon(Icons.style, color: Colors.white, size: 18),
-              label: Text(_selectedStyle!,
+              onPressed: () => setState(() {
+                _selectedStyle = null;
+                _selectedRoom = null;
+                _msgs.clear();
+              }),
+              icon: const Icon(Icons.refresh, color: Colors.white, size: 18),
+              label: Text('Change',
                   style: GoogleFonts.poppins(
                       color: Colors.white, fontSize: 12)),
             ),
@@ -256,54 +148,178 @@ class _AiRecommendationScreenState
       ),
       child: Column(
         children: [
-          // Chat area
+          // Inline selection or chat
           Expanded(
             child: _msgs.isEmpty
-                ? Center(
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                AppColors.accent.withValues(alpha: 0.15),
-                                AppColors.accentLight.withValues(alpha: 0.08),
-                              ],
-                            ),
-                            shape: BoxShape.circle,
+                        // Header
+                        Center(
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      AppColors.accent.withValues(alpha: 0.15),
+                                      AppColors.accentLight.withValues(alpha: 0.08),
+                                    ],
+                                  ),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.psychology,
+                                    size: 36, color: AppColors.accent),
+                              ),
+                              const SizedBox(height: 14),
+                              Text('AI Design Assistant',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.textPrimary)),
+                              const SizedBox(height: 6),
+                              Text(
+                                  _selectedStyle == null
+                                      ? 'Choose your preferred style'
+                                      : 'Now pick a room',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      color: AppColors.textSecondary)),
+                            ],
                           ),
-                          child: const Icon(Icons.psychology,
-                              size: 40, color: AppColors.accent),
                         ),
-                        const SizedBox(height: 16),
-                        Text('AI Design Assistant',
+                        const SizedBox(height: 28),
+
+                        // Step 1: Style selection
+                        Text('Design Style',
                             style: GoogleFonts.poppins(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white)),
-                        const SizedBox(height: 8),
-                        Text('Select a style to get started',
-                            style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                color: Colors.white.withValues(alpha: 0.7))),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _showStyleDialog,
-                          icon: const Icon(Icons.style),
-                          label: const Text('Choose Style'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: AppColors.primary,
-                            shape: RoundedRectangleBorder(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 12),
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 1.5,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                          ),
+                          itemCount: _styles.length,
+                          itemBuilder: (_, i) {
+                            final s = _styles[i];
+                            final selected = _selectedStyle == s.$1;
+                            return InkWell(
                               borderRadius: BorderRadius.circular(12),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 24, vertical: 12),
-                          ),
+                              onTap: () => _selectStyle(s.$1),
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? AppColors.accent.withValues(alpha: 0.1)
+                                      : AppColors.surface,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: selected
+                                        ? AppColors.accent
+                                        : AppColors.border,
+                                    width: selected ? 2 : 1,
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(s.$2,
+                                        color: selected
+                                            ? AppColors.accent
+                                            : AppColors.textSecondary,
+                                        size: 26),
+                                    const SizedBox(height: 6),
+                                    Text(s.$1,
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: selected
+                                                ? AppColors.accent
+                                                : AppColors.textPrimary)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
+
+                        // Step 2: Room selection (visible after style chosen)
+                        if (_selectedStyle != null) ...[
+                          const SizedBox(height: 24),
+                          Text('Room Type',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                          const SizedBox(height: 12),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              childAspectRatio: 1.8,
+                              crossAxisSpacing: 10,
+                              mainAxisSpacing: 10,
+                            ),
+                            itemCount: _rooms.length,
+                            itemBuilder: (_, i) {
+                              final r = _rooms[i];
+                              final selected = _selectedRoom == r.$1;
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _selectRoom(r.$1),
+                                child: Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? AppColors.accent.withValues(alpha: 0.1)
+                                        : AppColors.surface,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: selected
+                                          ? AppColors.accent
+                                          : AppColors.border,
+                                      width: selected ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(r.$2,
+                                          color: selected
+                                              ? AppColors.accent
+                                              : AppColors.textSecondary,
+                                          size: 22),
+                                      const SizedBox(width: 8),
+                                      Text(r.$1,
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: selected
+                                                  ? AppColors.accent
+                                                  : AppColors.textPrimary)),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 20),
                       ],
                     ),
                   )
@@ -316,8 +332,8 @@ class _AiRecommendationScreenState
                   ),
           ),
 
-          // Input bar
-          if (_selectedStyle != null)
+          // Input bar (only when chat is active)
+          if (_readyToChat)
             Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               decoration: BoxDecoration(

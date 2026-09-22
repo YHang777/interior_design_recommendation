@@ -220,30 +220,36 @@ class ProductCard extends StatelessWidget {
               ),
 
               // ── Info section ──
-              Expanded(
+              Flexible(
                 flex: 2,
+                fit: FlexFit.loose,
                 child: Padding(
-                  padding: EdgeInsets.all(compact ? 8 : 10),
+                  padding: EdgeInsets.fromLTRB(
+                    compact ? 6 : 8,
+                    compact ? 5 : 6,
+                    compact ? 6 : 8,
+                    compact ? 5 : 6,
+                  ),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Name
                       Text(
                         product.name,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
                           fontSize: compact ? 11 : 12,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary,
-                          height: 1.3,
+                          height: 1.2,
                         ),
                       ),
-                      const Spacer(),
+                      const SizedBox(height: 2),
 
                       // Rating (or "New" for unreviewed items)
                       if (!compact) ...[
-                        const SizedBox(height: 3),
                         if (product.ratingCount > 0)
                           RatingStars(
                             rating: product.rating,
@@ -273,7 +279,7 @@ class ProductCard extends StatelessWidget {
                           Text(
                             Formatters.myr(product.price),
                             style: GoogleFonts.poppins(
-                              fontSize: compact ? 13 : 15,
+                              fontSize: compact ? 12 : 14,
                               fontWeight: FontWeight.bold,
                               color: AppColors.accent,
                             ),
