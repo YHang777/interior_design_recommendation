@@ -114,13 +114,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         size: 38, color: AppColors.textOnDark),
                   ),
                   const SizedBox(height: 24),
-                  Text('Interior Design',
+                  Text('Intellar',
                       style: GoogleFonts.poppins(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
                           color: AppColors.textPrimary)),
                   const SizedBox(height: 6),
-                  Text('AI-powered home design recommendations',
+                  Text('AI & AR Interior Design',
                       style: GoogleFonts.poppins(
                           fontSize: 14, color: AppColors.textSecondary)),
                   const SizedBox(height: 40),

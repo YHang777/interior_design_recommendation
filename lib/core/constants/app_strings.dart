@@ -4,9 +4,9 @@ class AppStrings {
   AppStrings._();
 
   // App
-  static const String appTitle = 'Interior Design';
+  static const String appTitle = 'Intellar';
   static const String appSubtitle =
-      'AI-powered home design recommendations';
+      'AI & AR Interior Design';
 
   // Auth
   static const String login = 'Login';

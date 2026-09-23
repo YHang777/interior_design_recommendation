@@ -138,7 +138,7 @@ Future<void> handleVerifyConfirm(
     success: true,
     title: 'Email Verified!',
     message: '${payload['email']} is now verified.',
-    note: 'Return to the Interior Design app, tap "I\'ve Verified", and '
+    note: 'Return to the Intellar app, tap "I\'ve Verified", and '
         'log in.',
   );
 }
@@ -163,7 +163,7 @@ Future<void> _renderPage(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>$title — Interior Design</title>
+<title>$title — Intellar</title>
 <style>
   body{font-family:Segoe UI,Roboto,sans-serif;background:#f7f5f2;display:flex;
     align-items:center;justify-content:center;min-height:100vh;margin:0}

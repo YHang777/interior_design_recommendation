@@ -22,7 +22,7 @@ class VerificationMailer {
   VerificationMailer({
     required String apiKey,
     required String senderEmail,
-    String senderName = 'Interior Design App',
+    String senderName = 'Intellar',
     required String publicBaseUrl,
     http.Client? client,
   })  : _apiKey = apiKey,
@@ -67,7 +67,7 @@ class VerificationMailer {
               'to': [
                 {'email': email}
               ],
-              'subject': 'Verify your email — Interior Design App',
+              'subject': 'Verify your email — Intellar',
               'htmlContent': _emailHtml(link),
             }),
           )
@@ -87,7 +87,7 @@ class VerificationMailer {
 
   String _emailHtml(String link) => '''
 <div style="font-family:Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
-  <h2 style="margin:0 0 12px">Welcome to the Interior Design App!</h2>
+  <h2 style="margin:0 0 12px">Welcome to Intellar!</h2>
   <p style="color:#444;line-height:1.6">Thanks for creating an account. Click the
     button below to verify your email address.</p>
   <p style="margin:28px 0">

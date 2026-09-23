@@ -10,7 +10,7 @@ import 'package:interior_design_recommendation/features/auth/domain/repositories
 import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
 
 void main() {
-  testWidgets('Interior Design App smoke test', (WidgetTester tester) async {
+  testWidgets('Intellar App smoke test', (WidgetTester tester) async {
     // The app requires Firebase at boot. In unit tests we substitute the
     // auth repository so the router can render the (signed-out) login screen.
     final fakeAuth = _FakeAuthRepository();

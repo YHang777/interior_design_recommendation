@@ -56,7 +56,7 @@ Future<void> main(List<String> args) async {
     mailer: VerificationMailer(
       apiKey: env['BREVO_API_KEY'] ?? '',
       senderEmail: env['BREVO_SENDER_EMAIL'] ?? 'noreply@interior-design.app',
-      senderName: env['BREVO_SENDER_NAME'] ?? 'Interior Design App',
+      senderName: env['BREVO_SENDER_NAME'] ?? 'Intellar',
       publicBaseUrl: env['PUBLIC_BASE_URL'] ?? '',
     ),
     admin: FirebaseAdminClient(
@@ -162,7 +162,7 @@ Future<void> _route(
     // Health check — Render's health pings hit the root path.
     return await _jsonResponse(req.response, {
       'status': 'ok',
-      'service': 'interior-design-api',
+      'service': 'intellar-api',
       'endpoints': [
         '/products',
         '/orders',
