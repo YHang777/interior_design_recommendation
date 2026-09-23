@@ -110,11 +110,13 @@ class SavedDesignsScreen extends ConsumerWidget {
           // CTA
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 52,
             child: ElevatedButton.icon(
               onPressed: () => context.push('/design-editor'),
               icon: const Icon(Icons.camera_alt, size: 20),
-              label: const Text('Create Design'),
+              label: Text('Create Design',
+                  style: GoogleFonts.poppins(
+                      fontSize: 15, fontWeight: FontWeight.w600)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,

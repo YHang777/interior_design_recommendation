@@ -49,6 +49,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/login',
     redirect: (context, state) {
+      // While Firebase Auth is checking the session, don't redirect —
+      // this prevents the login page from flashing on app restart.
+      final isLoading = authState.isLoading;
+      if (isLoading) return null;
+
       final user = authState.whenOrNull(data: (u) => u);
       final isLoggedIn = user != null;
       final isOnAuthRoute = state.matchedLocation == '/login' ||

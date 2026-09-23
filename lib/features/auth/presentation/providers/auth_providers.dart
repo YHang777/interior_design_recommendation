@@ -31,7 +31,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
   final IAuthRepository _repository;
   StreamSubscription<AppUser?>? _authSub;
 
-  AuthStateNotifier(this._repository) : super(const AsyncValue.data(null)) {
+  AuthStateNotifier(this._repository) : super(const AsyncValue.loading()) {
     // Listen to auth state changes from the repository
     _authSub = _repository.authStateChanges().listen(
       (user) {

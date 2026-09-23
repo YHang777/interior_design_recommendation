@@ -97,16 +97,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       appBar: AppBar(
         title: Text('Profile',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.background,
         elevation: 0,
-        actions: [
-          if (!_editing)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit Profile',
-              onPressed: () => _startEditing(user),
-            ),
-        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -155,6 +147,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   Text(user?.email ?? '',
                       style: GoogleFonts.poppins(
                           fontSize: 14, color: AppColors.textSecondary)),
+                  const SizedBox(height: 14),
+                  // Edit profile button
+                  SizedBox(
+                    height: 38,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _startEditing(user),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: Text('Edit Profile',
+                          style: GoogleFonts.poppins(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -271,46 +281,64 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         'Check your inbox after a few minutes.',
                       ),
                       actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () async {
-                            Navigator.pop(ctx);
-                            try {
-                              await ref
-                                  .read(authStateProvider.notifier)
-                                  .sendPasswordResetEmail(email);
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Password reset email sent to $email'),
-                                    backgroundColor: AppColors.success,
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content:
-                                        Text('Could not send reset email: $e'),
-                                    backgroundColor: AppColors.error,
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.accent,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        SizedBox(
+                          width: 110,
+                          height: 44,
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
                             ),
+                            child: const Text('Cancel',
+                                style: TextStyle(fontSize: 13)),
                           ),
-                          child: const Text('Send Reset Link'),
+                        ),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 140,
+                          height: 44,
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              Navigator.pop(ctx);
+                              try {
+                                await ref
+                                    .read(authStateProvider.notifier)
+                                    .sendPasswordResetEmail(email);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Password reset email sent to $email'),
+                                      backgroundColor: AppColors.success,
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content:
+                                          Text('Could not send reset email: $e'),
+                                      backgroundColor: AppColors.error,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.accent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Send Reset Link',
+                                style: TextStyle(fontSize: 13)),
+                          ),
                         ),
                       ],
                     ),

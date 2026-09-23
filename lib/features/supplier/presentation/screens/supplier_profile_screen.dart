@@ -134,51 +134,69 @@ class _SupplierProfileScreenState
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+          SizedBox(
+            width: 110,
+            height: 44,
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                await ref
-                    .read(authStateProvider.notifier)
-                    .sendPasswordResetEmail(email);
-                if (mounted) {
-                  showAppSnackbar(
-                    context,
-                    'Password reset email sent to $email',
-                    color: AppColors.success,
-                    duration: const Duration(seconds: 3),
-                  );
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 140,
+            height: 44,
+            child: ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await ref
+                      .read(authStateProvider.notifier)
+                      .sendPasswordResetEmail(email);
+                  if (mounted) {
+                    showAppSnackbar(
+                      context,
+                      'Password reset email sent to $email',
+                      color: AppColors.success,
+                      duration: const Duration(seconds: 3),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    showAppSnackbar(
+                      context,
+                      'Could not send reset email',
+                      isError: true,
+                      detail: e.toString(),
+                      duration: const Duration(seconds: 3),
+                    );
+                  }
                 }
-              } catch (e) {
-                if (mounted) {
-                  showAppSnackbar(
-                    context,
-                    'Could not send reset email',
-                    isError: true,
-                    detail: e.toString(),
-                    duration: const Duration(seconds: 3),
-                  );
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
+              child: const Text('Send Reset Link',
+                  style: TextStyle(fontSize: 13)),
             ),
-            child: const Text('Send Reset Link'),
           ),
         ],
       ),
@@ -217,16 +235,8 @@ class _SupplierProfileScreenState
       appBar: AppBar(
         title: Text('Profile',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.background,
         elevation: 0,
-        actions: [
-          if (!_editing && user != null && supplier != null)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit Profile',
-              onPressed: () => _startEditing(user),
-            ),
-        ],
       ),
       body: user == null || supplier == null
           ? const EmptyState(
@@ -289,6 +299,24 @@ class _SupplierProfileScreenState
                                   color: AppColors.textSecondary)),
                           const SizedBox(height: 4),
                           StatusBadge.verification(user.verificationStatus),
+                          const SizedBox(height: 14),
+                          // Edit profile button
+                          SizedBox(
+                            height: 38,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _startEditing(user),
+                              icon: const Icon(Icons.edit_outlined, size: 16),
+                              label: Text('Edit Profile',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 13, fontWeight: FontWeight.w600)),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 20),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ],
                     ),

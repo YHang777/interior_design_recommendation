@@ -398,6 +398,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     });
   }
 
+  // ─── Room size presets ────────────────────────────────────────────────
+
+  static const _roomPresets = [
+    ('Small', 300, 300),
+    ('Medium', 400, 400),
+    ('Large', 500, 400),
+    ('Long', 600, 300),
+  ];
+
   void _addFromCatalog(_Cat cat) {
     final id =
         DateTime.now().microsecondsSinceEpoch.toString();
@@ -923,37 +932,115 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
+        // Room size selector — shown when the plan is empty
+        if (_furniture.isEmpty && widget.existingDesign == null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            color: AppColors.surface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.crop_square, size: 16, color: AppColors.accent),
+                    const SizedBox(width: 6),
+                    Text('Room Size',
+                        style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+                    const SizedBox(width: 6),
+                    Text('— then add furniture from the catalog below',
+                        style: GoogleFonts.poppins(
+                            fontSize: 11, color: AppColors.textHint)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 36,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _roomPresets.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) {
+                      final p = _roomPresets[i];
+                      final isSelected = _roomW == p.$2.toDouble() && _roomH == p.$3.toDouble();
+                      return GestureDetector(
+                        onTap: () => setState(() {
+                          _roomW = p.$2.toDouble();
+                          _roomH = p.$3.toDouble();
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isSelected ? AppColors.accent : AppColors.background,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected ? AppColors.accent : AppColors.border,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(p.$1,
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: isSelected ? Colors.white : AppColors.textPrimary)),
+                              const SizedBox(width: 6),
+                              Text('${p.$2}×${p.$3}cm',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 10,
+                                      color: isSelected ? Colors.white70 : AppColors.textHint)),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         // Room canvas — floor plan style
         Expanded(
-          child: Center(
-              child: AspectRatio(
-                aspectRatio: _roomW / _roomH,
-                child: Container(
-                  margin: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFFBF5), // warm paper
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                        color: AppColors.primary,
-                        width: 3), // thick wall border
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: LayoutBuilder(
+                builder: (ctx, constraints) {
+                  final maxW = constraints.maxWidth;
+                  final maxH = constraints.maxHeight;
+                  final roomAspect = _roomW / _roomH;
+                  double canvasW, canvasH;
+                  if (maxW / maxH > roomAspect) {
+                    canvasH = maxH;
+                    canvasW = canvasH * roomAspect;
+                  } else {
+                    canvasW = maxW;
+                    canvasH = canvasW / roomAspect;
+                  }
+                  final s = min(canvasW / _roomW, canvasH / _roomH);
+                  return SizedBox(
+                    width: canvasW,
+                    height: canvasH,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBF5),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: AppColors.primary, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: LayoutBuilder(
-                    builder: (ctx, constraints) {
-                      final canvasW =
-                          constraints.maxWidth;
-                      final canvasH =
-                          constraints.maxHeight;
-                      final scaleX = canvasW / _roomW;
-                      final scaleY = canvasH / _roomH;
-                      final s = min(scaleX, scaleY);
-                      return GestureDetector(
+                      child: GestureDetector(
                         onTapUp: (d) => _onCanvasTap(d.localPosition, s),
                         onPanStart: (d) =>
                             _onCanvasPanStart(d.localPosition, s),
@@ -1172,13 +1259,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                           }),
                           ],
                         ),
-                      );
-                    },
-                  ),
-                ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ),
+        ),
 
         // Selected item info
         if (_selectedIdx >= 0 &&
