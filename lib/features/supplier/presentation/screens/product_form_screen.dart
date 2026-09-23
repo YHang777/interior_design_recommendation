@@ -719,6 +719,19 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     if (_saving) return;
     setState(() => _attemptedSubmit = true);
+
+    // Wait for any in-flight image uploads — the product image must be a
+    // public URL for3D generation (Tripo fetches it server-side).
+    if (_hasPendingUploads) {
+      showAppSnackbar(
+        context,
+        'Please wait for photos to finish uploading.',
+        color: AppColors.warning,
+        duration: const Duration(seconds: 3),
+      );
+      return;
+    }
+
     if (!_validate()) {
       _scrollToFirstError();
       return;

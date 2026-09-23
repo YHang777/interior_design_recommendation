@@ -14,8 +14,8 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier profile — editable business identity (threaded into every
-/// product they publish), verification badge, account actions.
+/// Supplier profile — matching homeowner design with centered avatar,
+/// left-border section cards, and edit/view toggle.
 class SupplierProfileScreen extends ConsumerStatefulWidget {
   const SupplierProfileScreen({super.key});
 
@@ -26,23 +26,18 @@ class SupplierProfileScreen extends ConsumerStatefulWidget {
 
 class _SupplierProfileScreenState
     extends ConsumerState<SupplierProfileScreen> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _businessNameCtrl;
-  late final TextEditingController _businessPhoneCtrl;
-  late final TextEditingController _businessAddressCtrl;
+  bool _editing = false;
   bool _saving = false;
-  bool _attempted = false;
+  late TextEditingController _businessNameCtrl;
+  late TextEditingController _businessPhoneCtrl;
+  late TextEditingController _businessAddressCtrl;
 
   @override
   void initState() {
     super.initState();
-    final user = ref.read(currentUserProvider);
-    final supplier = user == null ? null : supplierFromUser(user);
-    _businessNameCtrl = TextEditingController(text: supplier?.name ?? '');
-    _businessPhoneCtrl =
-        TextEditingController(text: user?.businessPhone ?? user?.phone ?? '');
-    _businessAddressCtrl = TextEditingController(
-        text: user?.businessAddress ?? user?.address ?? '');
+    _businessNameCtrl = TextEditingController();
+    _businessPhoneCtrl = TextEditingController();
+    _businessAddressCtrl = TextEditingController();
   }
 
   @override
@@ -53,27 +48,41 @@ class _SupplierProfileScreenState
     super.dispose();
   }
 
-  // ── Actions ────────────────────────────────────────────────────────────
+  void _startEditing(AppUser user) {
+    final supplier = supplierFromUser(user);
+    _businessNameCtrl.text = supplier.name;
+    _businessPhoneCtrl.text = user.businessPhone ?? user.phone ?? '';
+    _businessAddressCtrl.text = user.businessAddress ?? user.address ?? '';
+    setState(() => _editing = true);
+  }
 
   Future<void> _save(AppUser user) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => _attempted = true);
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    setState(() => _saving = true);
-    final notifier = ref.read(authStateProvider.notifier);
-    try {
-      await notifier.updateProfile(
-        name: user.name,
-        phone: user.phone,
-        address: user.address,
-        businessName: _businessNameCtrl.text.trim(),
-        businessPhone: _businessPhoneCtrl.text.trim(),
-        businessAddress: _businessAddressCtrl.text.trim(),
+    final name = _businessNameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Business name cannot be empty'),
+          backgroundColor: AppColors.error,
+        ),
       );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await ref.read(authStateProvider.notifier).updateProfile(
+            name: user.name,
+            phone: user.phone,
+            address: user.address,
+            businessName: name,
+            businessPhone: _businessPhoneCtrl.text.trim(),
+            businessAddress: _businessAddressCtrl.text.trim(),
+          );
       if (mounted) {
+        setState(() => _editing = false);
         showAppSnackbar(
           context,
-          'Profile updated — new listings carry these business details',
+          'Business profile updated',
           color: AppColors.success,
           duration: const Duration(seconds: 3),
         );
@@ -90,13 +99,25 @@ class _SupplierProfileScreenState
     }
   }
 
+  void _cancelEditing() {
+    setState(() => _editing = false);
+  }
+
   Future<void> _changePassword() async {
+    final user = ref.read(currentUserProvider);
+    final email = user?.email ?? '';
+    if (email.isEmpty) {
+      showAppSnackbar(context, 'No email on file', isError: true);
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actionsAlignment: MainAxisAlignment.center,
         backgroundColor: AppColors.surface,
         title: Text(
-          'Change password',
+          'Reset Password?',
           style: GoogleFonts.poppins(
             fontSize: 17,
             fontWeight: FontWeight.w600,
@@ -104,9 +125,8 @@ class _SupplierProfileScreenState
           ),
         ),
         content: Text(
-          'Password changes are handled from the sign-in screen — use '
-          '"Forgot password?" to reset your password. Changing it in-app '
-          'is coming in a future update.',
+          'A password reset link will be sent to $email. '
+          'Check your inbox after a few minutes.',
           style: GoogleFonts.poppins(
             fontSize: 13.5,
             height: 1.4,
@@ -117,12 +137,48 @@ class _SupplierProfileScreenState
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: Text(
-              'OK',
+              'Cancel',
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w600,
                 color: AppColors.textSecondary,
               ),
             ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ref
+                    .read(authStateProvider.notifier)
+                    .sendPasswordResetEmail(email);
+                if (mounted) {
+                  showAppSnackbar(
+                    context,
+                    'Password reset email sent to $email',
+                    color: AppColors.success,
+                    duration: const Duration(seconds: 3),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  showAppSnackbar(
+                    context,
+                    'Could not send reset email',
+                    isError: true,
+                    detail: e.toString(),
+                    duration: const Duration(seconds: 3),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('Send Reset Link'),
           ),
         ],
       ),
@@ -140,7 +196,6 @@ class _SupplierProfileScreenState
     if (!confirmed || !mounted) return;
     try {
       await ref.read(authStateProvider.notifier).logout();
-      // Router redirects to /login automatically once signed out.
     } catch (_) {
       if (mounted) {
         showAppSnackbar(context, 'Could not log out — try again',
@@ -159,7 +214,20 @@ class _SupplierProfileScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Store profile')),
+      appBar: AppBar(
+        title: Text('Profile',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        actions: [
+          if (!_editing && user != null && supplier != null)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit Profile',
+              onPressed: () => _startEditing(user),
+            ),
+        ],
+      ),
       body: user == null || supplier == null
           ? const EmptyState(
               icon: Icons.person_off_outlined,
@@ -168,369 +236,239 @@ class _SupplierProfileScreenState
             )
           : RefreshIndicator(
               onRefresh: () async {
-                try {
-                  final _ =
-                      await ref.refresh(marketplaceProductsProvider.future);
-                } catch (_) {}
+                ref.invalidate(marketplaceProductsProvider);
               },
               color: AppColors.accent,
               child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                padding: const EdgeInsets.all(20),
                 children: [
-                  // ── Identity header ──
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [AppColors.primary, AppColors.primaryLight],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.25),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
+                  // ── Avatar with gradient ring ──
+                  Center(
+                    child: Column(
                       children: [
                         Container(
-                          width: 54,
-                          height: 54,
+                          padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.16),
+                            gradient: const LinearGradient(
+                              colors: [AppColors.accent, AppColors.accentLight],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
                             shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            _initials(supplier.name),
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                supplier.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textOnDark,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                user.email,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 11.5,
-                                  color:
-                                      Colors.white.withValues(alpha: 0.8),
-                                ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.accent.withValues(alpha: 0.25),
+                                blurRadius: 16,
+                                offset: const Offset(0, 6),
                               ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        StatusBadge.verification(user.verificationStatus),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── Business profile form ──
-                  _sectionCard(
-                    title: 'Business profile',
-                    subtitle:
-                        'Shown on your listings and to buyers at checkout',
-                    child: Form(
-                      key: _formKey,
-                      autovalidateMode: _attempted
-                          ? AutovalidateMode.always
-                          : AutovalidateMode.disabled,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _ProfileField(
-                            label: 'Business name',
-                            icon: Icons.storefront_outlined,
-                            controller: _businessNameCtrl,
-                            hint: 'e.g. Nordic Living Sdn Bhd',
-                            validator: (v) {
-                              final t = v?.trim() ?? '';
-                              if (t.isEmpty) return 'Business name is required';
-                              if (t.length < 2) {
-                                return 'Name is too short';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _ProfileField(
-                            label: 'Business phone',
-                            icon: Icons.phone_outlined,
-                            controller: _businessPhoneCtrl,
-                            hint: 'e.g. 0123456789',
-                            keyboardType: TextInputType.phone,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            validator: (v) {
-                              final t = v?.trim() ?? '';
-                              if (t.isEmpty) return null;
-                              if (t.length < 9 || t.length > 12) {
-                                return 'Enter a valid Malaysian phone number';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _ProfileField(
-                            label: 'Business address',
-                            icon: Icons.location_on_outlined,
-                            controller: _businessAddressCtrl,
-                            hint: 'Pickup / return address',
-                            maxLines: 2,
-                            validator: (v) {
-                              final t = v?.trim() ?? '';
-                              if (t.isEmpty) return null;
-                              if (t.length < 5) {
-                                return 'Address is too short';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 14),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 52,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: _saving
-                                    ? null
-                                    : const LinearGradient(
-                                        colors: [AppColors.accent, AppColors.gradientGreen],
-                                      ),
-                                borderRadius: BorderRadius.circular(14),
-                                color: _saving ? AppColors.border : null,
-                              ),
-                              child: ElevatedButton(
-                                onPressed: _saving
-                                    ? null
-                                    : () => _save(user),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.transparent,
-                                  shadowColor: Colors.transparent,
-                                  foregroundColor: Colors.white,
-                                  disabledBackgroundColor: Colors.transparent,
-                                  disabledForegroundColor: AppColors.textHint,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                child: _saving
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white),
-                                      )
-                                    : const Text('Save changes',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w600, fontSize: 14)),
-                              ),
+                          child: CircleAvatar(
+                            radius: 38,
+                            backgroundColor: AppColors.primary,
+                            child: Text(
+                              _initials(supplier.name),
+                              style: GoogleFonts.poppins(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textOnDark),
                             ),
                           ),
+                        ),
+                        const SizedBox(height: 14),
+                        if (!_editing) ...[
+                          Text(supplier.name,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary)),
+                          const SizedBox(height: 4),
+                          Text(user.email,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  color: AppColors.textSecondary)),
+                          const SizedBox(height: 4),
+                          StatusBadge.verification(user.verificationStatus),
                         ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── Store snapshot ──
-                  _sectionCard(
-                    title: 'Your store',
-                    child: Column(
-                      children: [
-                        _infoRow(
-                          icon: Icons.verified_outlined,
-                          label: 'Verification status',
-                          valueWidget:
-                              StatusBadge.verification(user.verificationStatus),
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: AppColors.divider),
-                        _infoRow(
-                          icon: Icons.inventory_2_outlined,
-                          label: 'Products listed',
-                          value: '${productsOfSupplier(
-                              productsAsync.valueOrNull ?? const <Product>[],
-                              user.uid).length}',
-                        ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 28),
+
+                  // ── Business profile ──
+                  _SectionCard(
+                    title: 'Business Profile',
+                    accentColor: AppColors.accent,
+                    subtitle: 'Shown on your listings and to buyers',
+                    children: _editing
+                        ? [
+                            _EditField(Icons.storefront_outlined,
+                                'Business Name', _businessNameCtrl),
+                            _EditField(Icons.phone_outlined, 'Business Phone',
+                                _businessPhoneCtrl,
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ]),
+                            _EditField(Icons.location_on_outlined,
+                                'Business Address', _businessAddressCtrl,
+                                maxLines: 2),
+                          ]
+                        : [
+                            _Field(Icons.storefront_outlined, 'Business Name',
+                                supplier.name),
+                            _Field(
+                                Icons.phone_outlined,
+                                'Business Phone',
+                                user.businessPhone ??
+                                    user.phone ??
+                                    'Not set'),
+                            _Field(
+                                Icons.location_on_outlined,
+                                'Business Address',
+                                user.businessAddress ??
+                                    user.address ??
+                                    'Not set'),
+                          ],
+                  ),
                   const SizedBox(height: 16),
+
+                  // ── Store info ──
+                  if (!_editing) ...[
+                    _SectionCard(
+                      title: 'Your Store',
+                      accentColor: AppColors.secondaryAccent,
+                      children: [
+                        _Field(Icons.verified_outlined, 'Verification',
+                            user.verificationStatus),
+                        _Field(
+                            Icons.inventory_2_outlined,
+                            'Products Listed',
+                            '${productsOfSupplier(productsAsync.valueOrNull ?? const <Product>[], user.uid).length}'),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // ── Edit actions ──
+                  if (_editing) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _saving ? null : _cancelEditing,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _saving ? null : () => _save(user),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.accent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: _saving
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('Save Changes'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
                   // ── Account ──
-                  _sectionCard(
-                    title: 'Account',
-                    child: Column(
+                  if (!_editing) ...[
+                    _SectionCard(
+                      title: 'Account',
+                      accentColor: AppColors.textHint,
                       children: [
-                        _actionRow(
-                          icon: Icons.password_outlined,
-                          label: 'Change password',
-                          color: AppColors.textPrimary,
-                          onTap: _changePassword,
-                        ),
-                        Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: AppColors.divider),
-                        _actionRow(
-                          icon: Icons.logout_outlined,
-                          label: 'Log out',
-                          color: AppColors.error,
-                          onTap: _logout,
-                        ),
+                        _LinkRow(Icons.password_outlined, 'Change Password',
+                            _changePassword),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 20),
+
+                    // ── Logout ──
+                    SizedBox(
+                      height: 52,
+                      child: OutlinedButton.icon(
+                        onPressed: _logout,
+                        icon: const Icon(Icons.logout, color: AppColors.error),
+                        label: const Text('Logout',
+                            style: TextStyle(color: AppColors.error)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ── Delete account ──
+                    TextButton(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            actionsAlignment: MainAxisAlignment.center,
+                            title: const Text('Delete Account?'),
+                            content: const Text(
+                                'This action cannot be undone. All your data will be permanently removed.'),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('Cancel')),
+                              ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  ref
+                                      .read(authStateProvider.notifier)
+                                      .logout();
+                                },
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.error,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    )),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      child: Text('Delete Account',
+                          style: GoogleFonts.poppins(
+                              color: AppColors.error, fontSize: 13)),
+                    ),
+                  ],
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
-    );
-  }
-
-  Widget _sectionCard({
-    required String title,
-    String? subtitle,
-    required Widget child,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                color: AppColors.textHint,
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow({
-    required IconData icon,
-    required String label,
-    String? value,
-    Widget? valueWidget,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          if (valueWidget != null)
-            valueWidget
-          else if (value != null)
-            Text(
-              value,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionRow({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: color,
-                ),
-              ),
-            ),
-            Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
-          ],
-        ),
-      ),
     );
   }
 
@@ -544,48 +482,183 @@ class _SupplierProfileScreenState
   }
 }
 
-/// ── Profile text field (dark label + filled box) ────────────────────────
+/// ── Section card with left accent border (matching homeowner) ──────────
 
-class _ProfileField extends StatelessWidget {
-  const _ProfileField({
-    required this.label,
-    required this.icon,
-    required this.controller,
-    required this.hint,
-    this.validator,
-    this.keyboardType,
-    this.inputFormatters,
-    this.maxLines = 1,
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    required this.title,
+    required this.children,
+    this.accentColor = AppColors.accent,
+    this.subtitle,
   });
 
-  final String label;
+  final String title;
+  final List<Widget> children;
+  final Color accentColor;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border(
+          left: BorderSide(color: accentColor, width: 3),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle!,
+                style: GoogleFonts.poppins(
+                    fontSize: 11, color: AppColors.textHint)),
+          ],
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+/// ── View-mode field row ────────────────────────────────────────────────
+
+class _Field extends StatelessWidget {
+  const _Field(this.icon, this.label, this.value);
   final IconData icon;
+  final String label, value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textHint),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 100,
+            child: Text(label,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value,
+                style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ── Edit-mode text field row ───────────────────────────────────────────
+
+class _EditField extends StatelessWidget {
+  const _EditField(this.icon, this.label, this.controller,
+      {this.keyboardType, this.inputFormatters, this.maxLines = 1});
+
+  final IconData icon;
+  final String label;
   final TextEditingController controller;
-  final String hint;
-  final FormFieldValidator<String>? validator;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final int maxLines;
 
   @override
   Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      validator: validator,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      maxLines: maxLines,
-      style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixIcon: Icon(icon,
-            color: AppColors.textSecondary, size: 19),
-        filled: true,
-        fillColor: AppColors.background,
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: maxLines > 1 ? 12 : 16,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textHint),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 100,
+            child: Text(label,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              keyboardType: keyboardType,
+              inputFormatters: inputFormatters,
+              maxLines: maxLines,
+              style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: AppColors.accent, width: 1.5),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ── Link row (tappable, for Account section) ──────────────────────────
+
+class _LinkRow extends StatelessWidget {
+  const _LinkRow(this.icon, this.label, this.onTap);
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.accent, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label,
+                  style: GoogleFonts.poppins(
+                      fontSize: 14, color: AppColors.textPrimary)),
+            ),
+            const Icon(Icons.chevron_right,
+                color: AppColors.textHint, size: 20),
+          ],
         ),
       ),
     );

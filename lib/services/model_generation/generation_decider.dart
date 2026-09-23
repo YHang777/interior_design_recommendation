@@ -71,14 +71,15 @@ class GenerationDecision {
 const int autoAttemptsCap = 2;
 
 /// Permanent failure message once automatic attempts are exhausted.
-const String autoAttemptsCapMessage = 'Could not generate 3D model — the '
-    'automatic attempt limit was reached. Tap Retry or Regenerate to try '
-    'one more time.';
+const String autoAttemptsCapMessage = '3D generation failed after multiple '
+    'attempts. Tap Retry to try again, or edit the product to add '
+    'Width/Height/Depth (meters) and a clear product photo.';
 
 /// Message used when the AI route cannot run because the product lacks a
 /// public photo (Tripo must fetch the image server-side).
 const String needsNetworkImageMessage =
-    'AI 3D generation needs a public product photo (network URL).';
+    '3D generation needs a clear, public product photo (uploaded as a URL). '
+    'Re-upload the image and try again.';
 
 /// Decides the next pipeline action for a product snapshot.
 ///
@@ -130,7 +131,7 @@ GenerationDecision decideGeneration({
       return const GenerationDecision(
         GenerationAction.none,
         message: 'Keeping the current AI model — regenerating needs Tripo '
-            'configured, a public product photo and complete dimensions.',
+            'configured, a clear product photo and complete dimensions.',
       );
     }
     if (dimsComplete) {
@@ -142,7 +143,7 @@ GenerationDecision decideGeneration({
     return const GenerationDecision(
       GenerationAction.none,
       message: 'Keeping the current model — set Width/Height/Depth to '
-          'regenerate it.',
+          'regenerate it. Customers can\'t view in AR without a 3D model.',
     );
   }
 
@@ -175,12 +176,14 @@ GenerationDecision decideGeneration({
     if (hasNetworkImage) {
       return const GenerationDecision(
         GenerationAction.markFailed,
-        message: 'Retry needs complete Width/Height/Depth (meters).',
+        message: 'Retry needs complete Width/Height/Depth (meters). '
+            'Add product dimensions to enable 3D generation.',
       );
     }
     return const GenerationDecision(
       GenerationAction.markFailed,
-      message: needsNetworkImageMessage,
+      message: 'Retry needs a clear product photo and dimensions. '
+          'Add Width/Height/Depth (meters) and re-upload the image.',
     );
   }
 
@@ -192,8 +195,8 @@ GenerationDecision decideGeneration({
       GenerationAction.markFailed,
       message: capReached
           ? autoAttemptsCapMessage
-          : 'AI generation could not continue — it needs Tripo configured, '
-              'a public product photo and complete dimensions.',
+          : '3D generation could not continue. It needs Tripo configured, '
+              'a clear product photo, and complete dimensions (W×H×D in meters).',
     );
   }
 
@@ -215,7 +218,8 @@ GenerationDecision decideGeneration({
     }
     return const GenerationDecision(
       GenerationAction.markFailed,
-      message: 'Set Width/Height/Depth (meters) to generate the 3D model.',
+      message: 'Set Width/Height/Depth (meters) to generate the 3D model. '
+          'Customers won\'t see AR without a 3D model.',
     );
   }
 
@@ -236,12 +240,12 @@ GenerationDecision decideGeneration({
     return const GenerationDecision(
       GenerationAction.markNoModel,
       message: 'No 3D model yet — add real-world Width/Height/Depth '
-          '(meters) to generate one.',
+          '(meters) to generate one. Without it, customers can\'t view in AR.',
     );
   }
   return const GenerationDecision(
     GenerationAction.markFailed,
     message: 'The 3D model state is invalid — edit and save the product '
-        'to regenerate it.',
+        'to regenerate it. Check dimensions and product photo.',
   );
 }

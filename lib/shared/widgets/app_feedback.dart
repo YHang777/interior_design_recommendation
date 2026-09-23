@@ -54,41 +54,77 @@ void showAppSnackbarOn(
 
   // Pick icon prefix based on type
   final iconData = isError ? Icons.error : Icons.check_circle;
-  final iconColor = isError ? AppColors.errorLight : AppColors.successLight;
 
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(
     SnackBar(
       behavior: SnackBarBehavior.floating,
       duration: duration,
-      backgroundColor: effectiveColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      content: Row(
-        children: [
-          Icon(iconData, color: Colors.white, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Colors.white,
-              ),
+      content: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: effectiveColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border(
+            left: BorderSide(
+              color: isError
+                  ? AppColors.errorLight
+                  : AppColors.successLight,
+              width: 4,
             ),
           ),
-        ],
-      ),
-      action: actionLabel == null || onAction == null
-          ? null
-          : SnackBarAction(
-              label: actionLabel,
-              textColor: Colors.white,
-              onPressed: onAction,
+          boxShadow: [
+            BoxShadow(
+              color: effectiveColor.withValues(alpha: 0.25),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(iconData, color: Colors.white, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onAction,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    actionLabel,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     ),
   );
 }

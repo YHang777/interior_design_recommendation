@@ -333,7 +333,7 @@ class _ProductManagementScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('My Products'),
+        title: const Text('Products'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -364,6 +364,11 @@ class _ProductManagementScreenState
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _goNew,
+        backgroundColor: AppColors.accent,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       body: RefreshIndicator(
         onRefresh: _refresh,
         color: AppColors.accent,
@@ -390,21 +395,8 @@ class _ProductManagementScreenState
                           onAction: _goNew,
                         ),
                       )
-                    : visible.isEmpty
-                        ? _scrollableState(
-                            EmptyState(
-                              icon: Icons.search_off,
-                              title: 'No products match',
-                              subtitle: 'Try a different search or filter.',
-                              actionLabel: 'Clear filters',
-                              onAction: () => setState(() {
-                                _query = '';
-                                _filter = _ProductFilter.all;
-                              }),
-                            ),
-                          )
-                        : _content(
-                            mine.length, activeCount, lowCount, visible),
+                    : _content(
+                        mine.length, activeCount, lowCount, visible, mine),
       ),
     );
   }
@@ -418,7 +410,7 @@ class _ProductManagementScreenState
   }
 
   Widget _content(
-      int total, int active, int low, List<Product> visible) {
+      int total, int active, int low, List<Product> visible, List<Product> allMine) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -488,17 +480,54 @@ class _ProductManagementScreenState
             ),
           ),
         ),
-        ...visible.map((p) => _ProductTile(
-              product: p,
-              overrideActive: _activeOverride[p.id],
-              busy: _busy.contains(p.id),
-              onOpen: () => _goEdit(p),
-              onToggleActive: (next) => _toggleActive(p, next),
-              onEditStock: () => _editStock(p),
-              onRetry3D: () => _retry3D(p),
-              onRegenerate3D: () => _regenerate3D(p),
-              onDelete: () => _delete(p),
-            )),
+        if (visible.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 32),
+            child: Column(
+              children: [
+                Icon(Icons.filter_list_off,
+                    size: 48, color: AppColors.textHint),
+                const SizedBox(height: 12),
+                Text(
+                  'No products match this filter',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Try a different filter or clear to see all products.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: AppColors.textHint,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _query = '';
+                    _filter = _ProductFilter.all;
+                  }),
+                  icon: const Icon(Icons.clear_all, size: 16),
+                  label: const Text('Clear filters'),
+                ),
+              ],
+            ),
+          )
+        else
+          ...visible.map((p) => _ProductTile(
+                product: p,
+                overrideActive: _activeOverride[p.id],
+                busy: _busy.contains(p.id),
+                onOpen: () => _goEdit(p),
+                onToggleActive: (next) => _toggleActive(p, next),
+                onEditStock: () => _editStock(p),
+                onRetry3D: () => _retry3D(p),
+                onRegenerate3D: () => _regenerate3D(p),
+                onDelete: () => _delete(p),
+              )),
         const SizedBox(height: 8),
       ],
     );
@@ -719,8 +748,9 @@ class _ProductTile extends StatelessWidget {
   }
 
   /// AR-pipeline status line: a green "3D ready" pill, an amber "3D
-  /// generating…" pill, or a red tappable "3D failed — retry" pill. Rows
-  /// without a 3D state (legacy products) show nothing.
+  /// generating…" pill, or a red tappable "3D failed — retry" pill with
+  /// an explanation row underneath. Rows without a 3D state (legacy
+  /// products) show nothing.
   Widget _arStatusRow(Product p) {
     final ar3d = p.ar3d;
     if (ar3d == null) return const SizedBox.shrink();
@@ -729,13 +759,13 @@ class _ProductTile extends StatelessWidget {
     VoidCallback? onTap;
     switch (ar3d.status) {
       case 'ready':
-        label = '3D ready';
+        label = '3D ready · AR available';
         color = AppColors.success;
       case 'generating':
         label = '3D generating…';
         color = AppColors.warning;
       case 'failed':
-        label = '3D failed — retry';
+        label = '3D failed · No AR';
         color = AppColors.error;
         onTap = busy ? null : onRetry3D;
       default:
@@ -744,7 +774,24 @@ class _ProductTile extends StatelessWidget {
     final pill = _Pill(label: label, color: color);
     final padded = Padding(
       padding: const EdgeInsets.only(top: 6),
-      child: pill,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          pill,
+          if (ar3d.status == 'failed') ...[
+            const SizedBox(height: 3),
+            Text(
+              'Customers won\'t see AR for this product. '
+              'Check dimensions (W×H×D) and product photo, then retry.',
+              style: GoogleFonts.poppins(
+                fontSize: 9,
+                color: AppColors.textHint,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
     if (onTap == null) return padded;
     return Padding(
@@ -755,7 +802,24 @@ class _ProductTile extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(6),
-          child: pill,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              pill,
+              if (ar3d.status == 'failed') ...[
+                const SizedBox(height: 3),
+                Text(
+                  'Customers won\'t see AR for this product. '
+                  'Check dimensions (W×H×D) and product photo, then retry.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    color: AppColors.textHint,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

@@ -51,10 +51,11 @@ Future<bool> showConfirmDialog(
       actions: [
         SizedBox(
           width: 110,
-          height: 44,
+          height: 48,
           child: OutlinedButton(
             onPressed: () => Navigator.pop(ctx, false),
             style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -62,6 +63,7 @@ Future<bool> showConfirmDialog(
             child: Text(
               'Cancel',
               style: GoogleFonts.poppins(
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textSecondary,
               ),
@@ -71,18 +73,25 @@ Future<bool> showConfirmDialog(
         const SizedBox(width: 12),
         SizedBox(
           width: 110,
-          height: 44,
+          height: 48,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: destructive ? AppColors.error : AppColors.accent,
               foregroundColor: AppColors.textOnDark,
               elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 10),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: Text(confirmLabel),
+            child: Text(
+              confirmLabel,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ),
       ],

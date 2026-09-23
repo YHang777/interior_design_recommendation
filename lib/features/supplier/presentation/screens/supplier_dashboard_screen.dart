@@ -12,7 +12,6 @@ import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/quick_action_button.dart';
 import '../../../../shared/widgets/section_header.dart';
-import '../../../../shared/widgets/stat_card.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/data/models/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -266,52 +265,48 @@ class _SupplierDashboardScreenState
         // ── Stats ──
         Row(
           children: [
-            Expanded(
-              child: StatCard(
-                icon: Icons.payments_outlined,
-                label: 'Revenue this month',
-                value: Formatters.myr(monthRevenue),
-                gradient: const [AppColors.accent, AppColors.gradientGreen],
-              ),
+            _StatCard(
+              icon: Icons.payments_outlined,
+              label: 'Revenue',
+              value: Formatters.myr(monthRevenue),
+              gradientColors: const [AppColors.accent, AppColors.gradientGreen],
             ),
             const SizedBox(width: 10),
-            Expanded(
-              child: StatCard(
-                icon: Icons.hourglass_top_outlined,
-                label: 'Pending orders',
-                value: '$pendingCount',
-                gradient: const [AppColors.warning, AppColors.gradientOrange],
-                onTap: pendingCount > 0
-                    ? () => _goTab(RouteNames.supplierOrders)
-                    : null,
-              ),
+            _StatCard(
+              icon: Icons.hourglass_top_outlined,
+              label: 'Pending',
+              value: '$pendingCount',
+              gradientColors: const [AppColors.warning, AppColors.gradientOrange],
+            ),
+            _StatCard(
+              icon: Icons.visibility_outlined,
+              label: 'Active',
+              value: '${mine.where((p) => p.isActive).length}',
+              gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
             ),
           ],
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(
-              child: StatCard(
-                icon: Icons.visibility_outlined,
-                label: 'Active products',
-                value:
-                    '${mine.where((p) => p.isActive).length}',
-                gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
-                onTap: () => _goTab(RouteNames.supplierProducts),
-              ),
+            _StatCard(
+              icon: Icons.priority_high_outlined,
+              label: 'Low stock',
+              value: '${lowStock.length}',
+              gradientColors: const [AppColors.primary, AppColors.primaryLight],
             ),
             const SizedBox(width: 10),
-            Expanded(
-              child: StatCard(
-                icon: Icons.priority_high_outlined,
-                label: 'Low stock',
-                value: '${lowStock.length}',
-                gradient: const [AppColors.primary, AppColors.primaryLight],
-                onTap: lowStock.isNotEmpty
-                    ? () => _goTab(RouteNames.supplierProducts)
-                    : null,
-              ),
+            _StatCard(
+              icon: Icons.inventory_2_outlined,
+              label: 'Products',
+              value: '${mine.length}',
+              gradientColors: const [AppColors.accent, AppColors.gradientGreen],
+            ),
+            _StatCard(
+              icon: Icons.receipt_long_outlined,
+              label: 'Orders',
+              value: '${allOrders.length}',
+              gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
             ),
           ],
         ),
@@ -563,6 +558,82 @@ class _LowStockTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ── Stat card (compact, matching homeowner style) ──────────────────────
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.gradientColors,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final List<Color> gradientColors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              gradientColors[0].withValues(alpha: 0.08),
+              gradientColors[1].withValues(alpha: 0.04),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: gradientColors[0].withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+              color: gradientColors[0].withValues(alpha: 0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradientColors,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(height: 10),
+            Text(value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 11, color: AppColors.textSecondary)),
+          ],
         ),
       ),
     );

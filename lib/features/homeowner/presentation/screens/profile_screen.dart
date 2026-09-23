@@ -250,9 +250,70 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               accentColor: AppColors.textHint,
               children: [
                 _LinkRow(Icons.lock_outline, 'Change Password', () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Password change emailed (mocked)')),
+                  final email = user?.email ?? '';
+                  if (email.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('No email on file'),
+                          backgroundColor: AppColors.error),
+                    );
+                    return;
+                  }
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      actionsAlignment: MainAxisAlignment.center,
+                      title: const Text('Reset Password?'),
+                      content: Text(
+                        'A password reset link will be sent to $email. '
+                        'Check your inbox after a few minutes.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () async {
+                            Navigator.pop(ctx);
+                            try {
+                              await ref
+                                  .read(authStateProvider.notifier)
+                                  .sendPasswordResetEmail(email);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Password reset email sent to $email'),
+                                    backgroundColor: AppColors.success,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content:
+                                        Text('Could not send reset email: $e'),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('Send Reset Link'),
+                        ),
+                      ],
+                    ),
                   );
                 }),
               ],
