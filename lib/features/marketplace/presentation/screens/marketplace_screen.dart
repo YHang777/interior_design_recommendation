@@ -248,44 +248,34 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                 }
                 return SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverLayoutBuilder(
-                    builder: (context, constraints) {
-                      final width = constraints.crossAxisExtent;
-                      final crossAxisCount = width > 600
-                          ? 4
-                          : width > 400
-                              ? 3
-                              : 2;
-                      return SliverGrid(
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio: 0.68,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final product = filtered[index];
-                            return ProductCard(
-                              product: product,
-                              isWishlisted: ref
-                                  .watch(wishlistProvider)
-                                  .contains(product.id),
-                              onTap: () => _openProduct(product),
-                              onArPreview: () => context.pushNamed(
-                                RouteNames.arViewer,
-                                extra: product,
-                              ),
-                              onAddToCart: () => _addToCart(product),
-                              onToggleWishlist: () =>
-                                  _toggleWishlist(product),
-                            );
-                          },
-                          childCount: filtered.length,
-                        ),
-                      );
-                    },
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      childAspectRatio: 0.68,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final product = filtered[index];
+                        return ProductCard(
+                          product: product,
+                          isWishlisted: ref
+                              .watch(wishlistProvider)
+                              .contains(product.id),
+                          onTap: () => _openProduct(product),
+                          onArPreview: () => context.pushNamed(
+                            RouteNames.arViewer,
+                            extra: product,
+                          ),
+                          onAddToCart: () => _addToCart(product),
+                          onToggleWishlist: () =>
+                              _toggleWishlist(product),
+                        );
+                      },
+                      childCount: filtered.length,
+                    ),
                   ),
                 );
               },

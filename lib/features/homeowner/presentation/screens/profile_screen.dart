@@ -5,11 +5,91 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  bool _editing = false;
+  bool _saving = false;
+  late TextEditingController _nameCtrl;
+  late TextEditingController _phoneCtrl;
+  late TextEditingController _addressCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController();
+    _phoneCtrl = TextEditingController();
+    _addressCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    super.dispose();
+  }
+
+  void _startEditing(dynamic user) {
+    _nameCtrl.text = user?.name ?? '';
+    _phoneCtrl.text = user?.phone ?? '';
+    _addressCtrl.text = user?.address ?? '';
+    setState(() => _editing = true);
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Name cannot be empty'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await ref.read(authStateProvider.notifier).updateProfile(
+            name: name,
+            phone: _phoneCtrl.text.trim(),
+            address: _addressCtrl.text.trim(),
+          );
+      if (mounted) {
+        setState(() => _editing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Update failed: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _cancelEditing() {
+    setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
 
     return Scaffold(
@@ -19,6 +99,14 @@ class ProfileScreen extends ConsumerWidget {
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         backgroundColor: AppColors.surface,
         elevation: 0,
+        actions: [
+          if (!_editing)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit Profile',
+              onPressed: () => _startEditing(user),
+            ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -57,15 +145,17 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(user?.name ?? 'User',
-                    style: GoogleFonts.poppins(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
-                const SizedBox(height: 4),
-                Text(user?.email ?? '',
-                    style: GoogleFonts.poppins(
-                        fontSize: 14, color: AppColors.textSecondary)),
+                if (!_editing) ...[
+                  Text(user?.name ?? 'User',
+                      style: GoogleFonts.poppins(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 4),
+                  Text(user?.email ?? '',
+                      style: GoogleFonts.poppins(
+                          fontSize: 14, color: AppColors.textSecondary)),
+                ],
               ],
             ),
           ),
@@ -75,130 +165,190 @@ class ProfileScreen extends ConsumerWidget {
           _SectionCard(
             title: 'Personal Information',
             accentColor: AppColors.accent,
-            children: [
-              _Field(Icons.person_outline, 'Full Name', user?.name ?? 'User'),
-              _Field(Icons.email_outlined, 'Email', user?.email ?? ''),
-              _Field(Icons.phone_outlined, 'Phone', user?.phone ?? 'Not set'),
-              _Field(Icons.location_on_outlined, 'Address',
-                  user?.address ?? 'Not set'),
-            ],
+            children: _editing
+                ? [
+                    _EditField(Icons.person_outline, 'Full Name', _nameCtrl),
+                    _ReadOnlyField(Icons.email_outlined, 'Email',
+                        user?.email ?? ''),
+                    _EditField(Icons.phone_outlined, 'Phone', _phoneCtrl),
+                    _EditField(
+                        Icons.location_on_outlined, 'Address', _addressCtrl),
+                  ]
+                : [
+                    _Field(Icons.person_outline, 'Full Name',
+                        user?.name ?? 'User'),
+                    _Field(Icons.email_outlined, 'Email', user?.email ?? ''),
+                    _Field(Icons.phone_outlined, 'Phone',
+                        user?.phone ?? 'Not set'),
+                    _Field(Icons.location_on_outlined, 'Address',
+                        user?.address ?? 'Not set'),
+                  ],
           ),
           const SizedBox(height: 16),
+
+          // Edit actions
+          if (_editing) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : _cancelEditing,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('Save Changes'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // Quick Links
-          _SectionCard(
-            title: 'Tools',
-            accentColor: AppColors.secondaryAccent,
-            children: [
-              _LinkRow(Icons.account_balance_wallet, 'Budget Planner',
-                  () => context.push('/budget')),
-              _LinkRow(Icons.assessment, 'Reports', () {}),
-            ],
-          ),
-          const SizedBox(height: 16),
+          if (!_editing) ...[
+            _SectionCard(
+              title: 'Tools',
+              accentColor: AppColors.secondaryAccent,
+              children: [
+                _LinkRow(Icons.account_balance_wallet, 'Budget Planner',
+                    () => context.push('/budget')),
+                _LinkRow(Icons.assessment, 'Reports', () {}),
+              ],
+            ),
+            const SizedBox(height: 16),
 
-          // Settings
-          _SectionCard(
-            title: 'Settings',
-            accentColor: AppColors.textHint,
-            children: [
-              _LinkRow(Icons.lock_outline, 'Change Password', () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Password change emailed (mocked)')),
-                );
-              }),
-            ],
-          ),
-          const SizedBox(height: 20),
+            // Settings
+            _SectionCard(
+              title: 'Settings',
+              accentColor: AppColors.textHint,
+              children: [
+                _LinkRow(Icons.lock_outline, 'Change Password', () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Password change emailed (mocked)')),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-          // Logout with confirmation
-          SizedBox(
-            height: 52,
-            child: OutlinedButton.icon(
+            // Logout with confirmation
+            SizedBox(
+              height: 52,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      actionsAlignment: MainAxisAlignment.center,
+                      title: const Text('Logout?'),
+                      content:
+                          const Text('Are you sure you want to log out?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            ref
+                                .read(authStateProvider.notifier)
+                                .logout();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('Logout'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.logout, color: AppColors.error),
+                label: const Text('Logout',
+                    style: TextStyle(color: AppColors.error)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.error),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Delete
+            TextButton(
               onPressed: () {
                 showDialog(
                   context: context,
                   builder: (ctx) => AlertDialog(
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16)),
-                    title: const Text('Logout?'),
-                    content:
-                        const Text('Are you sure you want to log out?'),
+                    actionsAlignment: MainAxisAlignment.center,
+                    title: const Text('Delete Account?'),
+                    content: const Text(
+                        'This action cannot be undone. All your data will be permanently removed.'),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel'),
-                      ),
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel')),
                       ElevatedButton(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          ref
-                              .read(authStateProvider.notifier)
-                              .logout();
+                          ref.read(authStateProvider.notifier).logout();
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text('Logout'),
+                            backgroundColor: AppColors.error,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            )),
+                        child: const Text('Delete'),
                       ),
                     ],
                   ),
                 );
               },
-              icon: const Icon(Icons.logout, color: AppColors.error),
-              label: const Text('Logout',
-                  style: TextStyle(color: AppColors.error)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.error),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
+              child: Text('Delete Account',
+                  style: GoogleFonts.poppins(
+                      color: AppColors.error, fontSize: 13)),
             ),
-          ),
-          const SizedBox(height: 10),
-
-          // Delete
-          TextButton(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                  title: const Text('Delete Account?'),
-                  content: const Text(
-                      'This action cannot be undone. All your data will be permanently removed.'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel')),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        ref.read(authStateProvider.notifier).logout();
-                      },
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          )),
-                      child: const Text('Delete'),
-                    ),
-                  ],
-                ),
-              );
-            },
-            child: Text('Delete Account',
-                style: GoogleFonts.poppins(
-                    color: AppColors.error, fontSize: 13)),
-          ),
+          ],
           const SizedBox(height: 32),
         ],
       ),
@@ -277,6 +427,90 @@ class _Field extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary)),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditField extends StatelessWidget {
+  const _EditField(this.icon, this.label, this.controller);
+  final IconData icon;
+  final String label;
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textHint),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 72,
+            child: Text(label,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: AppColors.accent, width: 1.5),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadOnlyField extends StatelessWidget {
+  const _ReadOnlyField(this.icon, this.label, this.value);
+  final IconData icon;
+  final String label, value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textHint),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 72,
+            child: Text(label,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value,
+                style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary)),
+          ),
+          Icon(Icons.lock_outline, size: 14, color: AppColors.textHint),
         ],
       ),
     );

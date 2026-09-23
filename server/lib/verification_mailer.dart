@@ -39,14 +39,19 @@ class VerificationMailer {
 
   static const Duration _timeout = Duration(seconds: 20);
 
-  bool get isConfigured =>
-      _apiKey.trim().isNotEmpty && _publicBaseUrl.trim().isNotEmpty;
+  bool get isConfigured => _apiKey.trim().isNotEmpty;
 
+  /// Override the configured public base URL (e.g. when the server detects
+  /// its own hostname from the incoming request instead of relying on env).
   Future<void> sendVerificationEmail({
     required String email,
     required String token,
+    String? baseUrlOverride,
   }) async {
-    final link = '$_publicBaseUrl/verify-email/confirm'
+    final base = (baseUrlOverride?.trim().isNotEmpty == true)
+        ? baseUrlOverride!.trim()
+        : _publicBaseUrl;
+    final link = '$base/verify-email/confirm'
         '?token=${Uri.encodeQueryComponent(token)}';
     http.Response resp;
     try {

@@ -249,6 +249,7 @@ class SavedDesignsScreen extends ConsumerWidget {
                       builder: (ctx) => AlertDialog(
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16)),
+                        actionsAlignment: MainAxisAlignment.center,
                         title: const Text('Delete Design'),
                         content: Text('Delete "${design.name}"?'),
                         actions: [
@@ -333,7 +334,7 @@ class SavedDesignsScreen extends ConsumerWidget {
           crossAxisCount: 3,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          childAspectRatio: 0.95,
+          childAspectRatio: 0.82,
           children: _styles
               .map((s) => _buildStyleCard(s.$1, s.$2, s.$3))
               .toList(),

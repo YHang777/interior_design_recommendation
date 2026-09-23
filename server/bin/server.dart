@@ -159,9 +159,20 @@ Future<void> _route(
   }
 
   if (segments.isEmpty) {
-    req.response.statusCode = HttpStatus.notFound;
-    await req.response.close();
-    return;
+    // Health check — Render's health pings hit the root path.
+    return await _jsonResponse(req.response, {
+      'status': 'ok',
+      'service': 'interior-design-api',
+      'endpoints': [
+        '/products',
+        '/orders',
+        '/categories',
+        '/styles',
+        '/config',
+        '/verify-email/send',
+        '/verify-email/confirm',
+      ],
+    });
   }
 
   final resource = segments[0];

@@ -13,7 +13,7 @@ import '../../features/homeowner/presentation/screens/dashboard_screen.dart';
 import '../../features/homeowner/presentation/screens/homeowner_shell.dart';
 import '../../features/homeowner/presentation/screens/profile_screen.dart';
 import '../../features/homeowner/presentation/screens/saved_designs_screen.dart';
-import '../../features/homeowner/presentation/screens/scan_screen.dart';
+
 import '../../features/supplier/presentation/screens/analytics_screen.dart';
 import '../../features/supplier/presentation/screens/order_management_screen.dart';
 import '../../features/supplier/presentation/screens/product_form_screen.dart';
@@ -216,9 +216,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/scan',
+                path: '/design',
                 name: RouteNames.homeownerScan,
-                builder: (_, __) => const ScanScreen(),
+                builder: (_, __) => const RoomScannerScreen(),
               ),
             ],
           ),

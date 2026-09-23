@@ -177,10 +177,10 @@ class DashboardScreen extends ConsumerWidget {
               children: [
                 Expanded(
                   child: _ActionCard(
-                      icon: Icons.camera_alt,
-                      label: 'Scan',
+                      icon: Icons.dashboard,
+                      label: 'Design',
                       gradientColors: const [Color(0xFF7B1FA2), Color(0xFFAB47BC)],
-                      onTap: () => context.go('/scan')),
+                      onTap: () => context.push('/design-editor')),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -188,7 +188,7 @@ class DashboardScreen extends ConsumerWidget {
                       icon: Icons.psychology,
                       label: 'AI Design',
                       gradientColors: const [Color(0xFF1565C0), Color(0xFF42A5F5)],
-                      onTap: () => context.go('/ai')),
+                      onTap: () => context.push('/ai')),
                 ),
               ],
             ),
@@ -200,7 +200,7 @@ class DashboardScreen extends ConsumerWidget {
                       icon: Icons.store,
                       label: 'Shop',
                       gradientColors: const [Color(0xFF2E7D32), Color(0xFF66BB6A)],
-                      onTap: () => context.go('/marketplace')),
+                      onTap: () => context.push('/marketplace')),
                 ),
                 const SizedBox(width: 10),
                 Expanded(

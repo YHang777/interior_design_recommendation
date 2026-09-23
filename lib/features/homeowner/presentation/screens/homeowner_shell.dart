@@ -48,9 +48,9 @@ class HomeownerShell extends StatelessWidget {
               label: 'Home',
             ),
             NavigationDestination(
-              icon: Icon(Icons.camera_alt_outlined),
-              selectedIcon: Icon(Icons.camera_alt),
-              label: 'Scan',
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard),
+              label: 'Design',
             ),
             NavigationDestination(
               icon: Icon(Icons.psychology_outlined),

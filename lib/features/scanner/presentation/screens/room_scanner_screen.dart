@@ -111,6 +111,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _found.addAll(widget.existingDesign!.detectedItems
           .map((l) => _Found(label: l, confidence: 0.9)));
       _stage = _Stage.plan;
+    } else {
+      // Start directly on the room plan editor — scanning is optional.
+      _stage = _Stage.plan;
     }
     _setupCam();
   }
@@ -240,7 +243,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _cam?.stopImageStream();
     } catch (_) {}
     _timer?.cancel();
-    if (mounted) setState(() => _stage = _Stage.roomSelect);
+    // Auto-place detected items and return to plan editor directly.
+    _autoPlaceFound();
+    if (mounted) setState(() => _stage = _Stage.plan);
   }
 
   void _autoPlaceFound() {
@@ -439,6 +444,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        actionsAlignment: MainAxisAlignment.center,
         title: const Text('Save Design'),
         content: TextField(
           controller: nameCtrl,
@@ -538,7 +544,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             _Stage.roomSelect => 'Room Scanner',
             _Stage.plan => widget.existingDesign != null
                 ? 'Edit: ${widget.existingDesign!.name}'
-                : 'Room Plan',
+                : 'Room Planner',
           },
           style: GoogleFonts.poppins(),
         ),
@@ -548,6 +554,20 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             _stage == _Stage.plan ? AppColors.textPrimary : Colors.white,
         actions: _stage == _Stage.plan
             ? [
+                IconButton(
+                  icon: const Icon(Icons.camera_alt),
+                  tooltip: 'Scan Room',
+                  onPressed: () {
+                    if (_cam != null && _cam!.value.isInitialized) {
+                      _startScan();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Camera not available')),
+                      );
+                    }
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.view_in_ar),
                   tooltip: 'View in AR',

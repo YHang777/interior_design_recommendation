@@ -57,8 +57,27 @@ Future<void> handleVerifySend(
 
   final token = createVerificationToken(
       uid: uid, email: email, secret: service.tokenSecret);
+
+  // Derive the public base URL from the request itself so the email link
+  // always points at the server that actually handled the request, even when
+  // PUBLIC_BASE_URL is missing or stale on the host (Render, etc.).
+  final host = req.headers.value('host');
+  // Behind a reverse proxy (Render's load balancer), the original scheme is
+  // forwarded in X-Forwarded-Proto; fall back to https for production hosts.
+  final forwardedProto = req.headers.value('x-forwarded-proto');
+  final scheme = (forwardedProto != null && forwardedProto.isNotEmpty)
+      ? forwardedProto
+      : (req.uri.scheme.isNotEmpty ? req.uri.scheme : 'https');
+  final requestBaseUrl = (host != null && host.isNotEmpty)
+      ? '$scheme://$host'
+      : null;
+
   try {
-    await service.mailer.sendVerificationEmail(email: email, token: token);
+    await service.mailer.sendVerificationEmail(
+      email: email,
+      token: token,
+      baseUrlOverride: requestBaseUrl,
+    );
   } on VerificationEmailException catch (e) {
     stderr.writeln('[verify] send failed: $e');
     return _json(
