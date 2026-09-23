@@ -343,52 +343,70 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     return f;
   }
 
-  // ─── Wall drawing interactions (canvas pixels → room cm) ───
+  // ─── Raw pointer interactions (canvas pixels → room cm) ───
+  // Uses Listener instead of GestureDetector so pan starts instantly
+  // without the 18 px kTouchSlop dead zone.
 
-  void _onCanvasTap(Offset local, double s) {
-    if (!_wallMode) {
-      setState(() => _selectedIdx = -1);
-      return;
-    }
-    final p = Offset(
-      (local.dx / s).clamp(0.0, _roomW).toDouble(),
-      (local.dy / s).clamp(0.0, _roomH).toDouble(),
-    );
-    // Ignore taps very close to an existing corner.
-    for (final w in _walls) {
-      if ((w - p).distance < 12) return;
-    }
-    setState(() => _walls.add(p));
-  }
+  bool _pointerMoved = false;
 
-  void _onCanvasPanStart(Offset local, double s) {
+  void _onPointerDown(PointerDownEvent e, double s) {
+    _pointerMoved = false;
+
+    final p = Offset(e.localPosition.dx / s, e.localPosition.dy / s);
+
+    // Try to grab an existing wall corner.
     _draggingWallIdx = -1;
-    if (!_wallMode || _walls.isEmpty) return;
-    final p = Offset(local.dx / s, local.dy / s);
-    int? best;
-    var bestDist = double.infinity;
-    for (var i = 0; i < _walls.length; i++) {
-      final d = (_walls[i] - p).distance;
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
+    if (_walls.isNotEmpty) {
+      int? best;
+      var bestDist = double.infinity;
+      for (var i = 0; i < _walls.length; i++) {
+        final d = (_walls[i] - p).distance;
+        if (d < bestDist) {
+          bestDist = d;
+          best = i;
+        }
+      }
+      // 25 cm grab radius in room coordinates.
+      if (best != null && bestDist <= 25) {
+        _draggingWallIdx = best;
+        return; // consume — start dragging immediately
       }
     }
-    // Grab the corner when the touch starts within ~15 cm of it.
-    if (best != null && bestDist <= 0.15) {
-      _draggingWallIdx = best;
+  }
+
+  void _onPointerMove(PointerMoveEvent e, double s) {
+    _pointerMoved = true;
+
+    // Drag an existing wall corner.
+    if (_draggingWallIdx >= 0 && _draggingWallIdx < _walls.length) {
+      final p = Offset(
+        (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
+        (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
+      );
+      setState(() {
+        _walls[_draggingWallIdx] = p;
+      });
     }
   }
 
-  void _onCanvasPanUpdate(Offset delta, double s) {
-    if (_draggingWallIdx < 0 || _draggingWallIdx >= _walls.length) return;
-    final w = _walls[_draggingWallIdx];
-    setState(() {
-      _walls[_draggingWallIdx] = Offset(
-        (w.dx + delta.dx / s).clamp(0.0, _roomW).toDouble(),
-        (w.dy + delta.dy / s).clamp(0.0, _roomH).toDouble(),
+  void _onPointerUp(PointerUpEvent e, double s) {
+    // Tap = pointer-down → pointer-up with < 5 px movement.
+    if (!_pointerMoved && _draggingWallIdx < 0) {
+      final p = Offset(
+        (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
+        (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
       );
-    });
+      if (_wallMode) {
+        // Add a new corner (ignore taps too close to existing ones).
+        final tooClose = _walls.any((w) => (w - p).distance < 12);
+        if (!tooClose) {
+          setState(() => _walls.add(p));
+        }
+      } else {
+        setState(() => _selectedIdx = -1);
+      }
+    }
+    _draggingWallIdx = -1;
   }
 
   void _clearWalls() {
@@ -468,6 +486,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
               onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()),
+            style: ElevatedButton.styleFrom(minimumSize: Size.zero),
             child: const Text('Save'),
           ),
         ],
@@ -542,64 +561,88 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _stage == _Stage.plan
-          ? AppColors.background
-          : Colors.black,
-      appBar: AppBar(
-        title: Text(
-          switch (_stage) {
-            _Stage.init || _Stage.scanning => 'Room Scanner',
-            _Stage.roomSelect => 'Room Scanner',
-            _Stage.plan => widget.existingDesign != null
-                ? 'Edit: ${widget.existingDesign!.name}'
-                : 'Room Planner',
-          },
-          style: GoogleFonts.poppins(),
-        ),
-        backgroundColor:
-            _stage == _Stage.plan ? AppColors.background : Colors.black,
-        foregroundColor:
-            _stage == _Stage.plan ? AppColors.textPrimary : Colors.white,
-        actions: _stage == _Stage.plan
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.camera_alt),
-                  tooltip: 'Scan Room',
-                  onPressed: () {
-                    if (_cam != null && _cam!.value.isInitialized) {
-                      _startScan();
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Camera not available')),
-                      );
-                    }
-                  },
+    final isDark = _stage != _Stage.plan;
+    final bgColor = isDark ? Colors.black : AppColors.background;
+    final fgColor = isDark ? Colors.white : AppColors.textPrimary;
+
+    // Use a plain Column instead of a nested Scaffold to avoid layout
+    // conflicts with the outer HomeownerShell Scaffold.
+    return ColoredBox(
+      color: bgColor,
+      child: Column(
+        children: [
+          // ── Custom app bar ──
+          SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: kToolbarHeight,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        switch (_stage) {
+                          _Stage.init || _Stage.scanning => 'Room Scanner',
+                          _Stage.roomSelect => 'Room Scanner',
+                          _Stage.plan => widget.existingDesign != null
+                              ? 'Edit: ${widget.existingDesign!.name}'
+                              : 'Room Planner',
+                        },
+                        style: GoogleFonts.poppins(
+                          color: fgColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ),
+                    if (_stage == _Stage.plan) ...[
+                      IconButton(
+                        icon: Icon(Icons.camera_alt, color: fgColor),
+                        tooltip: 'Scan Room',
+                        onPressed: () {
+                          if (_cam != null && _cam!.value.isInitialized) {
+                            _startScan();
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Camera not available')),
+                            );
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.view_in_ar, color: fgColor),
+                        tooltip: 'View in AR',
+                        onPressed: () => context.push(
+                          '/ar-viewer',
+                          extra: ArFurnitureLibrary.fromIconNames(
+                              _furniture.map((f) => f.iconName).toList()),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.save, color: fgColor),
+                        tooltip: 'Save Design',
+                        onPressed: _saveDesign,
+                      ),
+                    ],
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.view_in_ar),
-                  tooltip: 'View in AR',
-                  onPressed: () => context.push(
-                    '/ar-viewer',
-                    extra: ArFurnitureLibrary.fromIconNames(
-                        _furniture.map((f) => f.iconName).toList()),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.save),
-                  tooltip: 'Save Design',
-                  onPressed: _saveDesign,
-                ),
-              ]
-            : null,
+              ),
+            ),
+          ),
+          // ── Body ──
+          Expanded(
+            child: switch (_stage) {
+              _Stage.init => _initView(),
+              _Stage.scanning => _scanView(),
+              _Stage.roomSelect => _roomSelectView(),
+              _Stage.plan => _planEditor(),
+            },
+          ),
+        ],
       ),
-      body: switch (_stage) {
-        _Stage.init => _initView(),
-        _Stage.scanning => _scanView(),
-        _Stage.roomSelect => _roomSelectView(),
-        _Stage.plan => _planEditor(),
-      },
     );
   }
 
@@ -772,6 +815,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,
+                minimumSize: Size.zero,
               ),
             ),
           ],
@@ -1040,12 +1084,11 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                           ),
                         ],
                       ),
-                      child: GestureDetector(
-                        onTapUp: (d) => _onCanvasTap(d.localPosition, s),
-                        onPanStart: (d) =>
-                            _onCanvasPanStart(d.localPosition, s),
-                        onPanUpdate: (d) => _onCanvasPanUpdate(d.delta, s),
-                        onPanEnd: (_) => _draggingWallIdx = -1,
+                      child: Listener(
+                        behavior: HitTestBehavior.opaque,
+                        onPointerDown: (e) => _onPointerDown(e, s),
+                        onPointerMove: (e) => _onPointerMove(e, s),
+                        onPointerUp: (e) => _onPointerUp(e, s),
                         child: Stack(
                           clipBehavior: Clip.hardEdge,
                           children: [
@@ -1171,6 +1214,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                                 child: Container(
                                   width: itemW,
                                   height: itemH,
+                                  clipBehavior: Clip.hardEdge,
                                   decoration:
                                       BoxDecoration(
                                     color: isSelected
@@ -1222,15 +1266,16 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                                             ),
                                             if (itemW >
                                                 55)
-                                              Padding(
-                                                padding: const EdgeInsets.symmetric(horizontal: 2),
+                                              SizedBox(
+                                                width: itemW - 4,
                                                 child: Text(
                                                   f.name,
                                                   textAlign: TextAlign.center,
                                                   maxLines: 1,
+                                                  softWrap: false,
                                                   overflow: TextOverflow.ellipsis,
                                                   style: GoogleFonts.poppins(
-                                                    fontSize: min(itemW * 0.1, 10),
+                                                    fontSize: min(itemW * 0.1, 10).clamp(6, 10).toDouble(),
                                                     fontWeight: FontWeight.w600,
                                                     color: isSelected
                                                         ? AppColors.accent
@@ -1275,35 +1320,42 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             padding: const EdgeInsets.symmetric(
                 horizontal: 16, vertical: 8),
             color: AppColors.surface,
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.touch_app,
-                    size: 16, color: AppColors.accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _furniture[_selectedIdx].name,
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13),
-                  ),
+                Row(
+                  children: [
+                    Icon(Icons.touch_app,
+                        size: 16, color: AppColors.accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _furniture[_selectedIdx].name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        setState(() {
+                          _furniture.removeAt(_selectedIdx);
+                          _selectedIdx = -1;
+                        });
+                      },
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
-                Text('Tap to select • Drag to move • Long-press to remove',
+                Text('Tap to select · Drag to move · Long-press to remove',
                     style: GoogleFonts.poppins(
                         fontSize: 10,
                         color: AppColors.textHint)),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () {
-                    setState(() {
-                      _furniture.removeAt(_selectedIdx);
-                      _selectedIdx = -1;
-                    });
-                  },
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
               ],
             ),
           ),
@@ -1494,76 +1546,83 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                 const SizedBox(height: 8),
               ],
 
-              // Row 2 — actions
-              Row(
-                children: [
-                  // Wall drawing toggle (long-press clears the walls)
-                  GestureDetector(
-                    onLongPress: _walls.isEmpty ? null : _clearWalls,
-                    child: OutlinedButton.icon(
-                      onPressed: () => setState(
-                          () => _wallMode = !_wallMode),
-                      icon: Icon(
-                        _wallMode ? Icons.polyline : Icons.polyline_outlined,
-                        size: 18,
+              // Row 2 — actions (scrollable on narrow screens)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    // Wall drawing toggle (long-press clears the walls)
+                    GestureDetector(
+                      onLongPress: _walls.isEmpty ? null : _clearWalls,
+                      child: OutlinedButton.icon(
+                        onPressed: () => setState(
+                            () => _wallMode = !_wallMode),
+                        icon: Icon(
+                          _wallMode ? Icons.polyline : Icons.polyline_outlined,
+                          size: 18,
+                        ),
+                        label: Text(_wallMode ? 'Add Corners' : 'Draw Walls'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                          foregroundColor: _wallMode
+                              ? AppColors.accent
+                              : AppColors.textPrimary,
+                          side: BorderSide(
+                              color: _wallMode
+                                  ? AppColors.accent
+                                  : AppColors.border),
+                        ),
                       ),
-                      label: Text(_wallMode ? 'Add Corners' : 'Draw Walls'),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _furniture.clear();
+                          _selectedIdx = -1;
+                        });
+                      },
+                      icon: const Icon(Icons.clear_all, size: 18),
+                      label: const Text('Clear'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
-                        foregroundColor: _wallMode
-                            ? AppColors.accent
-                            : AppColors.textPrimary,
-                        side: BorderSide(
-                            color: _wallMode
-                                ? AppColors.accent
-                                : AppColors.border),
+                        minimumSize: Size.zero,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _furniture.clear();
-                        _selectedIdx = -1;
-                      });
-                    },
-                    icon: const Icon(Icons.clear_all, size: 18),
-                    label: const Text('Clear'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () => context.push(
+                        '/ar-viewer',
+                        extra: ArFurnitureLibrary.fromIconNames(
+                            _furniture.map((f) => f.iconName).toList()),
+                      ),
+                      icon: const Icon(Icons.view_in_ar, size: 18),
+                      label: const Text('AR View'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        minimumSize: Size.zero,
+                        foregroundColor: AppColors.accent,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  OutlinedButton.icon(
-                    onPressed: () => context.push(
-                      '/ar-viewer',
-                      extra: ArFurnitureLibrary.fromIconNames(
-                          _furniture.map((f) => f.iconName).toList()),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: _saveDesign,
+                      icon: const Icon(Icons.save, size: 18),
+                      label: const Text('Save'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        minimumSize: Size.zero,
+                      ),
                     ),
-                    icon: const Icon(Icons.view_in_ar, size: 18),
-                    label: const Text('AR View'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      foregroundColor: AppColors.accent,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: _saveDesign,
-                    icon: const Icon(Icons.save, size: 18),
-                    label: const Text('Save'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.accent,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
