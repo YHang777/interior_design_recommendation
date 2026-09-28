@@ -1,294 +1,331 @@
-# Interior Design Recommendation System — Project Reference
+# Intellar — Interior Design & Furniture Recommendation App
 
-## Overview
-
-A **Flutter-based Android mobile application** that provides AI-powered interior design recommendations. The app serves two user roles:
-
-| Role | Purpose |
-|------|---------|
-| **Homeowner / End User** | Get AI design suggestions, preview changes via AR, browse & buy materials from marketplace, track budgets |
-| **Supplier** | List and manage products, handle orders, view sales analytics |
-
-The project is a **Final Year Project (FYP)** by Lim Yee Hang (24PMR10425), Bachelor of Software Engineering (Honours), TAR UMT Penang, supervised by Ms Tan Kee Oon. Academic Year 2025/26.
+Project reference for Claude Code sessions. **Read this first**; it reflects the
+codebase as of 2026-09-29 (post-redesign, unified web host live on Render).
 
 ---
 
-## Current Codebase State — CRITICAL
+## 1. Overview
 
-The existing codebase is **not reusable** and needs a **full redesign and restructure**:
+FYP (Final Year Project) by **Lim Yee Hang** (24PMR10425), Tunku Abdul Rahman
+University of Management and Technology (Penang branch), supervisor **Ms Tan
+Kee Oon**, academic year 2025/26.
 
-1. **Monolithic dump**: `lib/main.dart` is ~9,437 lines (327 KB) containing **all** app code — auth, theming, every screen, every widget, providers, and business logic — all inline in one file.
-2. **Empty placeholder files**: The feature screen files under `lib/screens/homeowner/` and `lib/screens/supplier/` are all empty (0 lines). Only the report screens (`report_screens.dart` at 1,299 lines, `budget_report_screen.dart` at 434 lines, etc.) have actual code extracted from `main.dart`. The actual feature implementations are all still in `main.dart`.
-3. **No separation of concerns**: Models, services, providers, and UI are mixed together. `AuthProvider` is defined inline in `main.dart` instead of in a separate file.
-4. **Hardcoded data**: Designs, products, and recommendations are hardcoded — no real backend integration. Firebase is listed as the database but not actually integrated.
-5. **Plain/basic UI**: The current design is described as "too plain" — it uses a soft brown/teal color scheme with Material 3 and Google Fonts (Poppins), but the overall UX is basic.
-6. **Messy directory structure**: No clear separation between features, no reusable widget library, no routing system.
+A mobile app for interior design and furniture shopping with two roles:
 
-### Current Directory Structure (messy)
+- **Homeowner (customer)** — scan/design rooms, get AI recommendations, place
+  furniture in AR, browse a furniture marketplace, plan budgets.
+- **Supplier** — manage a product catalogue, fulfil orders, see analytics.
+- **Admin** — a web console (separate from the app) for user/supplier
+  monitoring, IC verification review, and account help.
 
-```
-interior_design_recommendation/
-├── lib/
-│   ├── main.dart              ← 9,437 lines, ALL code dumped here
-│   ├── config/
-│   │   ├── app_config.dart
-│   │   └── local_config.dart
-│   ├── models/
-│   │   └── product.dart
-│   ├── providers/
-│   │   ├── analytics_provider.dart
-│   │   └── marketplace_provider.dart
-│   ├── screens/
-│   │   ├── auth_screen.dart                  ← empty (0 lines)
-│   │   ├── budget_report_screen.dart          ← 434 lines
-│   │   ├── report_screens.dart                ← 1,299 lines
-│   │   ├── sales_analytics_report_screen.dart ← 549 lines
-│   │   ├── supplier_widgets.dart              ← empty (0 lines)
-│   │   ├── user_design_report_screen.dart     ← 527 lines
-│   │   ├── homeowner/
-│   │   │   ├── ai_recommendation_screen.dart    ← empty
-│   │   │   ├── budget_planner_screen.dart       ← empty
-│   │   │   ├── dashboard_screen.dart            ← empty
-│   │   │   ├── homeowner_main_screen.dart       ← empty
-│   │   │   ├── marketplace_screen.dart          ← empty
-│   │   │   ├── profile_screen.dart              ← empty
-│   │   │   └── saved_designs_screen.dart        ← empty
-│   │   └── supplier/
-│   │       ├── dashboard_screen.dart            ← empty
-│   │       ├── order_management_screen.dart     ← empty
-│   │       ├── product_management_screen.dart   ← empty
-│   │       ├── profile_screen.dart              ← empty
-│   │       └── sales_analytics_screen.dart      ← empty
-│   └── services/
-│       ├── gemini_service.dart
-│       └── marketplace_service.dart
-├── assets/
-│   ├── data/products.json
-│   └── images/                  ← ~60 stock images for furniture/textures/rooms
-├── server/
-│   ├── bin/server.dart
-│   └── data/products.json
-├── diagram/                     ← System design diagrams (Mermaid format)
-├── test/
-├── android/
-├── build/
-└── pubspec.yaml
-```
+The app is **implemented**, not a skeleton: the pre-redesign monolith
+(`main.dart` ~9,400 lines of hardcoded UI) was fully rebuilt into the feature
+structure below. Marketplace is Firestore-backed with real-time sync; AR
+places true-size furniture via procedural GLBs; email verification is a live
+production flow.
 
 ---
 
-## Target Architecture (To Be Built)
+## 2. System Architecture (as built)
 
-### Tech Stack
+Three deliverables in one repo:
 
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | Flutter (Dart), cross-platform for Android + iOS |
-| **Backend** | Node.js (existing `server/` placeholder) |
-| **Database** | Firebase (Firestore for real-time data; Auth for user management) |
-| **AI** | Google Gemini API (currently `gemini-2.0-flash`); ML Kit for image labeling |
-| **AR** | Camera plugin + ARCore/ARKit (via Flutter plugin, TBD) |
-| **State Management** | Provider (current), consider Riverpod or Bloc for redesign |
+| Part | Tech | Role |
+|---|---|---|
+| `lib/` | Flutter 3.29+ / Dart | The mobile app (customer + supplier) |
+| `web/` | React 18 + Vite 6 (SPA) and Express 4 + firebase-admin (Node 22) | **Unified web host** — admin console + email verification — one Render service, one URL |
+| `server/` | Dart (shelf-free, plain `HttpServer`) | **Legacy** — the original email-verification server. Kept as local-dev + token-format reference only. Its JSON marketplace endpoints are dropped (marketplace is Firestore). Not deployed. |
 
-### Dependencies (from pubspec.yaml)
+### Live hosting (Render)
 
-- `provider: ^6.1.5` — state management
-- `google_fonts: ^6.1.0` — typography
-- `google_generative_ai: ^0.4.7` — Gemini AI integration
-- `http: ^1.2.0` — HTTP client
-- `camera: ^0.10.5+5` — camera for AR
-- `google_mlkit_image_labeling: ^0.11.0` — on-device image recognition
+One service `interior-design-recommendation` on the free tier, image built by
+`web/Dockerfile` (multi-stage; build context = **repo root**):
 
-### Proposed New Directory Structure
+| URL | Serves |
+|---|---|
+| `https://interior-design-recommendation.onrender.com/` | 302 → `/admin` |
+| `…/admin` | React admin console (static SPA, `base: '/admin/'`) |
+| `…/admin/api/*` | Admin API (alias `/api/*` = same router; health check uses `/api/health`) |
+| `…/verify-email/send` | POST — mints HMAC token, sends Brevo email (called by the app at registration) |
+| `…/verify-email/confirm` | GET — token check page; sets Firebase `emailVerified` via firebase-admin |
+
+**Render settings that must not regress:**
+- **Dockerfile Path = `web/Dockerfile`** (if this reverts to `server/Dockerfile`,
+  the OLD Dart image builds and the health check at `/api/health` times out).
+- **Health Check Path = `/api/health`** → `{status:'ok', firebaseConfigured, verificationEmailConfigured}`.
+- Env: `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` (Identity Toolkit login
+  proxy), `ADMIN_UIDS` (comma-separated UIDs), `FIREBASE_SERVICE_ACCOUNT_JSON`
+  (paste whole key JSON — **secret, never commit, never paste into chat**; the
+  old `SERVICE_ACCOUNT_PATH` secret-file mount also works), `VERIFY_TOKEN_SECRET`,
+  `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `PUBLIC_BASE_URL`
+  (optional override for link base), `ADMIN_STATIC_DIR` (set in the image).
+- Free tier cold starts (~1 min). Health check must return 2xx or deploys fail
+  after ~18 min.
+
+### Email verification flow (production = Node port in `web/backend`)
+
+- Stateless HMAC-SHA256 token: `base64url(payload).base64url(sig)`, payload
+  `{uid, email, exp}` (epoch seconds, TTL 24h), **unpadded** base64url.
+  Token format is **byte-compatible** with the Dart implementation — links
+  already sent stay valid across the migration.
+- Send: `POST /verify-email/send` `{email, uid}` → Brevo v3 `/smtp/email`
+  transactional. 503 if unconfigured, 502 generic message on Brevo failure
+  (never leaks provider detail).
+- Confirm: `GET /verify-email/confirm?token=…` → success/failure HTML card
+  (inline CSS, same markup as the Dart version) + `updateUser(uid, {emailVerified: true})`.
+- Link base = request `Host` + `X-Forwarded-Proto` (first comma token),
+  fallback `https`, overridable by `PUBLIC_BASE_URL`.
+- The app side lives in `lib/features/auth/` +
+  `lib/services/verification/verification_application_service.dart` (IC
+  applications) and calls the paths above.
+
+### Admin auth & authorization
+
+- Login = Identity Toolkit `signInWithPassword` proxy (`/admin/api/auth/login`);
+  no Firebase SDK in the browser.
+- Admin = UID listed in `ADMIN_UIDS` **or** custom claim `{admin: true}`.
+- Firestore profile is optional at login (admin has no `role` field — the app
+  parses role as homeowner/supplier only).
+- Admin features: overview stats, user/supplier monitoring, IC verification
+  review queue (`verification_applications`), password reset help, safe account
+  deletion (cascade: cart/wishlist subcollections, deactivate owned products).
+- IC document bytes are admin-only — no public URLs.
+
+---
+
+## 3. Directory Structure
+
+### Flutter app (`lib/`)
 
 ```
 lib/
-├── main.dart                          ← thin, app entry + DI setup only
-├── app.dart                           ← MaterialApp, theme, router config
+├── main.dart                  # Firebase init → first-auth seed/migration → ProviderScope → app
+├── app.dart                   # MaterialApp.router
+├── config/                    # app_config.dart, local_config.dart (API keys — see Secrets)
 ├── core/
-│   ├── theme/
-│   │   ├── app_theme.dart             ← light/dark themes
-│   │   ├── app_colors.dart
-│   │   └── app_typography.dart
-│   ├── routing/
-│   │   └── app_router.dart            ← GoRouter or Navigator 2.0 routes
-│   ├── constants/
-│   │   └── app_constants.dart
-│   └── utils/
-│       ├── validators.dart
-│       └── extensions.dart
+│   ├── constants/             # app_colors, app_strings
+│   ├── router/                # app_router.dart (GoRouter, role redirects), route_names.dart
+│   ├── theme/                 # app_theme, text_styles (GoogleFonts)
+│   └── utils/                 # formatters, pricing, validators
 ├── features/
-│   ├── auth/
-│   │   ├── data/                      ← repositories, data sources
-│   │   ├── domain/                    ← models, use cases
-│   │   └── presentation/             ← screens, widgets, providers
-│   ├── dashboard/
-│   │   └── ...
-│   ├── ar_visualization/
-│   │   └── ...
-│   ├── ai_recommendation/
-│   │   └── ...
-│   ├── marketplace/
-│   │   └── ...
-│   ├── budget_planner/
-│   │   └── ...
-│   ├── supplier/
-│   │   ├── inventory/
-│   │   ├── orders/
-│   │   ├── analytics/
-│   │   └── ...
-│   └── settings/
-│       └── ...
-├── shared/
-│   ├── widgets/                       ← reusable UI components
-│   │   ├── buttons/
-│   │   ├── cards/
-│   │   ├── inputs/
-│   │   └── layout/
-│   └── services/                      ← shared backend services
-│       ├── api_client.dart
-│       ├── firebase_service.dart
-│       ├── gemini_service.dart        ← move from current location
-│       └── storage_service.dart
-└── l10n/                              ← localization (future)
+│   ├── auth/                  # clean architecture: domain, data, presentation
+│   │   └── login, register, forgot_password, verify_email
+│   ├── customer/
+│   │   ├── ar/                # AR viewer + data/: glb_generator, glb_rescaler, glb_bounds,
+│   │   │                      #   glb_file_saver, furniture_model_library, room_finishes
+│   │   ├── budget/            # budget planner
+│   │   ├── homeowner/         # dashboard, shell, scan, ai_recommendation, saved_designs, profile
+│   │   │                      #   data/: supabase_room_design_datasource (polling), providers/
+│   │   ├── marketplace/       # marketplace, product_detail, cart, checkout, order_confirmation,
+│   │   │                      #   order_history, buyer_order_detail, wishlist + providers/
+│   │   └── scanner/           # room_scanner (camera + ML Kit image labeling)
+│   └── supplier/              # presentation/{providers,screens}: shell, dashboard,
+│                              #   product_management, product_form, order_management,
+│                              #   order_detail, analytics, supplier_profile
+├── models/                    # product, cart_item, order, review, room_design,
+│                              #   product_category, app_config_data
+├── services/
+│   ├── gemini_service.dart
+│   ├── marketplace_repository.dart   # Firestore CRUD + seed/migration
+│   ├── recent_searches_store.dart
+│   ├── verification/                # verification_application_model/service (supplier IC apply)
+│   ├── media/                       # MediaStore → HybridMediaStore: photos → Cloudinary,
+│   │                                #   GLBs → Supabase
+│   └── model_generation/            # model_glb_resolver, tripo_generator, tripo_poll_state,
+│                                    #   generation_decider, model_generation_trigger
+└── shared/widgets/            # product_card, floating_nav_bar, skeleton_loader, empty_state,
+                               #   confirm_dialog, gradient_scaffold, … (21 shared widgets)
 ```
 
----
+### Web host (`web/`)
 
-## System Modules & Features
+```
+web/
+├── Dockerfile                 # THE Render image (3 stages: Vite build → tsc → node:22 runtime)
+├── README.md                  # deploy guide + env reference
+├── .env.example
+├── backend/src/
+│   ├── app.ts                 # unified host assembly (mount order matters — see file header)
+│   ├── index.ts               # boot + config-status banner
+│   ├── config/                # env.ts (zod), firebase.ts (admin SDK credential chain)
+│   ├── lib/                   # verification-token.ts (+test), verification-mailer.ts
+│   ├── middleware/            # auth, admin guard, errorHandler (400 INVALID_JSON etc.)
+│   ├── routes/                # index (health), auth, users, stats, verification,
+│   │                          #   verify-email.routes.ts (+test)
+│   └── services/              # identity, users, applications, deletion, verification,
+│                              #   verification-email
+└── frontend/src/              # React 18 + TS + Vite 6; pages: Login, Overview, Users,
+                               #   Verification; api/client.ts (VITE_API_BASE_URL);
+                               #   no react-router (state-switched pages)
+```
 
-### 1. Account & Profile Management
-- Email/password login with optional **2FA (face recognition)**
-- Role-based access: `homeowner` vs `supplier`
-- Profile editing, password change, notification preferences
-- Firebase Authentication target
+### Legacy Dart server (`server/`)
 
-### 2. AR Visualization Module
-- Real-time AR preview of design changes (wall colors, flooring, furniture)
-- Room scanning via camera
-- Furniture placement with position/rotation/scale
-- Lighting adaptation
-- Save/load designs
-- **Technology**: Camera plugin + AR framework (ARKit/ARCore)
+`bin/server.dart`, `lib/{verification_token,verification_mailer,verify_handlers,firebase_admin_client}.dart`,
+`test/` (7 token tests). **Not deployed.** Useful only for local token debugging;
+keep token format in sync with `web/backend/src/lib/verification-token.ts`.
 
-### 3. AI Recommendation Engine
-- **Room analysis**: Scan room → identify existing materials, colors, style
-- **Style matching**: Recommends compatible designs (Modern, Scandinavian, Industrial, Bohemian, Classic, Minimalist)
-- **Budget-aware suggestions**: Suggests cheaper alternatives if selections exceed budget
-- **Material recommendation**: Considers room conditions (e.g., water-resistant for humid areas)
-- **Powered by**: Google Gemini API + ML Kit image labeling
-- **Learning**: Refines recommendations from user feedback
+### Repo root
 
-### 4. Marketplace Module
-- Browse, filter, search products (furniture, materials, decor)
-- Categories: Furniture, Lighting, Flooring, Wall, Decor, Textiles
-- **Eco-friendly filter**: Recycled materials, sustainable certifications, low-VOC
-- **Live stock**: Real-time inventory from supplier
-- Shopping cart, order placement, payment integration
-- **Delivery tracking** for buyers
-
-### 5. Budget Planner
-- Set total renovation budget
-- Track spent amount across selected items
-- **Alert** when approaching/exceeding budget
-- Auto-suggest cheaper alternatives
-- Compare prices across suppliers
-- Generate cost estimates
-
-### 6. Dashboard (per role)
-
-**Homeowner Dashboard**: Saved designs, purchase history, budget status, AI recommendations, promotions
-
-**Supplier Dashboard**: Product views, sales volume, order management, analytics, low-stock alerts
-
-### 7. Virtual Staging (Real Estate)
-- Upload empty room photos
-- Digitally furnish with popular styles
-- Shareable link for potential buyers
-- Multiple style options (Modern, Rustic, Minimal)
+`firebase.json`, `firestore.rules`, `firestore.indexes.json`, `storage.rules`
+(future Blaze upgrade — Firebase Storage is currently unavailable on Spark),
+`lib/firebase_options.dart`, `test/` (Flutter widget/unit tests), `assets/`
+(seed `data/products.json`, ~70 images, 10 bundled `.glb` models).
 
 ---
 
-## Data Model (from ERD)
+## 4. Tech Stack
 
-Key entities:
-
-| Entity | Key Fields |
-|--------|-----------|
-| **User** | id, name, email, password, phone, address, role (homeowner/supplier), profilePicture |
-| **Supplier** | id, name, email, phone, address, businessLicense, description |
-| **Product** | id, name, description, price, stock, image, category, designStyle, supplierId (FK) |
-| **Order** | id, userId (FK), supplierId (FK), totalAmount, status, shippingAddress |
-| **OrderItem** | id, orderId (FK), productId (FK), quantity, unitPrice, subtotal |
-| **SavedDesign** | id, userId (FK), name, description, image, roomType, designStyle |
-| **PlacedFurniture** | id, designId (FK), furnitureId (FK), xPosition, yPosition, rotation, scale |
-| **FurnitureItem** | id, name, category, image, description, width, height |
-| **WallArea** | id, designId (FK), xPosition, yPosition, width, height, color, textureId (FK) |
-| **WallTexture** | id, name, image, category, description |
-| **Budget** | id, userId (FK), totalBudget, spentAmount, currency |
-| **BudgetItem** | id, budgetId (FK), category, allocatedAmount, spentAmount |
-| **ChatMessage** | id, userId (FK), sender, message, messageType |
-| **Notification** | id, userId (FK), title, message, type, status |
-| **Receipt** | id, orderId (FK), issuedBy, paymentMethod, totalAmount |
-| **SalesAnalytics** | id, supplierId (FK), totalSales, totalOrders, averageRating |
-| **PurchaseHistory** | id, userId (FK), productId (FK), quantity, totalPrice, status |
-
-### Key Relationships
-- User 1→* Order, SavedDesign, Budget, ChatMessage, Notification
-- Supplier 1→* Product, Order, SalesAnalytics
-- Order 1→* OrderItem; Order 1→1 Receipt
-- SavedDesign 1→* PlacedFurniture, WallArea
-- Budget 1→* BudgetItem
+| Layer | Technology |
+|---|---|
+| Mobile frontend | Flutter 3.29+, Dart SDK ^3.7, Android-first (minSdk 28, compileSdk 36) |
+| State management | **Riverpod** (`flutter_riverpod` 2.6) — StreamProviders for live data |
+| Navigation | **GoRouter** 14.8 — two `StatefulShellRoute.indexedStack` shells + role redirects |
+| Backend / DB | Firebase Auth + **Cloud Firestore** (marketplace source of truth) + Supabase PostgREST (room designs) |
+| Media | Cloudinary (product photos, unsigned preset), Supabase Storage (GLB models) |
+| AI | Google Gemini (`google_generative_ai`, model `gemini-2.0-flash`) for recommendations |
+| 3D generation | Tripo AI (async poll) with procedural GLB generator from seller dimensions first |
+| AR | `ar_flutter_plugin_2` (ARCore/SceneView) — true-size placement, floor/wall finish overlays |
+| Camera / ML | `camera` + `google_mlkit_image_labeling` (room scanner) |
+| Web admin | React 18 + Vite 6 + TypeScript, Express 4 + firebase-admin 13 + zod, Node 22 |
+| Email | Brevo (Sendinblue) v3 SMTP API — transactional verification mail |
+| Hosting | Render free tier (one Docker service), Firebase project `interior-design-256c5` |
+| Testing | `flutter_test` (widget/unit), `node:test` via `node --import tsx --test`, Dart `server/` tests |
 
 ---
 
-## Design Diagrams (in `diagram/` folder)
+## 5. System Modules (implementation status)
 
-All diagrams are in Mermaid format and can be imported to draw.io:
-
-| File | Content |
-|------|---------|
-| `software_architecture_diagrams.md` | Package diagram, deployment diagram, component diagram — full 3-layer architecture (SystemUI → SystemCtrl → Database) |
-| `erd_diagram.md` | Entity-relationship diagram with 17 entities, cardinalities, and foreign keys |
-| `class_diagram.md` | UML class diagram with methods, composition vs aggregation relationships |
-| `sequence_diagrams.md` | Sequence diagrams for account management, AI recommendation, AR visualization, marketplace, dashboard, budget |
-| `account_management_sequences.md` / `_states.md` | Detailed flow and state diagrams for auth module |
-| `ai_recommendation_sequences.md` / `_states.md` | AI recommendation flow and state transitions |
-| `ar_visualization_sequences.md` / `_states.md` | AR visualization flow and state transitions |
-| `budget_calculation_sequences.md` / `_states.md` | Budget calculation flow |
-| `marketplace_sequences.md` / `_states.md` | Marketplace/e-commerce flow |
-| `dashboard_sequences.md` / `_states.md` | Dashboard data flow |
-| `data_dictionary.md` | Complete data dictionary with all table attributes, types, and descriptions |
-| `algorithm_design.md` | AI recommendation algorithm design |
-| `security_design.md` | Security architecture |
+| Module | Status | Notes |
+|---|---|---|
+| Account / Profile | ✅ | Firebase Auth; login/register/forgot-password; email verification live (Brevo). 2FA face recognition was planned — **not implemented**. |
+| AR Visualization | ✅ | True-size furniture from seller dims (procedural GLB) → Tripo fallback → bundled library; floor/wall finish overlays with swatches. Needs a physical device for runtime testing. |
+| AI Recommendation Engine | ✅ | Gemini chat-style recommender with inline style/room selection. |
+| Marketplace (eco filter) | ✅ | Firestore real-time: catalog, cart, checkout, orders, reviews, wishlist. Membership tiers count DELIVERED orders only. Eco/energy filter exists in the product model/UI. |
+| Budget Planner | ✅ | Budget plans + estimates (MYR). |
+| Role Dashboards | ✅ | Homeowner dashboard + supplier dashboard/analytics. |
+| Virtual Staging | ⚠️ partial | AI style imagery + room scans exist; a dedicated virtual-staging module is not a separate feature. |
+| Supplier IC Verification | ✅ | Supplier applies in-app; admin reviews in `/admin` (IC docs admin-only). |
+| Admin Console | ✅ | Users, stats, verification review, password help, safe deletion. |
 
 ---
 
-## Development Methodology
+## 6. Data Model (as coded)
 
-**Evolutionary Prototyping** — Build early working prototypes, evaluate with stakeholders, refine iteratively.
+Firestore (`interior-design-256c5`):
 
-Phases: Requirements → Analysis → Prototype Development → Client Evaluation → Refinement → (loop) → Final Design → Coding → Integration Testing → Maintenance
+| Path | Contents |
+|---|---|
+| `products` | Public read, auth write. `stock` updated with **deltas** in transactions. `isActive` soft-delete. |
+| `products/{id}/reviews` | Doc id = order id → one review per order. |
+| `orders` | Participant-scoped via `supplierIds` array; status state machine (transactional next-step). |
+| `users/{uid}` | Profile (role: homeowner/supplier — no admin role here). |
+| `users/{uid}/cart`, `users/{uid}/wishlist` | Per-user subcollections. |
+| `verification_applications/{uid}` | Supplier IC verification applications (status, document refs). |
+
+Supabase (PostgREST, project `wlgqhhnezniodelidbvz`):
+
+| Table | Contents |
+|---|---|
+| `room_designs` | id, name, room_type, width_cm, height_cm, furniture JSONB, detected_items JSONB, image_path, timestamps, user_id. RLS disabled; anon key (Firebase Auth is the real auth). |
+
+Dart models in `lib/models/`: `product.dart`, `cart_item.dart`, `order.dart`,
+`review.dart`, `room_design.dart`, `product_category.dart`, `app_config_data.dart`.
+
+**Pricing invariant (do not regress):** ONE source —
+`lib/core/utils/pricing.dart` `computePriceBreakdown` (free shipping on
+post-membership-discount chargeable; 6% tax on chargeable). `PriceBreakdown.fromStored`
+for persisted orders.
+
+**Marketplace invariants:** `createOrder` is idempotent (deterministic id +
+transaction existence check before stock decrement); `updateProduct` uses stock
+deltas; `updateOrderStatus` transactional state machine; cart rows reconcile
+against the live products stream; seeding runs once after first sign-in
+(SharedPreferences key `marketplace_seed_v1`).
 
 ---
 
-## Key Design Intent (for the redesign)
+## 7. Key Design Patterns
 
-1. **Clean architecture**: Feature-based folder structure with separation of data/domain/presentation layers
-2. **Reusable widget library**: Shared components (buttons, cards, inputs) under `shared/widgets/`
-3. **Proper routing**: GoRouter or Navigator 2.0 with named routes instead of inline navigation
-4. **Theme system**: Centralized light/dark theme with design tokens, not scattered `Color(0xFF...)` values
-5. **Firebase integration**: Replace hardcoded data with Firestore real-time data + Firebase Auth
-6. **State management**: Move from scattered Providers to a structured approach (Riverpod or Bloc)
-7. **Backend API**: The `server/` directory contains a Dart shelf server stub — this should be the Node.js backend per the tech stack
-8. **Accessibility & localization**: Support multiple languages (at minimum EN + BM) for the Malaysian market
+- Auth state drives routing (`authStateProvider` watched by `appRouterProvider`).
+  Unauth → `/login`; homeowner blocked from `/supplier/**`; supplier blocked
+  from cart/checkout/orders/wishlist.
+- Shells (`HomeownerShell` 6 branches, `SupplierShell` 5 branches) are
+  `StatelessWidget`s with only a `NavigationBar` — each screen owns its Scaffold/AppBar.
+- 3D model pipeline: procedural GLB from seller dimensions → Tripo AI fallback →
+  bundled `assets/models/` fallback (`generation_decider.dart`).
+- AR viewer accepts `Product`, `List<ArFurnitureItem>`, or no args (full catalog).
+- Intra-lib imports are **relative**; Dart clamps `..` at the package root — when
+  moving files recompute each relative URI, never blind-prepend `../`.
+- Marketplace UI is StreamProvider-driven (seller publishes → buyer grid updates
+  instantly).
+- ProductCard uses `Flexible(flex: 2, fit: FlexFit.loose)` for the info section
+  (overflow fixes at 320dp are tested in `test/`).
+- Web backend: deps-injected routers for testability; middleware order in
+  `app.ts` is the contract (CORS lock → JSON → verify-email → api mounts → SPA
+  static/fallback → 404 → error handler).
 
 ---
 
-## Project Constraints & Notes
+## 8. Development Methodology
 
-- **Solo developer project** (FYP by Lim Yee Hang — acting as UI/UX designer, system analyst, developer, tester, and project manager)
-- **Target platform**: Android primarily, with iOS compatibility via Flutter
-- **Malaysian market**: MYR currency, local suppliers, Malaysian real estate context
-- **No existing backend**: Firebase is planned but not integrated; the `server/` folder is a placeholder
-- **Assets**: ~60 stock images for room types, furniture, textures, and wall materials — likely placeholders
+Evolutionary prototyping: build vertical slices, verify on device/tests, refine.
+Recent history: broken HTTP+asset marketplace → Firestore rebuild (Sep 2026) →
+monolith-to-features redesign (Riverpod/GoRouter) → AR pipeline → unified web
+host (admin + email verification) on Render (Sep 29 2026).
+
+Prefer small verified steps; keep pricing/order invariants; match surrounding
+code style. Flutter UI work needs widget tests for layout fixes (`test/`).
+
+---
+
+## 9. Project Constraints
+
+- **Solo developer** (FYP) — favor simple, maintainable solutions.
+- **Android-first** (minSdk 28); iOS/Windows folders exist but are not targeted.
+- **Malaysian market**: MYR pricing, 6% SST-style tax in the pricing helper.
+- **Free-tier everything**: Render (cold starts), Firebase Spark plan (no
+  Storage → hybrid Cloudinary/Supabase media), Cloudinary 25GB/10MB, Supabase
+  1GB/50MB. Design for these caps.
+- ~60+ stock assets (images) and 10 bundled GLB models; GoogleFonts (online).
+
+---
+
+## 10. Secrets & Safety Rules
+
+- Service-account JSON and API keys are **secrets**: never commit, never paste
+  into chat. Sources: `web/.env` / `web/backend/.env` (gitignored), Render
+  Environment tab, `lib/config/local_config.dart` for the app's client keys.
+- `web/.gitignore` covers `service-account*.json`, `secrets/`, `.env`; root
+  `.gitignore` covers `.env`, `server/secrets/`.
+- Passwords are never stored or logged. Admin API refuses non-admin UIDs.
+
+---
+
+## 11. Remaining TODOs
+
+1. Deploy updated `firestore.rules` / `storage.rules` for the IC verification
+   review queue (admin-only document reads) — `firebase deploy --only firestore`
+   when ready; Storage rules only matter after a Blaze upgrade.
+2. One real end-to-end registration email through the live Node port (send →
+   Brevo inbox → confirm page → `emailVerified: true`).
+3. Register the Android debug SHA-1 in the Firebase console if sign-in still
+   fails with DEVELOPER_ERROR.
+4. (Nice to have) deprecation note in `server/` docs; keep `server/Dockerfile`
+   from ever being selected on Render again.
+
+---
+
+## 12. Useful Entry Points
+
+| Want to… | Start at |
+|---|---|
+| App startup / DI | `lib/main.dart`, `lib/app.dart` |
+| Routes & roles | `lib/core/router/app_router.dart`, `route_names.dart` |
+| Marketplace logic | `lib/services/marketplace_repository.dart`, `lib/core/utils/pricing.dart` |
+| AR / 3D | `lib/features/customer/ar/`, `lib/services/model_generation/` |
+| Email verification (prod) | `web/backend/src/routes/verify-email.routes.ts`, `lib/verification-token.ts` |
+| Admin API | `web/backend/src/routes/`, `services/` |
+| Deploy | `web/README.md` §3, `web/Dockerfile` |
+| Structure deep map | memory `project-structure-lookup` (update it when structure changes) |
