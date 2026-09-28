@@ -1,24 +1,34 @@
-# Admin monitoring site (`web/frontend` + `web/backend`)
+# Intellar web host (`web/frontend` + `web/backend`)
 
-An admin console for the interior-design marketplace: monitor customers and
-suppliers, approve/reject suppliers, help users change passwords, and delete
-accounts — safely.
+The admin console **and** the mobile app's email-verification service, served
+from ONE Render URL:
+
+| Path | What |
+|---|---|
+| `/admin` | Admin console SPA (React + Vite + TypeScript) |
+| `/admin/api/*` (alias `/api/*`) | Admin API — monitor customers/suppliers, approve/reject suppliers, review IC applications, password help, safe account deletion |
+| `/verify-email/send` · `/verify-email/confirm` | Registration email verification (Brevo link → confirm page marks Firebase `emailVerified`) — port of the old Dart `server/` routes, same paths and byte-compatible tokens |
 
 **Architecture rule: the frontend never talks to Firebase or Supabase.** It
-talks only to the backend API (`web/backend`), which is the sole component
-that mutates Firebase Auth and Firestore. (The pre-existing Flutter web shell
-files in this folder — `index.html`, `manifest.json`, `favicon.png`, `icons/`
-— belong to the Flutter app and are untouched.)
+talks only to the admin API, which is the sole component that mutates Firebase
+Auth and Firestore. (The pre-existing Flutter web shell files in this folder —
+`index.html`, `manifest.json`, `favicon.png`, `icons/` — belong to the Flutter
+app and are untouched.)
 
 ```
 web/
-  frontend/    React + Vite + TypeScript admin UI  (port 5173)
-  backend/     Node + Express + firebase-admin API (port 4000)
-  render.yaml  Render Blueprint — deploys BOTH halves (see §3)
+  frontend/    React + Vite + TypeScript admin UI  (dev port 5173, base /admin/)
+  backend/     Node + Express + firebase-admin + email verification (port 4000)
+  Dockerfile   unified image — the ONE Render service (see §3)
   README.md    this file
   .env.example both halves' env vars, in one place
   .gitignore   node_modules, dist, .env, service-account keys
 ```
+
+The Dart package in `server/` is kept for local dev and as the reference for
+the token format; production email verification runs on this Node port
+(`web/backend/src/lib/verification-token.ts` is byte-compatible with
+`server/lib/verification_token.dart`, so links already in inboxes stay valid).
 
 Deploying? Jump straight to **[§3 Deploy on Render](#3-deploy-on-render)**.
 
@@ -50,7 +60,7 @@ Other scripts: `npm run build` (tsc → `dist/`), `npm start` (run compiled),
 ```bash
 cd web/frontend
 npm install
-npm run dev                   # http://localhost:5173
+npm run dev                   # http://localhost:5173/admin/
 ```
 
 Other scripts: `npm run build` (typecheck + production bundle in `dist/`),
@@ -72,7 +82,12 @@ override in `frontend/.env.local` if the API runs elsewhere.
 | `ADMIN_UIDS` | backend | Comma-separated Firebase Auth UIDs allowed to use the API |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | backend | **The whole service-account JSON as one env var** — preferred on Render (no secrets folder). When set it **wins** over the two below. |
 | `SERVICE_ACCOUNT_PATH` | backend | Path to the service-account JSON (local dev); falls back to `GOOGLE_APPLICATION_CREDENTIALS` |
-| `VITE_API_BASE_URL` | frontend | Backend base URL (default `http://localhost:4000/api`) — **build-time** (`VITE_` vars are inlined by Vite at `npm run build`) |
+| `VERIFY_TOKEN_SECRET` | backend | HMAC secret for stateless `/verify-email` tokens (same name the Dart server used). Missing → send returns 503 |
+| `BREVO_API_KEY` | backend | Brevo v3 API key (transactional send). Missing → send returns 503 |
+| `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME` | backend | Verified Brevo sender (default name `Intellar`) |
+| `PUBLIC_BASE_URL` | backend | Fallback email-link origin (e.g. `https://interior-design-recommendation.onrender.com`). Normally overridden per-request from `Host` + `X-Forwarded-Proto` |
+| `ADMIN_STATIC_DIR` | backend | Where the built SPA lives. Default: `web/frontend/dist`; the unified Docker image sets it to `/app/frontend-dist` |
+| `VITE_API_BASE_URL` | frontend | Backend base URL (default `http://localhost:4000/api`; the unified image bakes `/admin/api`) — **build-time** (`VITE_` vars are inlined by Vite at `npm run build`) |
 
 **Service account — never commit it.** `web/.gitignore` ignores `secrets/`,
 `service-account*.json` and `.env` (the repo-root `.gitignore` also ignores
@@ -85,86 +100,75 @@ at it, export `GOOGLE_APPLICATION_CREDENTIALS`, or paste it into
 
 ## 3. Deploy on Render
 
-Both halves deploy to Render — the API as a **Web Service** (Node) and the
-frontend as a **Static Site**. A Blueprint declaring both lives at
-[`render.yaml`](render.yaml) (paths are repo-root-relative, so it works from
-inside `web/`; if your Render flow only auto-detects `render.yaml` at the
-repository root, copy this file there or create the services by hand with
-Option B — the settings are identical).
+Everything lives on the **existing** `interior-design-recommendation` web
+service (the one that used to run the Dart `server/` image) at
+`https://interior-design-recommendation.onrender.com`. One service, one URL —
+Render's `*.onrender.com` hostname belongs to a single service, so unifying
+paths under it means the service itself serves them all (that's what
+`web/Dockerfile` + `web/backend/src/app.ts` do).
 
-### Option A — Render Blueprint
+There is deliberately **no blueprint**: the old `web/render.yaml` (two
+services) was removed — running it would create duplicate half-configured
+services next to the real host.
 
-1. Push this repo to GitHub.
-2. Render dashboard → **New + → Blueprint** → connect the repo. Point it at
-   `web/render.yaml` if asked for a YAML path (or copy that file to the repo
-   root).
-3. Render creates two services — `intellar-admin-api` (web service) and
-   `intellar-admin-frontend` (static site). For each env var marked
-   `sync: false`, open the service → **Environment** and fill in the value
-   from the tables below.
-4. Deploy. Health check: `GET https://<api-name>.onrender.com/api/health`
-   → `{ "status": "ok", … }`.
+### One-time switch on the existing service
 
-### Option B — create the two services by hand
+1. **Push** this repo to GitHub (Render deploys from GitHub, not your disk).
+2. Render dashboard → the `interior-design-recommendation` service →
+   **Settings**:
+   - **Dockerfile Path** → `web/Dockerfile` (build context stays the repo
+     root — the image copies from `web/frontend` + `web/backend`; the old
+     `server/Dockerfile` is no longer used in production).
+   - **Health Check Path** (optional but recommended) → `/api/health`.
+3. **Environment** tab — keep every var the Dart server used and add the
+   admin ones (full table below). Save triggers a redeploy.
+4. **Manual Deploy → Deploy latest commit** (first time after the path
+   change; use **Clear build cache & deploy** if anything looks stale).
+5. Verify (see checklist below).
 
-**API — Dashboard → New → Web Service**
+### Environment variables (one service, one list)
 
-| Setting | Value |
-|---|---|
-| Runtime | Node |
-| Root Directory | `web/backend` |
-| Build Command | `npm ci && npm run build` (compiles TypeScript → `dist/`) |
-| Start Command | `npm start` (runs `node dist/index.js`) |
-| Health Check Path | `/api/health` |
-
-**Frontend — Dashboard → New → Static Site**
-
-| Setting | Value |
-|---|---|
-| Root Directory | `web/frontend` |
-| Build Command | `npm ci && npm run build` (typecheck + Vite production bundle) |
-| Publish Directory | `dist` |
-
-### Environment variables — API (Web Service)
-
-| Variable | Value |
-|---|---|
-| `PORT` | **Injected by Render — do not set it.** The server reads `process.env.PORT` (default `4000` locally) and binds `0.0.0.0`. Hardcoding a port is the #1 Render failure; this app already handles it. |
-| `NODE_ENV` | `production` |
-| `FRONTEND_ORIGIN` | `https://<frontend-name>.onrender.com` — **exact match, no trailing slash** (see the CORS gotcha below) |
-| `FIREBASE_WEB_API_KEY` | Firebase Web API key (same value as `lib/firebase_options.dart`) |
-| `ADMIN_UIDS` | Comma-separated Firebase Auth UIDs allowed to use the API |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | The **entire service-account JSON** as a single-line value. Render has no secrets folder, so inline JSON is the supported shape. Collapse the key first: `jq -c . service-account.json`, then paste the output as the value. This env var **wins** over `SERVICE_ACCOUNT_PATH` / `GOOGLE_APPLICATION_CREDENTIALS`. |
-| `FIREBASE_PROJECT_ID` | Optional — defaults to `interior-design-256c5` |
-| `SERVICE_ACCOUNT_PATH` | Optional alternative (a file path) — only useful if you mount the file yourself; the JSON env var wins |
+| Variable | Value | Notes |
+|---|---|---|
+| `PORT` | **Injected by Render — do not set it.** | Hardcoding a port is the #1 Render failure; the server reads `process.env.PORT` and binds `0.0.0.0`. |
+| `NODE_ENV` | `production` | |
+| `ADMIN_UIDS` | Comma-separated Firebase Auth UIDs allowed to use the admin API | **New** |
+| `FIREBASE_WEB_API_KEY` | Firebase Web API key (same value as `lib/firebase_options.dart`) | **New** — powers the admin login proxy; missing → `503 LOGIN_NOT_CONFIGURED` |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | The **entire** service-account JSON as a single-line value (`jq -c . service-account.json`) | **Or** reuse the existing secret-file mount instead — see next row. This var **wins** if both are set. |
+| `SERVICE_ACCOUNT_PATH` | e.g. `/etc/secrets/service-account.json` | Already on this service (the Dart server used it). Keep the secret file and this path — the backend reads it too. |
+| `FIREBASE_PROJECT_ID` | `interior-design-256c5` | Already set |
+| `VERIFY_TOKEN_SECRET` | unchanged | Email tokens (HMAC) |
+| `BREVO_API_KEY` · `BREVO_SENDER_EMAIL` · `BREVO_SENDER_NAME` | unchanged | Brevo send |
+| `PUBLIC_BASE_URL` | `https://interior-design-recommendation.onrender.com` | Fallback email-link base (normally derived from the request Host) |
+| `FRONTEND_ORIGIN` | optional on the unified host | Only matters for split-origin local dev (`http://localhost:5173`). Same-origin `/admin` → `/admin/api` calls need no CORS at all. |
 
 **Never commit the service-account key.** `web/.gitignore` covers
-`service-account*.json`, `secrets/` and `.env`. Paste it only into Render's
-Environment tab (or your local `.env`).
+`service-account*.json`, `secrets/` and `.env`. It lives in Render's secret
+files / Environment tab only.
 
-### Environment variables — frontend (Static Site)
+`VITE_API_BASE_URL` is baked at image build to the same-origin path
+`/admin/api` (`web/Dockerfile` ARG) — no dashboard var needed.
 
-| Variable | Value |
+### Post-deploy checklist
+
+| Check | Expect |
 |---|---|
-| `VITE_API_BASE_URL` | `https://<api-name>.onrender.com/api` — note the **`/api` suffix**. This is a **build-time** variable (Vite inlines it into the bundle): set it *before* the first build, and after changing it trigger **Manual Deploy → Clear build cache & deploy** so the new value is baked in. |
+| `GET https://interior-design-recommendation.onrender.com/api/health` | `{"status":"ok",…,"firebaseConfigured":true,"verificationEmailConfigured":true}` |
+| `GET …/admin` | the admin login page (Intellar Admin) |
+| `GET …/verify-email/confirm?token=garbage` | styled "Verification failed" page |
+| Admin login with an allowlisted account | console loads; Overview KPIs appear |
+| One real registration email | link lands on `…/verify-email/confirm?token=…` → "Email Verified!" → `I've Verified` in the app works |
 
-### The CORS gotcha (login fails with a CORS error)
+Failure decoder:
 
-The backend only ever emits CORS headers for the one origin in
-`FRONTEND_ORIGIN` (exact string match in `web/backend/src/app.ts`). So:
-
-1. Create the frontend Static Site first and note its final URL —
-   `https://intellar-admin-frontend.onrender.com` (pick the name you want;
-   Render may hand you a `*.onrender.com` default if you skip this).
-2. Set the API's `FRONTEND_ORIGIN` to that URL **exactly** (no trailing
-   slash, `https://`, including any custom domain).
-3. Save — Render restarts the API with the new env.
-
-If this is wrong, every API call from the browser fails with
-`Access-Control-Allow-Origin` / CORS errors and the login form shows
-"Can't reach the admin API". Similarly, if `VITE_API_BASE_URL` points at the
-wrong host (or lacks `/api`), requests 404 or fail — the frontend has no
-Firebase SDK and talks **only** to this API.
+| Symptom | Cause | Fix |
+|---|---|---|
+| `/admin` shows 503 "assets are not built" | image built without the frontend stage | Dockerfile Path must be `web/Dockerfile`, not `server/Dockerfile` |
+| health `firebaseConfigured:false` | no service account | secret-file mount + `SERVICE_ACCOUNT_PATH`, or `FIREBASE_SERVICE_ACCOUNT_JSON` |
+| health `verificationEmailConfigured:false` | `VERIFY_TOKEN_SECRET` / `BREVO_API_KEY` missing | fill both |
+| `503 LOGIN_NOT_CONFIGURED` | `FIREBASE_WEB_API_KEY` missing | set it |
+| `403 NOT_ADMIN` | UID not allowlisted, no claim | add to `ADMIN_UIDS` (save restarts) |
+| first load slow (30–60 s) | free-tier cold start | expected; same as before |
 
 ### Promoting someone to admin
 
@@ -380,8 +384,9 @@ app's `users` collection had to change for it.
 
 ```
 backend/src/
-  index.ts              entry — starts Express
-  app.ts                CORS → JSON parsing → routes → 404 → error handler
+  index.ts              entry — starts Express (the unified web host)
+  app.ts                CORS → JSON parsing → /verify-email + /api + /admin
+                        (SPA static/fallback) → 404 → error handler
   config/env.ts         env parsing (dotenv)
   config/firebase.ts    lazy firebase-admin init (service account / ADC)
   middleware/
@@ -390,13 +395,20 @@ backend/src/
     validate.ts         step 3: zod body/query/param validation
     errorHandler.ts     step 5: central JSON error rendering
     types.ts            req.user typing
+  lib/
+    verification-token.ts   HMAC token — byte-compatible port of
+                        server/lib/verification_token.dart
+    verification-mailer.ts  Brevo send + email HTML (port of the Dart mailer)
   routes/
+    verify-email.routes.ts  /verify-email/send + /confirm (app signup flow;
+                        deps-injected so tests can fake mailer/Firebase)
     auth.routes.ts      /auth/login (public proxy), /auth/me
     users.routes.ts     list/detail/verification/password-reset/delete
     stats.routes.ts     /stats
     verification.routes.ts  /verification/applications… (IC review queue;
                         authenticate + requireAdmin on every route)
   services/             step 4: handlers delegate here → persistence
+    verification-email.service.ts  env + firebase wiring for /verify-email
     identity.service.ts sign-in proxy, reset link, temp password, auth delete
     users.service.ts    user list/detail/stats with product & order counts
     verification.service.ts  supplier approval + product snapshot sync
@@ -417,9 +429,13 @@ usersRouter.patch('/:uid/verification',
   handler → setSupplierVerification) // handler → persistence
 ```
 
-The existing Dart server in `server/` (email verification + JSON-file
-marketplace API) is **not** touched and not duplicated here — this backend
-only does admin monitoring/mutation against real Firebase.
+The Dart server in `server/` used to host email verification (and a legacy
+JSON-file marketplace API) on Render. This backend now **is** that host: its
+`/verify-email` routes are the port, run from the same unified service as the
+admin console. The Dart package remains in the repo for local dev and as the
+token-format reference; its JSON marketplace endpoints were dropped outright —
+the marketplace is Firestore (`lib/services/marketplace_repository.dart`) and
+nothing in the app called them.
 
 ---
 
@@ -435,11 +451,28 @@ only does admin monitoring/mutation against real Firebase.
   `verification_applications/` and files under `verification/{uid}/` —
   configure `web/backend/.env` (§2) and deploy the updated `storage.rules`
   and `firestore.rules` first.
-- ✅ Render readiness: `render.yaml` blueprint declares both services
-  (`healthCheckPath: /api/health`, native Node build, static `dist/`);
+- ✅ Email-verification port (replaces the Dart `server/` in production):
+  `npm test` runs 16 tests — the 7 token cases ported from
+  `server/test/verification_token_test.dart` plus route-level pins (503 when
+  unconfigured, 400 missing fields, token minting with Host-derived link
+  base, 502 on Brevo failure without leaking details, invalid/expired confirm
+  page, unavailable page without Firebase, success page calling
+  `setEmailVerified`, unavailable page when Firebase write fails). Tokens are
+  byte-compatible with the Dart format (unpadded base64url, HMAC over the
+  payload string as received, `exp` in epoch seconds) — links already in
+  inboxes keep working.
+- ✅ Unified host routing, smoke-tested locally: `GET /` → redirect `/admin`;
+  `/admin` serves the SPA (assets under `/admin/assets/…`); deep `/admin/…`
+  paths fall back to the shell; `/admin/api/nope` returns the JSON 404 (not
+  the SPA); `/api/health` and `/admin/api/health` both answer; confirm page
+  renders for garbage tokens.
+- ✅ Render readiness: `web/Dockerfile` builds SPA + API into one image
+  (repo-root build context, `ADMIN_STATIC_DIR` set for the runtime);
   `FIREBASE_SERVICE_ACCOUNT_JSON` (inline JSON, env var wins) is supported
-  alongside `SERVICE_ACCOUNT_PATH` / `GOOGLE_APPLICATION_CREDENTIALS`.
+  alongside `SERVICE_ACCOUNT_PATH` / `GOOGLE_APPLICATION_CREDENTIALS` — the
+  existing service's secret-file mount keeps working.
 - ⚠️ Not exercised against live credentials: sign-in, user listing and all
   mutations need a real service-account key + an admin Firebase account —
-  including the Render deploy end-to-end (CORS round-trip, login proxy).
-  Configure `web/backend/.env` (§2) or the Render env vars (§3) to try it.
+  including the Render deploy end-to-end (login proxy, real Brevo send →
+  confirm → `emailVerified`). Configure `web/backend/.env` (§2) or the Render
+  env vars (§3) and run the §3 checklist.

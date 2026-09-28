@@ -28,6 +28,11 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     code = 'VALIDATION_ERROR';
     message = 'Invalid request body.';
     details = err.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+  } else if (isJsonParseError(err)) {
+    // express.json() syntax errors (body-parser "entity.parse.failed").
+    status = 400;
+    code = 'INVALID_JSON';
+    message = 'Invalid JSON body.';
   } else {
     // Unknown error — log it server-side, but send only a generic message.
     console.error(`[error] ${req.method} ${req.originalUrl}:`, err instanceof Error ? err.message : err);
@@ -46,6 +51,15 @@ function isZodError(err: unknown): err is { name: string; issues: { path: (strin
     err !== null &&
     (err as { name?: string }).name === 'ZodError' &&
     Array.isArray((err as { issues?: unknown }).issues)
+  );
+}
+
+/** body-parser JSON syntax errors ("entity.parse.failed"). */
+function isJsonParseError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { type?: string }).type === 'entity.parse.failed'
   );
 }
 

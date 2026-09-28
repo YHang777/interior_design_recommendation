@@ -44,4 +44,29 @@ export const env = {
    * consistency.
    */
   webApiKey: process.env.FIREBASE_WEB_API_KEY ?? '',
+
+  // ── Email verification (`/verify-email/*`) ──────────────────────────────
+  // Same env names the Dart server used, so the Render service keeps working
+  // with the secrets it already has.
+
+  /** HMAC secret for stateless verification tokens. */
+  verifyTokenSecret: process.env.VERIFY_TOKEN_SECRET ?? '',
+  /** Brevo v3 API key (https://app.brevo.com → SMTP & API → API keys). */
+  brevoApiKey: process.env.BREVO_API_KEY ?? '',
+  /** Verified sender address in the Brevo console. */
+  brevoSenderEmail: process.env.BREVO_SENDER_EMAIL ?? 'noreply@interior-design.app',
+  brevoSenderName: process.env.BREVO_SENDER_NAME ?? 'Intellar',
+  /**
+   * Public origin of THIS service (e.g. https://interior-design-recommendation.onrender.com)
+   * — used as the email link base when the request Host header is missing.
+   * Normally overridden per-request from Host / X-Forwarded-Proto.
+   */
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? '',
+
+  /**
+   * Directory holding the built admin SPA (Vite `dist/`). Defaults to
+   * `web/frontend/dist` next to the backend package (local dev); the unified
+   * Docker image (web/Dockerfile) sets ADMIN_STATIC_DIR explicitly.
+   */
+  adminStaticDir: process.env.ADMIN_STATIC_DIR ?? '',
 };
