@@ -89,12 +89,30 @@ class MarketplaceRepository {
   // ── Products ────────────────────────────────────────────────────────────
 
   /// Real-time snapshot of all products, newest first.
+  ///
+  /// Sorted in memory, NOT with a Firestore `orderBy`. A server-side sort
+  /// silently excludes every document that does not carry the sort field, and
+  /// older product documents predate the `createdAt` stamp added in
+  /// [createProduct] — no write path backfills it, so an `orderBy('createdAt')`
+  /// query would drop those products from the buyer catalogue *and* from the
+  /// seller's own management list while they still show in the console.
+  ///
+  /// Each document is parsed independently: one malformed document must not
+  /// take the whole catalogue down with it.
   Stream<List<Product>> watchProducts() {
-    return _products
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => Product.fromJson(d.data())).toList());
+    return _products.snapshots().map((snap) {
+      final products = <Product>[];
+      for (final doc in snap.docs) {
+        try {
+          products.add(Product.fromJson(doc.data()));
+        } catch (e) {
+          debugPrint('[products] skipped unparsable doc ${doc.id}: $e');
+        }
+      }
+      products.sort((a, b) => (b.createdAt ?? DateTime(0))
+          .compareTo(a.createdAt ?? DateTime(0)));
+      return products;
+    });
   }
 
   /// Creates a product. Never leaves the id empty (F1): an id is generated

@@ -41,4 +41,5 @@ class RouteNames {
   static const supplierOrderDetail = 'supplier-order-detail';
   static const supplierAnalytics = 'supplier-analytics';
   static const supplierProfile = 'supplier-profile';
+  static const supplierVerification = 'supplier-verification';
 }

@@ -66,6 +66,13 @@ class AppUser {
   bool get isSupplier => role == UserRole.supplier;
   bool get isVerified => verificationStatus == 'verified';
 
+  /// Whether the supplier may submit (or re-submit) a verification
+  /// application right now: only from 'none' (never applied) or 'rejected'
+  /// (admin rejected — re-apply allowed). 'pending' is read-only while the
+  /// admin reviews, and 'verified' is terminal.
+  bool get canSubmitVerification =>
+      verificationStatus == 'none' || verificationStatus == 'rejected';
+
   /// Creates from Firestore document + Firebase Auth user.
   factory AppUser.fromFirestore({
     required String uid,
@@ -82,8 +89,11 @@ class AppUser {
       phone: data['phone'] as String?,
       address: data['address'] as String?,
       profilePicture: data['profilePicture'] as String?,
-      // Missing status defaults to verified — suppliers are trusted at
-      // registration today; admin moderation is future work.
+      // A stored status is always honoured — accounts written before this
+      // feature keep whatever value they have (including 'verified' from
+      // the old signup stamp). Only a doc that never got the field falls
+      // back, and it falls back to 'none': never claim a verification that
+      // was not granted.
       verificationStatus: data['verificationStatus']?.toString() ?? 'none',
       businessName: data['businessName']?.toString() ??
           (role == UserRole.supplier ? name : null),

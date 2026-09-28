@@ -8,6 +8,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../models/order.dart';
 import '../../../../models/product.dart';
+import '../../../../services/verification/verification_application_model.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_image.dart';
@@ -67,6 +68,13 @@ class _SupplierDashboardScreenState
     final uid = user?.uid ?? '';
     final productsAsync = ref.watch(marketplaceProductsProvider);
     final ordersAsync = ref.watch(supplierOrdersProvider(uid));
+    // Live application document — the stored profile status only refreshes
+    // with the session, so an admin's approval must come from this stream.
+    final application =
+        ref.watch(myVerificationApplicationProvider).valueOrNull;
+    final verificationStatus = user == null
+        ? 'none'
+        : resolveVerificationStatus(user.verificationStatus, application);
 
     final coldProducts = productsAsync.valueOrNull == null;
     final coldOrders = ordersAsync.valueOrNull == null;
@@ -108,8 +116,9 @@ class _SupplierDashboardScreenState
                   )
                 : coldProducts || coldOrders
                     ? const _DashboardSkeleton()
-                    : _content(context, user, mine, allOrders, monthRevenue,
-                        pendingCount, recentOrders, lowStock),
+                    : _content(context, user, application, verificationStatus,
+                        mine, allOrders, monthRevenue, pendingCount,
+                        recentOrders, lowStock),
       ),
     );
   }
@@ -117,6 +126,8 @@ class _SupplierDashboardScreenState
   Widget _content(
     BuildContext context,
     AppUser user,
+    VerificationApplication? application,
+    String verificationStatus,
     List<Product> mine,
     List<Order> allOrders,
     int monthRevenue,
@@ -133,7 +144,12 @@ class _SupplierDashboardScreenState
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.paddingOf(context).bottom + 24),
+      // Edge-to-edge display (SystemChrome in main.dart): the status bar
+      // overlays page content, so the list must start below it — the same
+      // SafeArea + 16 the customer dashboard uses (dashboard_screen.dart).
+      // Bottom stays manual: the floating nav bar overlays the content.
+      padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 16,
+          16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
         const PageHeading(title: 'Dashboard'),
         const SizedBox(height: 16),
@@ -174,7 +190,7 @@ class _SupplierDashboardScreenState
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (store.isVerified)
+                  if (verificationStatus == 'verified')
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 3),
@@ -201,7 +217,7 @@ class _SupplierDashboardScreenState
                     )
                   else
                     StatusBadge.verification(
-                        store.verificationStatus, compact: true),
+                        verificationStatus, compact: true),
                 ],
               ),
               const SizedBox(height: 4),
@@ -219,6 +235,14 @@ class _SupplierDashboardScreenState
           ),
         ),
         const SizedBox(height: 16),
+
+        // ── Verification callout ──
+        // Sits beside the greeting badge so the only supplier without the
+        // badge always sees the next step (or the review outcome).
+        if (verificationStatus != 'verified') ...[
+          _verificationBanner(verificationStatus, application),
+          const SizedBox(height: 16),
+        ],
 
         // ── Quick actions ──
         // Row + Expanded keeps all 4 in one run at every phone width
@@ -397,6 +421,130 @@ class _SupplierDashboardScreenState
                 color: AppColors.textSecondary,
                 height: 1.4,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Verification callout under the greeting — same state machine as the
+  /// profile screen: 'none'/'rejected' get the apply button, 'pending' a
+  /// read-only label, and a rejection carries the admin's note.
+  Widget _verificationBanner(
+      String status, VerificationApplication? application) {
+    final rejected = status == 'rejected';
+    final note = (application?.reviewNote ?? '').trim();
+    final accent = rejected ? AppColors.error : AppColors.warning;
+    final title = switch (status) {
+      'rejected' => 'Verification rejected',
+      'pending' => 'Verification pending',
+      _ => 'Get your store verified',
+    };
+    final subtitle = switch (status) {
+      'rejected' => 'Address the feedback and submit a new application.',
+      'pending' => 'An admin is reviewing your IC and supporting documents. '
+          'The badge appears here the moment you are approved.',
+      _ => 'Submit your IC and supporting documents — an admin reviews '
+          'them and your listings earn the Verified badge buyers look for.',
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border(left: BorderSide(color: accent, width: 3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            rejected
+                ? Icons.cancel_outlined
+                : status == 'pending'
+                    ? Icons.schedule
+                    : Icons.badge_outlined,
+            size: 20,
+            color: accent,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: GoogleFonts.poppins(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: GoogleFonts.poppins(
+                        fontSize: 11.5,
+                        color: AppColors.textSecondary,
+                        height: 1.45)),
+                if (rejected && note.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Rejected: $note',
+                      style: GoogleFonts.poppins(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.error,
+                          height: 1.4)),
+                ],
+                const SizedBox(height: 10),
+                if (status == 'pending')
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.schedule,
+                            size: 13, color: AppColors.warning),
+                        const SizedBox(width: 6),
+                        Text('Application under review',
+                            style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.warning)),
+                      ],
+                    ),
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: () => context
+                        .pushNamed(RouteNames.supplierVerification),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      side: BorderSide(color: accent),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      rejected ? 'Re-apply' : 'Apply for verification',
+                      style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: accent),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

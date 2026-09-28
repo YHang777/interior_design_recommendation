@@ -14,6 +14,7 @@ import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/filter_chip_bar.dart';
+import '../../../../shared/widgets/floating_nav_bar.dart' show kFloatingNavBarClearance;
 import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/quantity_stepper.dart';
@@ -317,42 +318,66 @@ class _ProductManagementScreenState
     final lowCount = lowStockProducts(mine, supplierId).length;
     final visible = _visible(mine);
 
+    // Which empty state is shown is itself diagnostic. Every cause used to
+    // collapse into the same bare page, so "the products page is empty" could
+    // mean five different things with no way to tell them apart from the UI.
+    final Widget body;
+    if (isLoading) {
+      body = const _ProductsSkeletonList();
+    } else if (user == null) {
+      body = _scrollableState(const EmptyState(
+        icon: Icons.person_outline,
+        title: 'Not signed in',
+        subtitle: 'Sign in to manage your products.',
+      ));
+    } else if (productsAsync.hasError && all.isEmpty) {
+      body = _scrollableState(EmptyState(
+        icon: Icons.cloud_off_outlined,
+        title: 'Could not load products',
+        subtitle: 'Check your connection and try again.',
+        actionLabel: 'Retry',
+        onAction: _refresh,
+      ));
+    } else if (mine.isEmpty) {
+      body = _scrollableState(EmptyState(
+        icon: Icons.storefront_outlined,
+        title: 'No products yet',
+        // Distinguish "the catalogue is empty" from "the catalogue is full of
+        // products that are not yours" — the second is not a load failure and
+        // must not look like one.
+        subtitle: all.isEmpty
+            ? 'Post your first product and it will appear in the '
+                'marketplace right away.'
+            : 'The marketplace has ${all.length} product${all.length == 1 ? '' : 's'}, '
+                'but none of them belong to this account. Products only '
+                'appear here after you post them.',
+        actionLabel: 'Add your first product',
+        onAction: _goNew,
+      ));
+    } else {
+      body = _content(mine.length, activeCount, lowCount, visible, mine);
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _goNew,
-        backgroundColor: AppColors.accent,
-        child: const Icon(Icons.add, color: Colors.white),
+      // This screen's Scaffold has no bottomNavigationBar of its own — the
+      // floating pill belongs to the outer supplier shell, which paints it
+      // OVER the body (`extendBody: true`). Scaffold therefore parks the FAB
+      // at the very bottom of the full-height body, i.e. behind the pill.
+      // Lift it by the documented nav clearance so it stays tappable.
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: kFloatingNavBarClearance),
+        child: FloatingActionButton(
+          onPressed: _goNew,
+          backgroundColor: AppColors.accent,
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
       ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _refresh,
           color: AppColors.accent,
-          child: isLoading
-              ? const _ProductsSkeletonList()
-              : productsAsync.hasError && all.isEmpty
-                  ? _scrollableState(
-                      EmptyState(
-                        icon: Icons.cloud_off_outlined,
-                        title: 'Could not load products',
-                        subtitle: 'Check your connection and try again.',
-                        actionLabel: 'Retry',
-                        onAction: _refresh,
-                      ),
-                    )
-                  : mine.isEmpty
-                      ? _scrollableState(
-                          EmptyState(
-                            icon: Icons.storefront_outlined,
-                            title: 'No products yet',
-                            subtitle: 'Post your first product and it will '
-                                'appear in the marketplace right away.',
-                            actionLabel: 'Add your first product',
-                            onAction: _goNew,
-                          ),
-                        )
-                      : _content(
-                          mine.length, activeCount, lowCount, visible, mine),
+          child: body,
         ),
       ),
     );

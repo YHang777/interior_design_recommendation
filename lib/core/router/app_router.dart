@@ -21,6 +21,7 @@ import '../../features/supplier/presentation/screens/product_management_screen.d
 import '../../features/supplier/presentation/screens/supplier_dashboard_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_profile_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_shell.dart';
+import '../../features/supplier/presentation/screens/verification_application_screen.dart';
 
 // Marketplace feature
 import '../../features/customer/marketplace/presentation/screens/marketplace_screen.dart';
@@ -212,6 +213,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             orderId: state.pathParameters['id']!,
           ),
         ),
+      ),
+
+      // ── Supplier verification application (full-screen) ──
+      GoRoute(
+        path: '/supplier/verification',
+        name: RouteNames.supplierVerification,
+        pageBuilder: (_, __) =>
+            _buildPage(const VerificationApplicationScreen()),
       ),
 
       // ── Homeowner shell ──

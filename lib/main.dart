@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
+import 'core/utils/boot_trace.dart';
 import 'firebase_options.dart';
 import 'services/marketplace_repository.dart';
 import 'services/model_generation/model_generation_trigger.dart';
@@ -21,6 +22,7 @@ const _bootWorkDelay = Duration(seconds: 3);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await BootTrace.start('main()');
 
   // Edge-to-edge display — status bar overlays page content.
   // Dark icons: pages are light and header-less. Full-bleed dark stages
@@ -31,9 +33,19 @@ void main() async {
     statusBarIconBrightness: Brightness.dark,
   ));
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await BootTrace.log('boot: before Firebase.initializeApp');
+  // Firebase init is on the critical path to the first frame. If the
+  // platform channel never returns (broken Play Services, blocked network),
+  // the app would sit on the native splash forever — bound it so the UI
+  // can still come up and report the failure.
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 15));
+    await BootTrace.log('boot: Firebase.initializeApp OK');
+  } catch (e) {
+    await BootTrace.log('boot: Firebase.initializeApp FAILED: $e');
+  }
 
   // The catalogue seed WRITES to Firestore, and the
   // security rules only allow writes for authenticated users. Fire-and-

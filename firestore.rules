@@ -32,17 +32,28 @@ service cloud.firestore {
 
     // ── Verification applications (IC + supporting documents) ──
     // Document id IS the supplier's uid. The supplier may create and read
-    // ONLY their own application; nobody may update or delete it through
-    // the client — the admin backend writes the review outcome (status,
-    // reviewedAt, reviewedBy, reviewNote) with the Admin SDK, which bypasses
-    // these rules. There is no public read: list/get as an admin console
-    // user goes through the authenticated API, not the Firestore SDK.
+    // ONLY their own application. The admin backend writes the review outcome
+    // (status, reviewedAt, reviewedBy, reviewNote) with the Admin SDK, which
+    // bypasses these rules. There is no public read: list/get as an admin
+    // console user goes through the authenticated API, not the Firestore SDK.
     // The file bytes live in Storage `verification/{uid}/…` (admin-only read).
+    //
+    // The one update a client may make is a RE-APPLICATION: a rejected
+    // supplier submits a fresh set of documents over their existing
+    // application. That is a `set()` on this document, so without the update
+    // rule below every re-apply fails with `permission-denied`. It is pinned
+    // to the rejected → pending edge — the new status must be 'pending', so a
+    // client can never write 'approved' and self-approve. Approval remains
+    // admin-only.
     match /verification_applications/{uid} {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid) &&
           request.resource.data.uid == uid;
-      allow update, delete: if false;
+      allow update: if isOwner(uid) &&
+          request.resource.data.uid == uid &&
+          resource.data.status == 'rejected' &&
+          request.resource.data.status == 'pending';
+      allow delete: if false;
     }
 
     // ── Products: public catalogue, authenticated sellers write ──
@@ -65,8 +76,20 @@ service cloud.firestore {
     // `orders where supplierIds array-contains me`, both of which are
     // satisfied by the per-document conditions below.
     match /orders/{orderId} {
+      // `resource` is null for a get() on a document that does not exist, and
+      // rules evaluate `resource.data.customerId` on that null as an error —
+      // which FAILS CLOSED (deny). `createOrder` opens its transaction with an
+      // idempotency pre-read of an order id it has only just generated, so that
+      // read always hit the missing-doc case, the whole transaction aborted,
+      // and no order was ever written. That is why checkout appeared to be a
+      // mock on both the buyer and supplier sides.
+      //
+      // Permit only the existence check on a missing document. The contents of
+      // an EXISTING order stay participant-only below, and list queries never
+      // see `resource == null`, so this widens nothing that holds data.
       allow read: if signedIn() &&
-          (request.auth.uid == resource.data.customerId ||
+          (resource == null ||
+           request.auth.uid == resource.data.customerId ||
            request.auth.uid in resource.data.supplierIds);
       allow create: if signedIn() &&
           request.auth.uid == request.resource.data.customerId;

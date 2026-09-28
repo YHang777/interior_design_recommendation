@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../models/order.dart';
 import '../../../../models/product.dart';
+import '../../../../services/verification/verification_application_model.dart';
+import '../../../../services/verification/verification_application_service.dart';
 import '../../../auth/data/models/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
@@ -43,13 +45,41 @@ Supplier supplierFromUser(AppUser user) {
   );
 }
 
+// ─── Verification application ─────────────────────────────────────────────────
+
+/// Supplier verification pipeline (submit / watch `verification_applications`).
+final verificationApplicationServiceProvider =
+    Provider<VerificationApplicationService>((ref) {
+  return VerificationApplicationService();
+});
+
+/// Live `verification_applications/{uid}` for the signed-in supplier —
+/// `null` until one has been submitted. Profile and dashboard watch this so
+/// an admin's approval/rejection lands without a manual refresh (the profile
+/// field itself only refreshes with the session).
+final myVerificationApplicationProvider =
+    StreamProvider<VerificationApplication?>((ref) {
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream<VerificationApplication?>.value(null);
+  return ref
+      .watch(verificationApplicationServiceProvider)
+      .watchMyApplication(user.uid);
+});
+
 // ─── Products (owned by the current supplier) ─────────────────────────────────
 
-/// Products owned by [supplierId] — matched by the top-level `supplierId`
-/// field (never by name matching).
+/// Products owned by [supplierId] — matched by the resolved supplier id
+/// (never by name matching).
+///
+/// Must use [Product.resolvedSupplierId], not the raw top-level `supplierId`:
+/// documents written before that field existed carry the owner only in the
+/// nested `supplier.id`, so comparing the raw field silently drops every
+/// legacy product from the seller's list.
 List<Product> productsOfSupplier(
     Iterable<Product> products, String supplierId) {
-  return products.where((p) => p.supplierId == supplierId).toList();
+  return products
+      .where((p) => p.resolvedSupplierId == supplierId)
+      .toList();
 }
 
 int activeProductsCount(Iterable<Product> products, String supplierId) =>

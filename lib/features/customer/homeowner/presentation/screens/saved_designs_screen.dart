@@ -340,7 +340,10 @@ class SavedDesignsScreen extends ConsumerWidget {
           crossAxisCount: 3,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          childAspectRatio: 0.82,
+          // Taller than wide-relative: the card stacks a 44px icon plus up to
+          // two lines of name ("Scandinavian") and two of subtitle, which at
+          // the previous 0.82 ratio overflowed the fixed-height cell.
+          childAspectRatio: 0.62,
           children: _styles
               .map((s) => _buildStyleCard(s.$1, s.$2, s.$3))
               .toList(),
@@ -370,19 +373,28 @@ class SavedDesignsScreen extends ConsumerWidget {
             child: Icon(icon, size: 22, color: AppColors.accent),
           ),
           const SizedBox(height: 8),
-          Text(name,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+          // Flexible, not bare Text: a GridView cell has a hard height, so
+          // without this the label block can still push the Column past the
+          // card and paint the overflow banner even with maxLines set.
+          Flexible(
+            child: Text(name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
           const SizedBox(height: 2),
-          Text(subtitle,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                  fontSize: 9, color: AppColors.textHint)),
+          Flexible(
+            child: Text(subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 9, color: AppColors.textHint)),
+          ),
         ],
       ),
     );

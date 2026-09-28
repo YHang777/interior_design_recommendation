@@ -45,6 +45,16 @@ class StatusBadge extends StatelessWidget {
     return StatusBadge(label: label, color: color, compact: compact, icon: icon);
   }
 
+  /// Display label for a verification status — shared with plain-text rows
+  /// (e.g. the profile's "Verification" field) so they read exactly like the
+  /// badge beside them.
+  static String verificationLabel(String status) => switch (status) {
+        'verified' => 'Verified',
+        'pending' => 'Pending',
+        'rejected' => 'Rejected',
+        _ => 'Not verified',
+      };
+
   final String label;
   final Color color;
   final bool compact;

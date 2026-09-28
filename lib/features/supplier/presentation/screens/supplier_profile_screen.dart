@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/router/route_names.dart';
 import '../../../../models/product.dart';
+import '../../../../services/verification/verification_application_model.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
@@ -164,6 +167,79 @@ class _SupplierProfileScreenState
     }
   }
 
+  // ── Verification ───────────────────────────────────────────────────────
+
+  void _goVerification() =>
+      context.pushNamed(RouteNames.supplierVerification);
+
+  /// Badge action for the current verification status — the one place the
+  /// "what can I do now" choice lives, so it always matches the state
+  /// machine (`none`/`rejected` may apply, `pending` is read-only).
+  Widget _verificationAction(AppUser user, VerificationApplication? application) {
+    final status =
+        resolveVerificationStatus(user.verificationStatus, application);
+    switch (status) {
+      case 'verified':
+        return const SizedBox.shrink();
+      case 'pending':
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.warning.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.schedule, size: 14, color: AppColors.warning),
+              const SizedBox(width: 6),
+              Text('Application under review',
+                  style: GoogleFonts.poppins(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.warning)),
+            ],
+          ),
+        );
+      case 'rejected':
+        final note = (application?.reviewNote ?? '').trim();
+        return Column(
+          children: [
+            if (note.isNotEmpty) ...[
+              Text(
+                'Rejected: $note',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                    fontSize: 11.5, color: AppColors.error, height: 1.4),
+              ),
+              const SizedBox(height: 6),
+            ],
+            _verificationButton(label: 'Re-apply'),
+          ],
+        );
+      default: // 'none' — never applied
+        return _verificationButton(label: 'Apply for verification');
+    }
+  }
+
+  /// Rendered only for statuses the state machine allows ('none'/'rejected'),
+  /// so the button is always live.
+  Widget _verificationButton({required String label}) {
+    return OutlinedButton.icon(
+      onPressed: _goVerification,
+      icon: const Icon(Icons.badge_outlined, size: 16),
+      label: Text(label,
+          style:
+              GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────
 
   @override
@@ -171,6 +247,13 @@ class _SupplierProfileScreenState
     final user = ref.watch(currentUserProvider);
     final productsAsync = ref.watch(marketplaceProductsProvider);
     final supplier = user == null ? null : supplierFromUser(user);
+    // Live application document: the stored profile status only refreshes
+    // with the session, so the admin's decision lands here first.
+    final application =
+        ref.watch(myVerificationApplicationProvider).valueOrNull;
+    final verificationStatus = user == null
+        ? 'none'
+        : resolveVerificationStatus(user.verificationStatus, application);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -238,7 +321,10 @@ class _SupplierProfileScreenState
                                   fontSize: 14,
                                   color: AppColors.textSecondary)),
                           const SizedBox(height: 4),
-                          StatusBadge.verification(user.verificationStatus),
+                          StatusBadge.verification(verificationStatus),
+                          const SizedBox(height: 8),
+                          if (user.isSupplier)
+                            _verificationAction(user, application),
                           const SizedBox(height: 14),
                           // Edit profile button
                           SizedBox(
@@ -308,7 +394,7 @@ class _SupplierProfileScreenState
                       accentColor: AppColors.secondaryAccent,
                       children: [
                         _Field(Icons.verified_outlined, 'Verification',
-                            user.verificationStatus),
+                            StatusBadge.verificationLabel(verificationStatus)),
                         _Field(
                             Icons.inventory_2_outlined,
                             'Products Listed',

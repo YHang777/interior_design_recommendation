@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/foundation.dart' show debugPrint;
+import '../../../../core/utils/boot_trace.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/firebase_auth_datasource.dart';
 import '../datasources/firestore_user_datasource.dart';
@@ -28,14 +29,29 @@ class AuthRepositoryImpl implements IAuthRepository {
   @override
   Stream<AppUser?> authStateChanges() {
     return _authDatasource.authStateChanges().asyncMap((fbUser) async {
-      if (fbUser == null) return null;
+      if (fbUser == null) {
+        await BootTrace.log('authState: signed out');
+        return null;
+      }
       // Unverified sign-ins are treated as signed out. This matches the
       // login() gate below AND fixes the post-register bounce race: the late
       // `User` emission from createUserWithEmailAndPassword (which lands
       // after register() has already signed out) would otherwise flip the
       // router away from the Verify-Email screen seconds after arrival.
-      if (!fbUser.emailVerified) return null;
-      return _buildAppUser(fbUser);
+      if (!fbUser.emailVerified) {
+        await BootTrace.log('authState: user present but email unverified');
+        return null;
+      }
+      await BootTrace.log('authState: restoring session uid=${fbUser.uid}');
+      try {
+        final user = await _buildAppUser(fbUser)
+            .timeout(const Duration(seconds: 25));
+        await BootTrace.log('authState: profile OK');
+        return user;
+      } catch (e) {
+        await BootTrace.log('authState: profile FAILED: $e');
+        rethrow;
+      }
     });
   }
 
@@ -49,13 +65,17 @@ class AuthRepositoryImpl implements IAuthRepository {
   @override
   Future<AppUser> login(String email, String password) async {
     try {
-      final credential = await _authDatasource.signInWithEmailAndPassword(
-        email,
-        password,
-      );
+      await BootTrace.log('login: signInWithEmailAndPassword begin');
+      // Bound the auth round trip — without a timeout a stalled network
+      // leaves the Sign In button spinning forever with no feedback.
+      final credential = await _authDatasource
+          .signInWithEmailAndPassword(email, password)
+          .timeout(const Duration(seconds: 25));
+      await BootTrace.log('login: signIn OK uid=${credential.user?.uid}');
       final fbUser = credential.user!;
 
       if (!fbUser.emailVerified) {
+        await BootTrace.log('login: email NOT verified — signing out');
         await _authDatasource.signOut();
         throw const AuthException(
           'Please verify your email first. Check your inbox.',
@@ -63,8 +83,19 @@ class AuthRepositoryImpl implements IAuthRepository {
         );
       }
 
-      return _buildAppUser(fbUser);
+      await BootTrace.log('login: fetching profile document');
+      final user = await _buildAppUser(fbUser)
+          .timeout(const Duration(seconds: 25));
+      await BootTrace.log('login: profile OK role=${user.role.name}');
+      return user;
+    } on TimeoutException {
+      await BootTrace.log('login: TIMED OUT');
+      throw const AuthException(
+        'Sign in timed out. Check your connection and try again.',
+        code: 'timeout',
+      );
     } on fb.FirebaseAuthException catch (e) {
+      await BootTrace.log('login: FirebaseAuthException ${e.code}');
       throw _mapFirebaseError(e);
     }
   }
@@ -247,7 +278,9 @@ class AuthRepositoryImpl implements IAuthRepository {
 
   /// Reads `users/{uid}` and maps it to an [AppUser]. Always hits Firestore.
   Future<AppUser> _fetchAppUser(fb.User fbUser) async {
+    await BootTrace.log('profile: users/${fbUser.uid} get()');
     final doc = await _firestoreDatasource.getUser(fbUser.uid);
+    await BootTrace.log('profile: users/${fbUser.uid} exists=${doc.exists}');
 
     if (!doc.exists) {
       throw AuthException(
