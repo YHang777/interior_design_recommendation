@@ -4,9 +4,9 @@
 // Pure Dart — no widgets, no Firebase, no filesystem.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:interior_design_recommendation/features/ar/data/glb_generator.dart'
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart'
     show FloorFinishType, WallFinishType;
-import 'package:interior_design_recommendation/features/ar/data/room_finishes.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/room_finishes.dart';
 
 void main() {
   group('finish color palettes', () {

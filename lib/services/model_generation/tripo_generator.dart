@@ -7,8 +7,8 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 import '../../config/app_config.dart';
-import '../../features/ar/data/glb_bounds.dart';
-import '../../features/ar/data/glb_rescaler.dart';
+import '../../features/customer/ar/data/glb_bounds.dart';
+import '../../features/customer/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
 import '../media/media_store.dart';
 import 'tripo_poll_state.dart';

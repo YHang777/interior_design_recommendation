@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/firebase_auth_datasource.dart';
 import '../../data/datasources/firestore_user_datasource.dart';
@@ -137,6 +138,32 @@ final authStateProvider =
     StateNotifierProvider<AuthStateNotifier, AsyncValue<AppUser?>>((ref) {
   final repository = ref.watch(authRepositoryProvider);
   return AuthStateNotifier(repository);
+});
+
+/// A [ChangeNotifier] that fires whenever the auth state changes.
+/// Used as GoRouter's [refreshListenable] so redirects are re-evaluated
+/// without recreating the router (which would flash the login page).
+class AuthRefreshNotifier extends ChangeNotifier {
+  AuthRefreshNotifier(StateNotifier<AsyncValue<AppUser?>> authNotifier) {
+    // state_notifier 1.0.0: addListener returns a remove callback.
+    _removeListener = authNotifier.addListener((_) => notifyListeners());
+  }
+
+  late final VoidCallback _removeListener;
+
+  @override
+  void dispose() {
+    _removeListener();
+    super.dispose();
+  }
+}
+
+/// Provider for the auth refresh notifier, consumed by the router.
+final authRefreshProvider = Provider<AuthRefreshNotifier>((ref) {
+  final authNotifier = ref.watch(authStateProvider.notifier);
+  final notifier = AuthRefreshNotifier(authNotifier);
+  ref.onDispose(notifier.dispose);
+  return notifier;
 });
 
 // ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import '../../../../shared/widgets/quantity_stepper.dart';
 import '../../../../shared/widgets/search_bar.dart';
 import '../../../../shared/widgets/stat_card.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
 /// Supplier's product catalogue screen: stats, search, status filters and

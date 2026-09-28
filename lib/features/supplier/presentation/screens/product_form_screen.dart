@@ -11,7 +11,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/route_names.dart';
-import '../../../../features/ar/data/glb_generator.dart' show resolveShapeFamily;
+import '../../../customer/ar/data/glb_generator.dart' show resolveShapeFamily;
 import '../../../../models/product.dart';
 import '../../../../models/product_category.dart';
 import '../../../../services/media/media_store.dart';
@@ -20,7 +20,7 @@ import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/product_card.dart';
 import '../../../../shared/widgets/quantity_stepper.dart';
-import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
 /// Full-screen create/edit form for a supplier product.

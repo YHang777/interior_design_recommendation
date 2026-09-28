@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-import '../../features/ar/data/glb_bounds.dart';
-import '../../features/ar/data/glb_generator.dart';
-import '../../features/ar/data/glb_rescaler.dart';
+import '../../features/customer/ar/data/glb_bounds.dart';
+import '../../features/customer/ar/data/glb_generator.dart';
+import '../../features/customer/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
 
 /// Thrown when a product has no resolvable 3D model — either it never got

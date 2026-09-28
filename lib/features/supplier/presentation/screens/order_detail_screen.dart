@@ -12,7 +12,7 @@ import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
 /// Full order view for a supplier — buyer details, status timeline, the

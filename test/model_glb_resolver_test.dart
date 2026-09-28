@@ -8,7 +8,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:interior_design_recommendation/features/ar/data/glb_bounds.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/models/product.dart';
 import 'package:interior_design_recommendation/services/model_generation/model_glb_resolver.dart';
 

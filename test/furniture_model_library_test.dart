@@ -4,7 +4,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:interior_design_recommendation/features/ar/data/furniture_model_library.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/furniture_model_library.dart';
 
 void main() {
   test('every catalog model file exists under assets/models/', () {

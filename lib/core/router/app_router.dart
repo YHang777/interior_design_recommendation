@@ -7,12 +7,12 @@ import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/verify_email_screen.dart';
-import '../../features/budget/presentation/screens/budget_planner_screen.dart';
-import '../../features/homeowner/presentation/screens/ai_recommendation_screen.dart';
-import '../../features/homeowner/presentation/screens/dashboard_screen.dart';
-import '../../features/homeowner/presentation/screens/homeowner_shell.dart';
-import '../../features/homeowner/presentation/screens/profile_screen.dart';
-import '../../features/homeowner/presentation/screens/saved_designs_screen.dart';
+import '../../features/customer/budget/presentation/screens/budget_planner_screen.dart';
+import '../../features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
+import '../../features/customer/homeowner/presentation/screens/dashboard_screen.dart';
+import '../../features/customer/homeowner/presentation/screens/homeowner_shell.dart';
+import '../../features/customer/homeowner/presentation/screens/profile_screen.dart';
+import '../../features/customer/homeowner/presentation/screens/saved_designs_screen.dart';
 
 import '../../features/supplier/presentation/screens/analytics_screen.dart';
 import '../../features/supplier/presentation/screens/order_management_screen.dart';
@@ -23,32 +23,42 @@ import '../../features/supplier/presentation/screens/supplier_profile_screen.dar
 import '../../features/supplier/presentation/screens/supplier_shell.dart';
 
 // Marketplace feature
-import '../../features/marketplace/presentation/screens/marketplace_screen.dart';
-import '../../features/marketplace/presentation/screens/product_detail_screen.dart';
-import '../../features/marketplace/presentation/screens/cart_screen.dart';
-import '../../features/marketplace/presentation/screens/checkout_screen.dart';
-import '../../features/marketplace/presentation/screens/order_confirmation_screen.dart';
-import '../../features/marketplace/presentation/screens/order_history_screen.dart';
-import '../../features/marketplace/presentation/screens/buyer_order_detail_screen.dart';
-import '../../features/marketplace/presentation/screens/wishlist_screen.dart';
-import '../../features/scanner/presentation/screens/room_scanner_screen.dart';
-import '../../features/ar/data/furniture_model_library.dart';
-import '../../features/ar/presentation/screens/ar_viewer_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/marketplace_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/product_detail_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/cart_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/checkout_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/order_confirmation_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/order_history_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/buyer_order_detail_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/wishlist_screen.dart';
+import '../../features/customer/scanner/presentation/screens/room_scanner_screen.dart';
+import '../../features/customer/ar/data/furniture_model_library.dart';
+import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
 
 import 'route_names.dart';
 
 /// GoRouter provider with role-based redirect logic.
 ///
-/// The router watches [authStateProvider] and redirects based on:
-/// - Authentication state (logged in / logged out)
-/// - User role (homeowner / supplier)
+/// The router uses [refreshListenable] (the auth state notifier) to
+/// re-evaluate redirects when auth state changes, instead of recreating
+/// the entire router. This prevents the login page from flashing on app
+/// restart or after a successful login.
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  // Use a ChangeNotifier that fires on auth state changes. This lets
+  // GoRouter re-evaluate redirects without recreating the router (which
+  // would flash the login page on app restart or after login).
+  final authRefresh = ref.watch(authRefreshProvider);
 
   return GoRouter(
     initialLocation: '/login',
+    // Re-evaluate the redirect whenever the auth state changes.
+    refreshListenable: authRefresh,
     redirect: (context, state) {
+      // Read the *current* auth state at redirect time (not captured at
+      // router creation).
+      final authState = ref.read(authStateProvider);
+
       // While Firebase Auth is checking the session, don't redirect —
       // this prevents the login page from flashing on app restart.
       final isLoading = authState.isLoading;

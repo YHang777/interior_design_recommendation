@@ -8,9 +8,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:interior_design_recommendation/features/ar/data/glb_bounds.dart';
-import 'package:interior_design_recommendation/features/ar/data/glb_generator.dart';
-import 'package:interior_design_recommendation/features/ar/data/glb_rescaler.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_rescaler.dart';
 
 /// Parses [bytes] and verifies the GLB container header.
 GlbBounds parseGlb(Uint8List bytes) {
