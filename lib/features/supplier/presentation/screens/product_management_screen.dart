@@ -338,24 +338,19 @@ class _ProductManagementScreenState
         actionLabel: 'Retry',
         onAction: _refresh,
       ));
-    } else if (mine.isEmpty) {
-      body = _scrollableState(EmptyState(
-        icon: Icons.storefront_outlined,
-        title: 'No products yet',
-        // Distinguish "the catalogue is empty" from "the catalogue is full of
-        // products that are not yours" — the second is not a load failure and
-        // must not look like one.
-        subtitle: all.isEmpty
-            ? 'Post your first product and it will appear in the '
-                'marketplace right away.'
-            : 'The marketplace has ${all.length} product${all.length == 1 ? '' : 's'}, '
-                'but none of them belong to this account. Products only '
-                'appear here after you post them.',
-        actionLabel: 'Add your first product',
-        onAction: _goNew,
-      ));
     } else {
-      body = _content(mine.length, activeCount, lowCount, visible, mine);
+      // An empty catalogue is NOT a separate page: keep the heading, stats,
+      // search and filters and let _content() explain the emptiness in the
+      // list area. Replacing the whole body with a bare EmptyState is what
+      // made this screen look completely empty (no heading, no stats).
+      body = _content(
+        mine.length,
+        activeCount,
+        lowCount,
+        visible,
+        mine,
+        marketplaceCount: all.length,
+      );
     }
 
     return Scaffold(
@@ -392,7 +387,63 @@ class _ProductManagementScreenState
   }
 
   Widget _content(
-      int total, int active, int low, List<Product> visible, List<Product> allMine) {
+      int total, int active, int low, List<Product> visible, List<Product> allMine,
+      {int marketplaceCount = 0}) {
+    // Shown in the LIST AREA when nothing matches — never replaces the page
+    // chrome (heading, stats, search, filters) above it.
+    final Widget emptyListArea = total == 0
+        // Nothing of this seller's exists yet. Distinguish "the catalogue is
+        // empty" from "the catalogue is full of products that are not yours" —
+        // the second is not a load failure and must not look like one.
+        ? EmptyState(
+            icon: Icons.storefront_outlined,
+            title: 'No products yet',
+            subtitle: marketplaceCount == 0
+                ? 'Post your first product and it will appear in the '
+                    'marketplace right away.'
+                : 'The marketplace has $marketplaceCount product${marketplaceCount == 1 ? '' : 's'}, '
+                    'but none of them belong to this account. Products only '
+                    'appear here after you post them.',
+            actionLabel: 'Add your first product',
+            onAction: _goNew,
+          )
+        // The catalogue has products but the current filter/search matched
+        // none of them.
+        : Padding(
+            padding: const EdgeInsets.only(top: 32),
+            child: Column(
+              children: [
+                Icon(Icons.filter_list_off,
+                    size: 48, color: AppColors.textHint),
+                const SizedBox(height: 12),
+                Text(
+                  'No products match this filter',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Try a different filter or clear to see all products.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: AppColors.textHint,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _query = '';
+                    _filter = _ProductFilter.all;
+                  }),
+                  icon: const Icon(Icons.clear_all, size: 16),
+                  label: const Text('Clear filters'),
+                ),
+              ],
+            ),
+          );
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(
@@ -414,6 +465,13 @@ class _ProductManagementScreenState
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
                   foregroundColor: Colors.white,
+                  // The theme's ElevatedButton is a full-width 52px CTA
+                  // (`minimumSize: Size(double.infinity, 52)`). PageHeading
+                  // actions sit in a Row, whose non-flex children get
+                  // unbounded main-axis width — an infinite min-width there
+                  // asserts "BoxConstraints forces an infinite width". Size
+                  // this compact chip to its content instead.
+                  minimumSize: Size.zero,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(
@@ -494,41 +552,7 @@ class _ProductManagementScreenState
           ),
         ),
         if (visible.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 32),
-            child: Column(
-              children: [
-                Icon(Icons.filter_list_off,
-                    size: 48, color: AppColors.textHint),
-                const SizedBox(height: 12),
-                Text(
-                  'No products match this filter',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Try a different filter or clear to see all products.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: AppColors.textHint,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextButton.icon(
-                  onPressed: () => setState(() {
-                    _query = '';
-                    _filter = _ProductFilter.all;
-                  }),
-                  icon: const Icon(Icons.clear_all, size: 16),
-                  label: const Text('Clear filters'),
-                ),
-              ],
-            ),
-          )
+          emptyListArea
         else
           ...visible.map((p) => _ProductTile(
                 product: p,
@@ -710,19 +734,29 @@ class _ProductTile extends StatelessWidget {
           Divider(height: 1, thickness: 1, color: AppColors.divider),
           Row(
             children: [
-              _RowAction(
-                icon: Icons.edit_outlined,
-                label: 'Edit',
-                color: AppColors.textSecondary,
-                onTap: busy ? null : onOpen,
+              // Loose Flexible on the three actions: at normal widths they
+              // keep their natural size and the layout is unchanged, but on
+              // narrow screens / large system font scales they share the row
+              // (labels ellipsize) instead of overflowing it.
+              Flexible(
+                flex: 3,
+                child: _RowAction(
+                  icon: Icons.edit_outlined,
+                  label: 'Edit',
+                  color: AppColors.textSecondary,
+                  onTap: busy ? null : onOpen,
+                ),
               ),
-              _RowAction(
-                icon: Icons.inventory_2_outlined,
-                label: 'Stock',
-                color: AppColors.textSecondary,
-                onTap: busy ? null : onEditStock,
+              Flexible(
+                flex: 3,
+                child: _RowAction(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Stock',
+                  color: AppColors.textSecondary,
+                  onTap: busy ? null : onEditStock,
+                ),
               ),
-              const Spacer(),
+              const Spacer(flex: 1),
               // Regenerate 3D lives in the overflow menu of READY products
               // (an explicit seller action — it re-submits a paid Tripo task
               // when one is configured).
@@ -752,11 +786,14 @@ class _ProductTile extends StatelessWidget {
                     ),
                   ],
                 ),
-              _RowAction(
-                icon: Icons.delete_outline,
-                label: 'Delete',
-                color: busy ? AppColors.textHint : AppColors.error,
-                onTap: busy ? null : onDelete,
+              Flexible(
+                flex: 3,
+                child: _RowAction(
+                  icon: Icons.delete_outline,
+                  label: 'Delete',
+                  color: busy ? AppColors.textHint : AppColors.error,
+                  onTap: busy ? null : onDelete,
+                ),
               ),
               const SizedBox(width: 4),
             ],
@@ -922,12 +959,16 @@ class _RowAction extends StatelessWidget {
             Icon(icon, size: 15,
                 color: enabled ? color : AppColors.textHint),
             const SizedBox(width: 5),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: enabled ? color : AppColors.textHint,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: enabled ? color : AppColors.textHint,
+                ),
               ),
             ),
           ],
