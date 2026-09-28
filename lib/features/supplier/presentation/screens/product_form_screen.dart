@@ -17,7 +17,10 @@ import '../../../../models/product_category.dart';
 import '../../../../services/media/media_store.dart';
 import '../../../../services/model_generation/model_generation_trigger.dart';
 import '../../../../shared/widgets/app_feedback.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
+import '../../../../shared/widgets/float_button.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_card.dart';
 import '../../../../shared/widgets/quantity_stepper.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
@@ -119,6 +122,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   final _descriptionKey = GlobalKey<FormFieldState<String>>();
   final _priceKey = GlobalKey<FormFieldState<String>>();
   final _originalPriceKey = GlobalKey<FormFieldState<String>>();
+  final _shippingFeeKey = GlobalKey<FormFieldState<String>>();
   final _widthKey = GlobalKey<FormFieldState<String>>();
   final _heightKey = GlobalKey<FormFieldState<String>>();
   final _depthKey = GlobalKey<FormFieldState<String>>();
@@ -127,6 +131,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _originalPriceCtrl;
   late final TextEditingController _descriptionCtrl;
+  late final TextEditingController _shippingFeeCtrl;
   late final TextEditingController _widthCtrl;
   late final TextEditingController _heightCtrl;
   late final TextEditingController _depthCtrl;
@@ -156,6 +161,12 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   int _stock = 0;
   bool _isEco = false;
   bool _isActive = true;
+
+  /// Shipping toggles (Task B): fee charged on delivery + the buyer-facing
+  /// 30 km notice. The fee text lives in [_shippingFeeCtrl]; it is only
+  /// VALIDATED while [_shippingEnabled] is on.
+  bool _shippingEnabled = false;
+  bool _shippingNotice = false;
   String? _category;
   String? _style;
   List<_ImageEntry> _images = [];
@@ -181,6 +192,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _priceCtrl = TextEditingController();
     _originalPriceCtrl = TextEditingController();
     _descriptionCtrl = TextEditingController();
+    _shippingFeeCtrl = TextEditingController();
     _widthCtrl = TextEditingController();
     _heightCtrl = TextEditingController();
     _depthCtrl = TextEditingController();
@@ -209,6 +221,12 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _originalStock = p.stock;
     _isEco = p.isEcoFriendly;
     _isActive = p.isActive;
+    // Legacy products predate shipping fields — fromJson defaults them to
+    // free/no-notice, which is exactly what this form should show.
+    _shippingEnabled = p.shippingEnabled;
+    _shippingNotice = p.shippingLongDistanceNotice;
+    _shippingFeeCtrl.text =
+        p.shippingFee > 0 ? p.shippingFee.toString() : '';
     _removedOriginalUrls.clear();
     _images = p.resolvedImages.map((url) {
       return _ImageEntry(
@@ -242,6 +260,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _priceCtrl.dispose();
     _originalPriceCtrl.dispose();
     _descriptionCtrl.dispose();
+    _shippingFeeCtrl.dispose();
     _widthCtrl.dispose();
     _heightCtrl.dispose();
     _depthCtrl.dispose();
@@ -666,6 +685,12 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       // generating / failed model back to 'none' (the repository additionally
       // re-merges ar3d from the live document inside its update transaction).
       ar3d: _existing?.ar3d,
+      // The fee is persisted even while the toggle is off (so re-enabling
+      // later restores the seller's number) — `shippingCharge` gates it, so
+      // a disabled product can never bill buyers.
+      shippingEnabled: _shippingEnabled,
+      shippingFee: int.tryParse(_shippingFeeCtrl.text.trim()) ?? 0,
+      shippingLongDistanceNotice: _shippingNotice,
       createdAt: _existing?.createdAt,
     );
   }
@@ -695,6 +720,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       _descriptionKey,
       _priceKey,
       _originalPriceKey,
+      _shippingFeeKey,
       _widthKey,
       _heightKey,
       _depthKey,
@@ -838,26 +864,14 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             color: AppColors.textSecondary,
           ),
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Keep editing',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: AppColors.textOnDark,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            ),
-            child: const Text('Discard'),
+          ConfirmDialogActions(
+            confirmLabel: 'Discard',
+            cancelLabel: 'Keep editing',
+            destructive: true,
+            onCancel: () => Navigator.pop(ctx, false),
+            onConfirm: () => Navigator.pop(ctx, true),
           ),
         ],
       ),
@@ -883,16 +897,39 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     if (_isEditing && !_seeded) {
       return Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(title: const Text('Edit Product')),
-        body: productsAsync.isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : EmptyState(
-                icon: Icons.inventory_2_outlined,
-                title: 'Product not found',
-                subtitle: 'It may have been deleted.',
-                actionLabel: 'Go back',
-                onAction: () => context.pop(),
+        body: Stack(
+          children: [
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const PageHeading(title: 'Edit Product'),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: productsAsync.isLoading
+                          ? const Center(
+                              child: CircularProgressIndicator())
+                          : EmptyState(
+                              icon: Icons.inventory_2_outlined,
+                              title: 'Product not found',
+                              subtitle: 'It may have been deleted.',
+                              actionLabel: 'Go back',
+                              onAction: () => context.pop(),
+                            ),
+                    ),
+                  ],
+                ),
               ),
+            ),
+            Positioned(
+              top: MediaQuery.viewPaddingOf(context).top + 8,
+              left: 8,
+              child: const FloatingBackButton(),
+            ),
+          ],
+        ),
       );
     }
 
@@ -902,41 +939,55 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Product' : 'New Product'),
-      ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-        child: Form(
-          key: _formKey,
-          autovalidateMode: _attemptedSubmit
-              ? AutovalidateMode.always
-              : AutovalidateMode.disabled,
-          child: PopScope(
-            canPop: !_dirty || _saved,
-            onPopInvokedWithResult: (didPop, _) async {
-              if (didPop || _saved) return;
-              await _confirmDiscard();
-            },
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                _buildPhotosSection(),
-                const SizedBox(height: 14),
-                _buildDetailsSection(categoriesAsync, stylesAsync),
-                const SizedBox(height: 14),
-                _buildPricingSection(),
-                const SizedBox(height: 14),
-                _buildDimensionsSection(),
-                const SizedBox(height: 14),
-                _buildPreviewSection(preview),
-              ],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+              child: Form(
+                key: _formKey,
+                autovalidateMode: _attemptedSubmit
+                    ? AutovalidateMode.always
+                    : AutovalidateMode.disabled,
+                child: PopScope(
+                  canPop: !_dirty || _saved,
+                  onPopInvokedWithResult: (didPop, _) async {
+                    if (didPop || _saved) return;
+                    await _confirmDiscard();
+                  },
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 60, 16, 24),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    children: [
+                      PageHeading(
+                        title: _isEditing ? 'Edit Product' : 'New Product',
+                      ),
+                      const SizedBox(height: 14),
+                      _buildPhotosSection(),
+                      const SizedBox(height: 14),
+                      _buildDetailsSection(categoriesAsync, stylesAsync),
+                      const SizedBox(height: 14),
+                      _buildPricingSection(),
+                      const SizedBox(height: 14),
+                      _buildShippingSection(),
+                      const SizedBox(height: 14),
+                      _buildDimensionsSection(),
+                      const SizedBox(height: 14),
+                      _buildPreviewSection(preview),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: const FloatingBackButton(),
+          ),
+        ],
       ),
       bottomNavigationBar: _buildSubmitBar(),
     );
@@ -974,6 +1025,9 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       ratingCount: _existing?.ratingCount ?? 0,
       originalPrice: original,
       dimensions: _formDimensions,
+      shippingEnabled: _shippingEnabled,
+      shippingFee: int.tryParse(_shippingFeeCtrl.text.trim()) ?? 0,
+      shippingLongDistanceNotice: _shippingNotice,
     );
   }
 
@@ -1469,7 +1523,137 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     );
   }
 
-  // ── Section 4: Dimensions (for 3D & AR) ────────────────────────────────
+  // ── Section 4: Shipping ─────────────────────────────────────────────────
+
+  /// Seller-controlled delivery charge + the long-distance notice shown on
+  /// the customer product page. Everything flows through
+  /// `Product.shippingEnabled`/`shippingFee`/`shippingLongDistanceNotice`
+  /// (see models/product.dart): `shippingCharge` gates the fee everywhere,
+  /// so a stored amount with the toggle off can never bill a buyer.
+  Widget _buildShippingSection() {
+    return _SectionCard(
+      title: 'Shipping',
+      subtitle: 'Delivery charges buyers pay for this product',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _shippingEnabled,
+            onChanged: (v) {
+              _onAnyChange();
+              setState(() => _shippingEnabled = v);
+            },
+            activeTrackColor: AppColors.accent,
+            title: Text(
+              'Charge for delivery',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            subtitle: Text(
+              _shippingEnabled
+                  ? 'On — the fee below is added at checkout'
+                  : 'Off — buyers get free shipping for this product',
+              style:
+                  GoogleFonts.poppins(fontSize: 11, color: AppColors.textHint),
+            ),
+            secondary: const Icon(Icons.local_shipping_outlined,
+                color: AppColors.secondaryAccent),
+          ),
+          const SizedBox(height: 4),
+          _AppInput(
+            label: 'Delivery fee (RM)',
+            icon: Icons.payments_outlined,
+            controller: _shippingFeeCtrl,
+            fieldKey: _shippingFeeKey,
+            enabled: _shippingEnabled,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            hint: 'e.g. 25',
+            helperText: _shippingEnabled
+                ? 'Charged once per order, regardless of quantity'
+                : 'Turn on delivery charges to set a fee',
+            validator: (v) {
+              if (!_shippingEnabled) return null;
+              final t = v?.trim() ?? '';
+              if (t.isEmpty) {
+                return 'Delivery fee is required when charging';
+              }
+              final value = int.tryParse(t);
+              if (value == null) return 'Enter a whole number (RM)';
+              if (value < 0) return 'Fee cannot be negative';
+              if (value > 1000) return 'Max RM 1,000';
+              return null;
+            },
+            onChanged: _onAnyChange,
+          ),
+          const SizedBox(height: 6),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _shippingNotice,
+            onChanged: (v) {
+              _onAnyChange();
+              setState(() => _shippingNotice = v);
+            },
+            activeTrackColor: AppColors.accent,
+            title: Text(
+              'Long-distance notice',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            subtitle: Text(
+              'Tell buyers that deliveries over 30 km incur extra charges',
+              style:
+                  GoogleFonts.poppins(fontSize: 11, color: AppColors.textHint),
+            ),
+            secondary:
+                const Icon(Icons.route_outlined, color: AppColors.warning),
+          ),
+          if (_shippingNotice) ...[
+            const SizedBox(height: 4),
+            // Live preview of the exact copy buyers see on the product page
+            // (shared constant — preview and store page cannot drift).
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border:
+                    Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline,
+                      size: 16, color: AppColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      Product.longDistanceNotice,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Section 5: Dimensions (for 3D & AR) ────────────────────────────────
 
   Widget _buildDimensionsSection() {
     return _SectionCard(
@@ -1581,7 +1765,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     );
   }
 
-  // ── Section 5: Live buyer preview ──────────────────────────────────────
+  // ── Section 6: Live buyer preview ──────────────────────────────────────
 
   Widget _buildPreviewSection(Product preview) {
     return LayoutBuilder(
@@ -1659,6 +1843,10 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.transparent,
                   disabledForegroundColor: AppColors.textHint,
+                  // Tight 52px wrapper — keep the label's line box
+                  // (e.g. the 'g' in "changes") inside the button.
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1796,6 +1984,7 @@ class _AppInput extends StatefulWidget {
     this.maxLines = 1,
     this.minLines,
     this.onChanged,
+    this.enabled = true,
   });
 
   final String label;
@@ -1811,6 +2000,10 @@ class _AppInput extends StatefulWidget {
   final int maxLines;
   final int? minLines;
   final VoidCallback? onChanged;
+
+  /// False greys the field out (e.g. the delivery fee while "Charge for
+  /// delivery" is off) while keeping it inside the Form validation flow.
+  final bool enabled;
 
   @override
   State<_AppInput> createState() => _AppInputState();
@@ -1875,6 +2068,7 @@ class _AppInputState extends State<_AppInput> {
       validator: widget.validator,
       keyboardType: widget.keyboardType,
       inputFormatters: widget.inputFormatters,
+      enabled: widget.enabled,
       maxLines: widget.maxLines,
       minLines: widget.minLines,
       maxLength: widget.maxLength,

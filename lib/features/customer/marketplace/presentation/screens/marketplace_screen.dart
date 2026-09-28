@@ -10,6 +10,8 @@ import '../../../../../shared/widgets/search_bar.dart' as sw;
 import '../../../../../shared/widgets/filter_chip_bar.dart';
 import '../../../../../shared/widgets/product_card.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/gradient_scaffold.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/skeleton_loader.dart';
 
 import '../providers/marketplace_providers.dart';
@@ -140,75 +142,68 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
     final ordersAsync = ref.watch(customerOrdersProvider);
     final orderCount = ordersAsync.whenOrNull(data: (o) => o.length) ?? 0;
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Marketplace',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textOnDark)),
-            Text('Furniture & materials for your space',
-                style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textOnDark.withValues(alpha: 0.7))),
-          ],
-        ),
-        actions: [
-          // Wishlist
-          IconButton(
-            icon: Badge(
-              isLabelVisible: wishlistCount > 0,
-              label: Text('$wishlistCount',
-                  style: const TextStyle(fontSize: 10, color: Colors.white)),
-              child: const Icon(Icons.favorite_outline,
-                  color: AppColors.textOnDark),
-            ),
-            onPressed: () => context.pushNamed(RouteNames.homeownerWishlist),
-          ),
-          // Order history
-          IconButton(
-            icon: Badge(
-              isLabelVisible: orderCount > 0,
-              label: Text('$orderCount',
-                  style: const TextStyle(fontSize: 10, color: Colors.white)),
-              child: const Icon(Icons.receipt_long_outlined,
-                  color: AppColors.textOnDark),
-            ),
-            onPressed: () =>
-                context.pushNamed(RouteNames.homeownerOrderHistory),
-          ),
-          // Cart
-          IconButton(
-            icon: Badge(
-              isLabelVisible: cartCount > 0,
-              label: Text(
-                  cartCount > 99 ? '99+' : '$cartCount',
-                  style: const TextStyle(fontSize: 10, color: Colors.white)),
-              child: const Icon(Icons.shopping_cart_outlined,
-                  color: AppColors.textOnDark),
-            ),
-            onPressed: () => context.pushNamed(RouteNames.homeownerCart),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+    return GradientScaffold(
+      child: RefreshIndicator(
         color: AppColors.accent,
         onRefresh: _refresh,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
               parent: BouncingScrollPhysics()),
           slivers: [
-            // ── Search + filters header ──
+            // ── Page heading + search/filters header ──
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    PageHeading(
+                      title: 'Marketplace',
+                      subtitle: 'Furniture & materials for your space',
+                      actions: [
+                        // Wishlist
+                        IconButton(
+                          icon: Badge(
+                            isLabelVisible: wishlistCount > 0,
+                            label: Text('$wishlistCount',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.white)),
+                            child: const Icon(Icons.favorite_outline,
+                                color: AppColors.textPrimary),
+                          ),
+                          onPressed: () =>
+                              context.pushNamed(RouteNames.homeownerWishlist),
+                        ),
+                        // Order history
+                        IconButton(
+                          icon: Badge(
+                            isLabelVisible: orderCount > 0,
+                            label: Text('$orderCount',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.white)),
+                            child: const Icon(Icons.receipt_long_outlined,
+                                color: AppColors.textPrimary),
+                          ),
+                          onPressed: () => context
+                              .pushNamed(RouteNames.homeownerOrderHistory),
+                        ),
+                        // Cart
+                        IconButton(
+                          icon: Badge(
+                            isLabelVisible: cartCount > 0,
+                            label: Text(
+                                cartCount > 99 ? '99+' : '$cartCount',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.white)),
+                            child: const Icon(Icons.shopping_cart_outlined,
+                                color: AppColors.textPrimary),
+                          ),
+                          onPressed: () =>
+                              context.pushNamed(RouteNames.homeownerCart),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     _buildSearchArea(),
                     const SizedBox(height: 10),
                     if (_chipRowEntries().isNotEmpty || _sortChipVisible())
@@ -803,10 +798,11 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
           isAccent: true,
           onClear: () => ref.read(ecoOnlyProvider.notifier).state = false));
     }
-    if (state.verifiedOff) {
+    if (state.verifiedActive) {
       entries.add(_RemovableChip(
-          label: 'All sellers',
-          onClear: () => ref.read(verifiedOnlyProvider.notifier).state = true));
+          label: 'Verified sellers',
+          isAccent: true,
+          onClear: () => ref.read(verifiedOnlyProvider.notifier).state = false));
     }
     return entries;
   }

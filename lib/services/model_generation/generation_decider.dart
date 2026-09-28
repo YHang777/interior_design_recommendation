@@ -1,11 +1,13 @@
 /// PURE decision module for the auto-3D pipeline (no Firebase, no IO — unit
 /// testable headless).
 ///
-/// Every entry point of the pipeline — product save, the seller's Retry /
-/// Regenerate actions, boot resume of stuck generations — funnels through
-/// [decideGeneration] so the whole decision table lives in ONE place and
-/// every path is deterministic:
+/// Tripo is the ONLY model source for products: this table no longer decides
+/// BETWEEN model sources (that cascade — Tripo → procedural generator →
+/// category-default dimensions → bundled catalog — is gone). It decides only
+/// what the single pipeline should do right now: SUBMIT a new Tripo task,
+/// POLL the persisted task, WAIT, or record a loud failure / no-model state.
 ///
+/// Guarantees, all unit-tested in generation_decision_test.dart:
 ///  - a healthy `ready` model is never re-kicked automatically (re-submitting
 ///    a paid Tripo task on every product edit would burn credits);
 ///  - a persisted `taskId` means poll THAT task first — polling is free and
@@ -14,9 +16,10 @@
 ///    AUTOMATIC kicks (a crash/resume loop must not bill a seller
 ///    repeatedly); an EXPLICIT seller action (`force: true`) always may
 ///    submit — a human is deciding to spend;
-///  - forcing regeneration of a product whose current model is a ready Tripo
-///    model NEVER downgrades it to a procedural one when the AI path is not
-///    available — the current AI model is kept.
+///  - an explicit regenerate on a non-eligible product keeps the current
+///    ready model instead of clobbering it;
+///  - every refusal names the EXACT missing precondition(s) (API key, photo,
+///    dimensions) so the operator knows what to fix.
 library;
 
 /// What the pipeline should do right now for one product.
@@ -26,24 +29,28 @@ enum GenerationAction {
   none,
 
   /// Re-check the persisted Tripo `taskId` (free, no billing, no new
-  /// submission). Used for `generating` docs and `failed` docs that ended on
-  /// a transient error.
+  /// submission). Used for `generating` docs and `failed` docs that still
+  /// carry a pollable task.
   pollExistingTask,
 
   /// Submit a brand-new Tripo image-to-model task (bills credits; increments
   /// `attempts`).
   submitNewTripo,
 
-  /// Mark `ar3d` ready with the built-in generator as source (instant —
-  /// geometry materializes on demand in the AR viewer).
+  /// LEGACY — never produced anymore. Kept only because
+  /// `product_management_screen.dart` (supplier UI, outside this change's
+  /// ownership) switches exhaustively over [GenerationAction] and would fail
+  /// to compile without it. The procedural product-model path was deleted;
+  /// do NOT start returning this value.
   stampProcedural,
 
-  /// Clear `ar3d` back to `none` (no model possible — typically no
+  /// Clear `ar3d` back to `none` (no model possible — typically no seller
   /// dimensions yet).
   markNoModel,
 
-  /// Mark `ar3d` failed with a human-readable reason. `taskId` is kept only
-  /// for transient-cap failures (the trigger clears it otherwise).
+  /// Mark `ar3d` failed with a human-readable reason. Only chosen when there
+  /// is no pollable task left (or the seller must fix a precondition), so
+  /// clearing `taskId` here never discards a resumable generation.
   markFailed,
 }
 
@@ -81,16 +88,66 @@ const String needsNetworkImageMessage =
     '3D generation needs a clear, public product photo (uploaded as a URL). '
     'Re-upload the image and try again.';
 
+/// Message used when no Tripo API key is configured — the operator must set
+/// it; there is no other model source to fall back to.
+const String needsTripoKeyMessage =
+    '3D generation is not configured: set TRIPO_API_KEY (or '
+    'LocalConfig.tripoApiKey) and restart the app. Tripo is the only 3D '
+    'model source, so no model can be created without it.';
+
+/// Message used when the seller declared no dimension at all — AR needs the
+/// product's real size and never guesses one.
+const String needsDimensionsMessage =
+    '3D generation needs the product size: set Width/Height/Depth (meters) '
+    'in the product form. AR will not place a model at a guessed size.';
+
+/// Names exactly which precondition(s) are absent, e.g.
+/// `'TRIPO_API_KEY (LocalConfig.tripoApiKey), Width/Height/Depth (meters)'`.
+/// Empty string when nothing is missing.
+String missingGenerationReasons({
+  required bool tripoConfigured,
+  required bool hasNetworkImage,
+  required bool hasDimensions,
+}) {
+  final missing = <String>[];
+  if (!tripoConfigured) missing.add('TRIPO_API_KEY (LocalConfig.tripoApiKey)');
+  if (!hasNetworkImage) {
+    missing.add('a clear public product photo (image URL)');
+  }
+  if (!hasDimensions) missing.add('Width/Height/Depth (meters)');
+  return missing.join(', ');
+}
+
+/// The single, specific message for "these preconditions are missing".
+String missingPreconditionsMessage({
+  required bool tripoConfigured,
+  required bool hasNetworkImage,
+  required bool hasDimensions,
+}) {
+  final missing = missingGenerationReasons(
+    tripoConfigured: tripoConfigured,
+    hasNetworkImage: hasNetworkImage,
+    hasDimensions: hasDimensions,
+  );
+  if (missing.isEmpty) return '';
+  if (!hasDimensions && tripoConfigured && hasNetworkImage) {
+    return needsDimensionsMessage;
+  }
+  if (!tripoConfigured) return '$needsTripoKeyMessage Missing: $missing.';
+  if (!hasNetworkImage) return '$needsNetworkImageMessage Missing: $missing.';
+  return '3D generation cannot run — missing: $missing.';
+}
+
 /// Decides the next pipeline action for a product snapshot.
 ///
 /// Pure: all inputs are scalars, so the full table is unit-testable without
 /// Firebase.
 ///
 /// - [status]: `ar3d.status` or `'none'` when no ar3d record exists.
-/// - [source]: `ar3d.source` (`''` | `'procedural'` | `'tripo'`).
 /// - [hasTaskId]: whether a Tripo task was persisted and may be re-polled.
 /// - [attempts]: how many NEW Tripo tasks have been submitted so far.
-/// - [dimsComplete]: the product carries full W×H×D meters.
+/// - [hasDimensions]: the seller declared at least one of W/H/D > 0 (the
+///   rescaler sizes from whichever axes exist; none → refuse).
 /// - [hasNetworkImage]: `image` starts with http(s) — Tripo fetches it
 ///   server-side.
 /// - [tripoConfigured]: an API key is configured.
@@ -98,22 +155,21 @@ const String needsNetworkImageMessage =
 ///   re-save with the AI switch on). Bypasses the automatic-attempt cap.
 GenerationDecision decideGeneration({
   required String status,
-  required String source,
   required bool hasTaskId,
   required int attempts,
-  required bool dimsComplete,
+  required bool hasDimensions,
   required bool hasNetworkImage,
   required bool tripoConfigured,
   required bool force,
 }) {
-  final eligible =
-      tripoConfigured && hasNetworkImage && dimsComplete;
+  final eligible = tripoConfigured && hasNetworkImage && hasDimensions;
   final capReached = attempts >= autoAttemptsCap;
 
   // ── 1. Healthy ready model ─────────────────────────────────────────────
-  // Automatic kicks never touch it. An explicit force-regenerate may ask for
-  // a fresh model (tripo) or a re-stamp (procedural) — but NEVER downgrades
-  // a ready Tripo model to procedural when the AI route is unavailable.
+  // Automatic kicks never touch it. An explicit force-regenerate submits a
+  // fresh Tripo task when eligible; when NOT eligible it keeps the current
+  // model (never clobbers a healthy model with a failure) and says which
+  // precondition is missing.
   if (status == 'ready') {
     if (!force) {
       return const GenerationDecision(
@@ -127,23 +183,14 @@ GenerationDecision decideGeneration({
         message: 'Submitting a new AI 3D generation task…',
       );
     }
-    if (source == 'tripo') {
-      return const GenerationDecision(
-        GenerationAction.none,
-        message: 'Keeping the current AI model — regenerating needs Tripo '
-            'configured, a clear product photo and complete dimensions.',
-      );
-    }
-    if (dimsComplete) {
-      return const GenerationDecision(
-        GenerationAction.stampProcedural,
-        message: 'Regenerating with the built-in model…',
-      );
-    }
-    return const GenerationDecision(
+    return GenerationDecision(
       GenerationAction.none,
-      message: 'Keeping the current model — set Width/Height/Depth to '
-          'regenerate it. Customers can\'t view in AR without a 3D model.',
+      message: 'Keeping the current AI model — regenerating needs: '
+          '${missingGenerationReasons(
+            tripoConfigured: tripoConfigured,
+            hasNetworkImage: hasNetworkImage,
+            hasDimensions: hasDimensions,
+          )}.',
     );
   }
 
@@ -156,96 +203,63 @@ GenerationDecision decideGeneration({
   }
 
   // ── 3. A new Tripo submission — automatic only under the attempt cap ────
-  if (eligible && (force || !capReached)) {
-    return GenerationDecision(
-      GenerationAction.submitNewTripo,
-      message: force
-          ? 'Submitting a new AI 3D generation task…'
-          : 'Starting AI 3D generation…',
-    );
-  }
-
-  // ── 4. Explicit seller retry that cannot reach the AI route ────────────
-  if (force) {
-    if (dimsComplete) {
-      return const GenerationDecision(
-        GenerationAction.stampProcedural,
-        message: 'AI generation is not available — using the built-in model.',
+  if (eligible) {
+    if (force || !capReached) {
+      return GenerationDecision(
+        GenerationAction.submitNewTripo,
+        message: force
+            ? 'Submitting a new AI 3D generation task…'
+            : 'Starting AI 3D generation…',
       );
     }
-    if (hasNetworkImage) {
-      return const GenerationDecision(
-        GenerationAction.markFailed,
-        message: 'Retry needs complete Width/Height/Depth (meters). '
-            'Add product dimensions to enable 3D generation.',
-      );
-    }
-    return const GenerationDecision(
-      GenerationAction.markFailed,
-      message: 'Retry needs a clear product photo and dimensions. '
-          'Add Width/Height/Depth (meters) and re-upload the image.',
-    );
-  }
-
-  // ── 5. Automatic kicks, AI route unavailable or capped ─────────────────
-  if (status == 'generating') {
-    // A generation that started but can no longer continue (no task id to
-    // poll, no way to submit) must not sit in `generating` forever.
-    return GenerationDecision(
-      GenerationAction.markFailed,
-      message: capReached
-          ? autoAttemptsCapMessage
-          : '3D generation could not continue. It needs Tripo configured, '
-              'a clear product photo, and complete dimensions (W×H×D in meters).',
-    );
-  }
-
-  if (status == 'failed') {
-    if (capReached) {
-      return const GenerationDecision(
-        GenerationAction.markFailed,
-        message: autoAttemptsCapMessage,
-      );
-    }
-    if (dimsComplete) {
-      // Product is saveable without an AI model — recover with the free
-      // deterministic generator (attempts stay under the cap, so a later
-      // save with the AI route restored submits again).
-      return const GenerationDecision(
-        GenerationAction.stampProcedural,
-        message: 'AI generation is not available — using the built-in model.',
-      );
-    }
-    return const GenerationDecision(
-      GenerationAction.markFailed,
-      message: 'Set Width/Height/Depth (meters) to generate the 3D model. '
-          'Customers won\'t see AR without a 3D model.',
-    );
-  }
-
-  // ── 6. No record yet (`none`) or an unknown status ─────────────────────
-  if (dimsComplete) {
-    return const GenerationDecision(
-      GenerationAction.stampProcedural,
-      message: 'AI generation is not available — using the built-in model.',
-    );
-  }
-  if (capReached) {
     return const GenerationDecision(
       GenerationAction.markFailed,
       message: autoAttemptsCapMessage,
     );
   }
-  if (status == 'none') {
-    return const GenerationDecision(
-      GenerationAction.markNoModel,
-      message: 'No 3D model yet — add real-world Width/Height/Depth '
-          '(meters) to generate one. Without it, customers can\'t view in AR.',
+
+  // ── 4. Not eligible — every refusal names the missing precondition(s) ──
+  final why = missingPreconditionsMessage(
+    tripoConfigured: tripoConfigured,
+    hasNetworkImage: hasNetworkImage,
+    hasDimensions: hasDimensions,
+  );
+  if (force) {
+    // Explicit seller action: record the failure loudly so the chip shows
+    // WHY (there is no other model source to settle for).
+    return GenerationDecision(GenerationAction.markFailed, message: why);
+  }
+
+  // ── 5. Automatic kicks that cannot run ─────────────────────────────────
+  if (status == 'generating') {
+    // A generation that started but can no longer continue (no task id to
+    // poll, no way to submit) must not sit in `generating` forever.
+    return GenerationDecision(
+      GenerationAction.markFailed,
+      message: capReached ? autoAttemptsCapMessage : why,
     );
   }
-  return const GenerationDecision(
+
+  if (status == 'failed') {
+    return GenerationDecision(
+      GenerationAction.markFailed,
+      message: capReached ? autoAttemptsCapMessage : why,
+    );
+  }
+
+  // ── 6. No record yet (`none`) or an unknown status ─────────────────────
+  if (status == 'none') {
+    return GenerationDecision(
+      GenerationAction.markNoModel,
+      message: why.isEmpty
+          ? 'No 3D model yet — tap Regenerate 3D to create one. Without it, '
+              'customers can\'t view this product in AR.'
+          : why,
+    );
+  }
+  return GenerationDecision(
     GenerationAction.markFailed,
-    message: 'The 3D model state is invalid — edit and save the product '
-        'to regenerate it. Check dimensions and product photo.',
+    message: 'The 3D model state "$status" is invalid — edit and save the '
+        'product to regenerate it. Check $why',
   );
 }

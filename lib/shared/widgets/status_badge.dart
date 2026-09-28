@@ -38,7 +38,9 @@ class StatusBadge extends StatelessWidget {
       'verified' => ('Verified', AppColors.success, Icons.check_circle_outline),
       'pending' => ('Pending', AppColors.warning, Icons.schedule),
       'rejected' => ('Rejected', AppColors.error, Icons.cancel_outlined),
-      _ => ('Unknown', AppColors.textHint, Icons.help_outline),
+      // 'none' is the default for every new account — it is the ordinary
+      // "has not applied yet" state, not an unknown/error condition.
+      _ => ('Not verified', AppColors.textHint, Icons.outlined_flag),
     };
     return StatusBadge(label: label, color: color, compact: compact, icon: icon);
   }

@@ -16,6 +16,7 @@ import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/quantity_stepper.dart';
 import '../../../../../shared/widgets/rating_stars.dart';
 import '../../../../../shared/widgets/section_header.dart';
+import '../../../../../shared/widgets/verified_badge.dart';
 
 import '../providers/marketplace_providers.dart';
 
@@ -223,6 +224,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       _buildPriceRow(product),
                       const SizedBox(height: 8),
                       _buildStockLine(product),
+                      const SizedBox(height: 8),
+                      _buildShippingLine(product),
+                      if (product.shippingLongDistanceNotice) ...[
+                        const SizedBox(height: 10),
+                        _buildLongDistanceNotice(),
+                      ],
                       const SizedBox(height: 14),
                       const Divider(),
                       const SizedBox(height: 10),
@@ -427,6 +434,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         backgroundColor: Colors.transparent,
                         shadowColor: Colors.transparent,
                         foregroundColor: Colors.white,
+                        // Tight 48px wrapper — shrink vertical padding so
+                        // the label box still fits the line (the 'y' in
+                        // "Buy Now") after the theme's 32px is deducted.
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(24),
                         ),
@@ -492,8 +504,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Widget _buildPriceRow(Product product) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    // Wrap (not Row) so a long price + strike-through + discount badge
+    // folds onto a second line on narrow screens instead of overflowing.
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Text(Formatters.myr(product.price),
             style: GoogleFonts.poppins(
@@ -501,13 +517,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 fontWeight: FontWeight.w800,
                 color: AppColors.accent)),
         if (product.originalPrice != null) ...[
-          const SizedBox(width: 8),
           Text(Formatters.myr(product.originalPrice!),
               style: const TextStyle(
                   fontSize: 16,
                   decoration: TextDecoration.lineThrough,
                   color: AppColors.textHint)),
-          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -542,6 +556,59 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 fontWeight: FontWeight.w500,
                 color: color)),
       ],
+    );
+  }
+
+  /// Delivery line straight from the seller's product-level settings:
+  /// 'Shipping: RM X' when a charge is on, 'Free shipping' otherwise.
+  Widget _buildShippingLine(Product product) {
+    final charged = product.shippingCharge > 0;
+    final color = charged ? AppColors.textSecondary : AppColors.success;
+    return Row(
+      children: [
+        Icon(Icons.local_shipping_outlined, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          charged
+              ? 'Shipping: ${Formatters.myr(product.shippingCharge)}'
+              : 'Free shipping',
+          style: TextStyle(
+              fontSize: 13, fontWeight: FontWeight.w500, color: color),
+        ),
+      ],
+    );
+  }
+
+  /// Long-distance notice the seller opted into on the product form.
+  /// Rendered from the shared constant so the wording can never drift
+  /// between the seller's preview and this page.
+  Widget _buildLongDistanceNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline,
+              size: 16, color: AppColors.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              Product.longDistanceNotice,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -624,9 +691,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                                   color: AppColors.textPrimary)),
                         ),
                         if (supplier.isVerified) ...[
-                          const SizedBox(width: 5),
-                          const Icon(Icons.verified,
-                              size: 16, color: AppColors.accent),
+                          const SizedBox(width: 6),
+                          // Self-gating: renders nothing unless the admin
+                          // actually approved this supplier.
+                          VerifiedBadge(
+                              verificationStatus: supplier.verificationStatus),
                         ],
                       ],
                     ),

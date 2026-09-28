@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../../../../models/product.dart';
 import 'glb_bounds.dart';
 
 /// Thrown when a GLB cannot be rescaled (degenerate geometry, missing BIN
@@ -15,6 +16,78 @@ class GlbRescaleException implements Exception {
 
   @override
   String toString() => 'GlbRescaleException: $message';
+}
+
+/// Thrown when the seller declared no usable dimension at all (every axis is
+/// missing or ≤ 0). AR then refuses to size — and therefore refuses to place —
+/// the model. A guessed size is never acceptable: the seller's numbers are
+/// the only source of truth for how big a product is.
+class MissingDimensionsException implements Exception {
+  const MissingDimensionsException();
+
+  @override
+  String toString() => 'MissingDimensionsException: the product declares no '
+      'Width/Height/Depth (meters). Set the seller dimensions in the product '
+      'form — AR will not place a model at a guessed size.';
+}
+
+/// Whether the seller declared at least one usable dimension (> 0 m). Only
+/// these products may be modeled / placed in AR; a product with none may not.
+bool hasAnySellerDimension(ProductDimensions? dims) =>
+    dims != null && (dims.widthM > 0 || dims.heightM > 0 || dims.depthM > 0);
+
+/// Rescales a downloaded Tripo GLB (arbitrary baked scale — e.g. a 0.70 m
+/// mesh for a product the seller declared as 0.50 m) to the SELLER's declared
+/// size and grounds it at y = 0.
+///
+/// The seller's dimensions in the product form are the single source of
+/// truth for size:
+///  * all three of W/H/D present → per-axis rescale to exactly those
+///    dimensions (true size);
+///  * only some present → a UNIFORM scale driven by the dimension(s) that
+///    were given, HEIGHT preferred, so "height 0.50 m" turns a 0.70 m mesh
+///    into a 0.50 m mesh while the proportions stay intact;
+///  * none present → [MissingDimensionsException]. Never a guessed size.
+///
+/// The heavy lifting (per-axis factors, Y grounding, normal repair) is
+/// [rescaleGlbToDimensions] — this function only decides the target size.
+Uint8List rescaleGlbToSellerSize(Uint8List glbBytes, ProductDimensions? dims) {
+  if (!hasAnySellerDimension(dims)) throw const MissingDimensionsException();
+  final d = dims!; // non-null: the guard above throws otherwise
+  final widthM = d.widthM;
+  final heightM = d.heightM;
+  final depthM = d.depthM;
+  if (widthM > 0 && heightM > 0 && depthM > 0) {
+    return rescaleGlbToDimensions(
+      glbBytes,
+      targetWidthM: widthM,
+      targetHeightM: heightM,
+      targetDepthM: depthM,
+    );
+  }
+
+  // Partial dimensions → one uniform scale so the mesh keeps its shape.
+  // Height is preferred (the declared height is what a seller measures a
+  // piece of furniture by), then width, then depth.
+  final bounds = GlbBounds.fromGlbBytes(glbBytes);
+  if (bounds.isDegenerate) {
+    throw GlbRescaleException('Cannot rescale: source geometry is degenerate '
+        '(${bounds.widthM} × ${bounds.heightM} × ${bounds.depthM} m).');
+  }
+  final double scale;
+  if (heightM > 0) {
+    scale = heightM / bounds.heightM;
+  } else if (widthM > 0) {
+    scale = widthM / bounds.widthM;
+  } else {
+    scale = depthM / bounds.depthM;
+  }
+  return rescaleGlbToDimensions(
+    glbBytes,
+    targetWidthM: bounds.widthM * scale,
+    targetHeightM: bounds.heightM * scale,
+    targetDepthM: bounds.depthM * scale,
+  );
 }
 
 /// Rescales a binary glTF 2.0 (GLB) model so its geometry exactly spans

@@ -1,0 +1,25 @@
+# Admin site (frontend/ + backend/) — never commit secrets or build output.
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.vite/
+
+# Environment files (keep *.example files)
+.env
+.env.local
+.env.*.local
+*.local
+
+# Firebase service-account keys — NEVER commit
+secrets/
+service-account*.json
+*-service-account.json
+firebase-admin*.json
+
+# Logs & OS noise
+npm-debug.log*
+*.log
+.DS_Store

@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../models/order.dart';
 import '../../../../shared/widgets/empty_state.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/stat_card.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -78,11 +79,11 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Analytics')),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        color: AppColors.accent,
-        child: ordersAsync.isLoading && ordersAsync.valueOrNull == null
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          color: AppColors.accent,
+          child: ordersAsync.isLoading && ordersAsync.valueOrNull == null
             ? const _AnalyticsSkeleton()
             : ordersAsync.hasError && orders.isEmpty
                 ? LayoutBuilder(
@@ -119,14 +120,17 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
                           ),
                         ),
                       )
-                    : _content(months, monthly, maxMonthly, totalOrders,
-                        totalRevenue, avgOrderValue, tally),
+                    : _content(context, months, monthly, maxMonthly,
+                        totalOrders, totalRevenue, avgOrderValue, tally),
+        ),
       ),
     );
   }
 
+  /// Items + this supplier's shipping share (kept consistent with
+  /// `totalRevenue`/`revenueInMonth` in supplier_providers).
   int totalRevenueOf(List<Order> sold, String uid) =>
-      sold.fold(0, (sum, o) => sum + mySubtotal(o, uid));
+      sold.fold(0, (sum, o) => sum + mySubtotal(o, uid) + myShipping(o, uid));
 
   List<_Tally> _topProducts(List<Order> sold, String uid) {
     final byProduct = <String, _Tally>{};
@@ -143,36 +147,48 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
     return list.take(3).toList();
   }
 
-  Widget _content(List<DateTime> months, List<int> monthly, int maxMonthly,
-      int totalOrders, int totalRevenue, int avgOrderValue,
-      List<_Tally> top) {
+  Widget _content(BuildContext context, List<DateTime> months,
+      List<int> monthly, int maxMonthly, int totalOrders, int totalRevenue,
+      int avgOrderValue, List<_Tally> top) {
     final now = DateTime.now();
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
+        const PageHeading(title: 'Analytics'),
+        const SizedBox(height: 16),
+
         // ── Summary figures ──
+        // Expanded keeps the three cards at equal 1/3 width — as bare Row
+        // children they sized to intrinsic text width and overflowed 360dp.
         Row(
           children: [
-            StatCard(
-              icon: Icons.receipt_long_outlined,
-              label: 'Total orders',
-              value: '$totalOrders',
-              gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+            Expanded(
+              child: StatCard(
+                icon: Icons.receipt_long_outlined,
+                label: 'Total orders',
+                value: '$totalOrders',
+                gradient: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.receipt_outlined,
-              label: 'Avg order value',
-              value: Formatters.myr(avgOrderValue),
-              gradient: const [AppColors.warning, AppColors.gradientOrange],
+            Expanded(
+              child: StatCard(
+                icon: Icons.receipt_outlined,
+                label: 'Avg order value',
+                value: Formatters.myr(avgOrderValue),
+                gradient: const [AppColors.warning, AppColors.gradientOrange],
+              ),
             ),
             const SizedBox(width: 10),
-            StatCard(
-              icon: Icons.payments_outlined,
-              label: 'Total revenue',
-              value: Formatters.myr(totalRevenue),
-              gradient: const [AppColors.accent, AppColors.gradientGreen],
+            Expanded(
+              child: StatCard(
+                icon: Icons.payments_outlined,
+                label: 'Total revenue',
+                value: Formatters.myr(totalRevenue),
+                gradient: const [AppColors.accent, AppColors.gradientGreen],
+              ),
             ),
           ],
         ),
@@ -181,7 +197,7 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
         // ── Revenue bar chart (hand-rolled) ──
         _card(
           title: 'Revenue — last 6 months',
-          subtitle: 'Your items only; cancelled orders excluded',
+          subtitle: 'Your sales + shipping; cancelled orders excluded',
           child: monthly.every((v) => v == 0)
               ? Padding(
                   padding: const EdgeInsets.symmetric(vertical: 26),

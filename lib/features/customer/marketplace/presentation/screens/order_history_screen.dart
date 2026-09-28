@@ -6,6 +6,8 @@ import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/order.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/float_button.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/status_badge.dart';
 import '../providers/marketplace_providers.dart';
@@ -24,87 +26,111 @@ class OrderHistoryScreen extends ConsumerWidget {
       length: 4,
       child: Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppBar(
-          title: const Text('My Orders'),
-          bottom: const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            indicatorColor: AppColors.accent,
-            indicatorWeight: 3,
-            labelColor: AppColors.accent,
-            unselectedLabelColor: AppColors.textSecondary,
-            labelStyle: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
+        body: Stack(
+          children: [
+            SafeArea(
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: PageHeading(title: 'My Orders'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: TabBar(
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      indicatorColor: AppColors.accent,
+                      indicatorWeight: 3,
+                      labelColor: AppColors.accent,
+                      unselectedLabelColor: AppColors.textSecondary,
+                      labelStyle: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      unselectedLabelStyle: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      tabs: [
+                        Tab(text: 'All'),
+                        Tab(text: 'Processing'),
+                        Tab(text: 'Delivered'),
+                        Tab(text: 'Cancelled'),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ordersAsync.when(
+                      skipLoadingOnRefresh: true,
+                      loading: () => const _OrdersSkeleton(),
+                      error: (_, __) => EmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Could not load your orders',
+                        subtitle: 'Check your connection and try again.',
+                        actionLabel: 'Retry',
+                        onAction: () =>
+                            ref.invalidate(customerOrdersProvider),
+                      ),
+                      data: (orders) {
+                        // Newest first; live status changes move cards
+                        // across tabs.
+                        final sorted = [...orders]
+                          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                        return TabBarView(
+                          children: [
+                            _OrdersTab(
+                              orders: sorted,
+                              emptyIcon: Icons.receipt_long_outlined,
+                              emptyTitle: 'No orders yet',
+                              emptySubtitle:
+                                  'Your purchases will appear here with live tracking.',
+                              emptyAction: 'Browse the store',
+                            ),
+                            _OrdersTab(
+                              orders: sorted
+                                  .where((o) => !o.status.isTerminal)
+                                  .toList(),
+                              emptyIcon: Icons.inventory_2_outlined,
+                              emptyTitle: 'Nothing being processed',
+                              emptySubtitle:
+                                  'Orders awaiting confirmation, being prepared or on '
+                                  'their way will appear here.',
+                              emptyAction: 'Browse the store',
+                            ),
+                            _OrdersTab(
+                              orders: sorted
+                                  .where((o) => o.status == OrderStatus.delivered)
+                                  .toList(),
+                              emptyIcon: Icons.local_shipping_outlined,
+                              emptyTitle: 'No delivered orders yet',
+                              emptySubtitle:
+                                  'Completed orders land here, ready to be reviewed.',
+                              emptyAction: 'Browse the store',
+                            ),
+                            _OrdersTab(
+                              orders: sorted
+                                  .where((o) => o.status == OrderStatus.cancelled)
+                                  .toList(),
+                              emptyIcon: Icons.cancel_outlined,
+                              emptyTitle: 'No cancelled orders',
+                              emptySubtitle: 'Cancelled orders will appear here.',
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
-            unselectedLabelStyle: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w500,
+            Positioned(
+              top: MediaQuery.viewPaddingOf(context).top + 8,
+              left: 8,
+              child: const FloatingBackButton(),
             ),
-            tabs: [
-              Tab(text: 'All'),
-              Tab(text: 'Processing'),
-              Tab(text: 'Delivered'),
-              Tab(text: 'Cancelled'),
-            ],
-          ),
-        ),
-        body: ordersAsync.when(
-          skipLoadingOnRefresh: true,
-          loading: () => const _OrdersSkeleton(),
-          error: (_, __) => EmptyState(
-            icon: Icons.cloud_off_outlined,
-            title: 'Could not load your orders',
-            subtitle: 'Check your connection and try again.',
-            actionLabel: 'Retry',
-            onAction: () => ref.invalidate(customerOrdersProvider),
-          ),
-          data: (orders) {
-            // Newest first; live status changes move cards across tabs.
-            final sorted = [...orders]
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-            return TabBarView(
-              children: [
-                _OrdersTab(
-                  orders: sorted,
-                  emptyIcon: Icons.receipt_long_outlined,
-                  emptyTitle: 'No orders yet',
-                  emptySubtitle:
-                      'Your purchases will appear here with live tracking.',
-                  emptyAction: 'Browse the store',
-                ),
-                _OrdersTab(
-                  orders: sorted
-                      .where((o) => !o.status.isTerminal)
-                      .toList(),
-                  emptyIcon: Icons.inventory_2_outlined,
-                  emptyTitle: 'Nothing being processed',
-                  emptySubtitle:
-                      'Orders awaiting confirmation, being prepared or on '
-                      'their way will appear here.',
-                  emptyAction: 'Browse the store',
-                ),
-                _OrdersTab(
-                  orders: sorted
-                      .where((o) => o.status == OrderStatus.delivered)
-                      .toList(),
-                  emptyIcon: Icons.local_shipping_outlined,
-                  emptyTitle: 'No delivered orders yet',
-                  emptySubtitle:
-                      'Completed orders land here, ready to be reviewed.',
-                  emptyAction: 'Browse the store',
-                ),
-                _OrdersTab(
-                  orders: sorted
-                      .where((o) => o.status == OrderStatus.cancelled)
-                      .toList(),
-                  emptyIcon: Icons.cancel_outlined,
-                  emptyTitle: 'No cancelled orders',
-                  emptySubtitle: 'Cancelled orders will appear here.',
-                ),
-              ],
-            );
-          },
+          ],
         ),
       ),
     );

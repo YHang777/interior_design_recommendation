@@ -27,9 +27,15 @@ class AppUser {
   final String? address;
   final String? profilePicture;
 
-  /// Onboarding/verification state: 'verified', 'pending' or 'rejected'.
-  /// Suppliers register as 'verified' today; an admin approval flow that
-  /// writes 'pending' is future work.
+  /// Admin-granted supplier verification: 'none' | 'pending' | 'verified' |
+  /// 'rejected'.
+  ///
+  /// Every new account starts at 'none'. Only the admin backend may set
+  /// 'verified', and only after the supplier has uploaded an IC and
+  /// supporting documents and an admin has approved them — `firestore.rules`
+  /// refuses any client write of 'verified', so this cannot be self-granted.
+  /// Homeowners never see verification UI; the value only matters for
+  /// suppliers, where it drives the "Verified" badge buyers see.
   final String verificationStatus;
 
   /// Supplier business profile (populated when [role] is supplier).
@@ -48,7 +54,7 @@ class AppUser {
     this.phone,
     this.address,
     this.profilePicture,
-    this.verificationStatus = 'verified',
+    this.verificationStatus = 'none',
     this.businessName,
     this.businessPhone,
     this.businessAddress,
@@ -78,7 +84,7 @@ class AppUser {
       profilePicture: data['profilePicture'] as String?,
       // Missing status defaults to verified — suppliers are trusted at
       // registration today; admin moderation is future work.
-      verificationStatus: data['verificationStatus']?.toString() ?? 'verified',
+      verificationStatus: data['verificationStatus']?.toString() ?? 'none',
       businessName: data['businessName']?.toString() ??
           (role == UserRole.supplier ? name : null),
       businessPhone: data['businessPhone']?.toString(),

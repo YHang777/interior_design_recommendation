@@ -8,6 +8,7 @@ import '../../../../models/product.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/data/models/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -110,97 +111,38 @@ class _SupplierProfileScreenState
       showAppSnackbar(context, 'No email on file', isError: true);
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actionsAlignment: MainAxisAlignment.center,
-        backgroundColor: AppColors.surface,
-        title: Text(
-          'Reset Password?',
-          style: GoogleFonts.poppins(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'A password reset link will be sent to $email. '
+    // Same shared helper as Log out / Delete: long half-width buttons,
+    // centered pair, 16px gap (a bespoke AlertDialog here once again
+    // produced narrow, touching buttons).
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Reset Password?',
+      message: 'A password reset link will be sent to $email. '
           'Check your inbox after a few minutes.',
-          style: GoogleFonts.poppins(
-            fontSize: 13.5,
-            height: 1.4,
-            color: AppColors.textSecondary,
-          ),
-        ),
-        actions: [
-          SizedBox(
-            width: 110,
-            height: 44,
-            child: OutlinedButton(
-              onPressed: () => Navigator.pop(ctx),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 140,
-            height: 44,
-            child: ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                try {
-                  await ref
-                      .read(authStateProvider.notifier)
-                      .sendPasswordResetEmail(email);
-                  if (mounted) {
-                    showAppSnackbar(
-                      context,
-                      'Password reset email sent to $email',
-                      color: AppColors.success,
-                      duration: const Duration(seconds: 3),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    showAppSnackbar(
-                      context,
-                      'Could not send reset email',
-                      isError: true,
-                      detail: e.toString(),
-                      duration: const Duration(seconds: 3),
-                    );
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text('Send Reset Link',
-                  style: TextStyle(fontSize: 13)),
-            ),
-          ),
-        ],
-      ),
+      confirmLabel: 'Send Reset Link',
     );
+    if (!confirmed || !mounted) return;
+    try {
+      await ref.read(authStateProvider.notifier).sendPasswordResetEmail(email);
+      if (mounted) {
+        showAppSnackbar(
+          context,
+          'Password reset email sent to $email',
+          color: AppColors.success,
+          duration: const Duration(seconds: 3),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppSnackbar(
+          context,
+          'Could not send reset email',
+          isError: true,
+          detail: e.toString(),
+          duration: const Duration(seconds: 3),
+        );
+      }
+    }
   }
 
   Future<void> _logout() async {
@@ -232,28 +174,26 @@ class _SupplierProfileScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text('Profile',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.background,
-        elevation: 0,
-      ),
-      body: user == null || supplier == null
-          ? const EmptyState(
-              icon: Icons.person_off_outlined,
-              title: 'Not signed in',
-              subtitle: 'Sign in as a supplier to view your profile.',
-            )
-          : RefreshIndicator(
-              onRefresh: () async {
-                ref.invalidate(marketplaceProductsProvider);
-              },
-              color: AppColors.accent,
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  // ── Avatar with gradient ring ──
-                  Center(
+      body: SafeArea(
+        child: user == null || supplier == null
+            ? const EmptyState(
+                icon: Icons.person_off_outlined,
+                title: 'Not signed in',
+                subtitle: 'Sign in as a supplier to view your profile.',
+              )
+            : RefreshIndicator(
+                onRefresh: () async {
+                  ref.invalidate(marketplaceProductsProvider);
+                },
+                color: AppColors.accent,
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                      16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
+                  children: [
+                    const PageHeading(title: 'Profile'),
+                    const SizedBox(height: 16),
+                    // ── Avatar with gradient ring ──
+                    Center(
                     child: Column(
                       children: [
                         Container(
@@ -436,8 +376,8 @@ class _SupplierProfileScreenState
                     const SizedBox(height: 20),
 
                     // ── Logout ──
-                    SizedBox(
-                      height: 52,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 52),
                       child: OutlinedButton.icon(
                         onPressed: _logout,
                         icon: const Icon(Icons.logout, color: AppColors.error),
@@ -455,38 +395,18 @@ class _SupplierProfileScreenState
 
                     // ── Delete account ──
                     TextButton(
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            actionsAlignment: MainAxisAlignment.center,
-                            title: const Text('Delete Account?'),
-                            content: const Text(
-                                'This action cannot be undone. All your data will be permanently removed.'),
-                            actions: [
-                              TextButton(
-                                  onPressed: () => Navigator.pop(ctx),
-                                  child: const Text('Cancel')),
-                              ElevatedButton(
-                                onPressed: () {
-                                  Navigator.pop(ctx);
-                                  ref
-                                      .read(authStateProvider.notifier)
-                                      .logout();
-                                },
-                                style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.error,
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    )),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
+                      onPressed: () async {
+                        final confirmed = await showConfirmDialog(
+                          context,
+                          title: 'Delete Account?',
+                          message:
+                              'This action cannot be undone. All your data will be permanently removed.',
+                          confirmLabel: 'Delete',
+                          destructive: true,
                         );
+                        if (confirmed) {
+                          ref.read(authStateProvider.notifier).logout();
+                        }
                       },
                       child: Text('Delete Account',
                           style: GoogleFonts.poppins(
@@ -497,6 +417,7 @@ class _SupplierProfileScreenState
                 ],
               ),
             ),
+      ),
     );
   }
 

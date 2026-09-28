@@ -9,10 +9,11 @@
 ///  keepPolling                      │ sleep the poll interval, GET again
 ///  taskSucceeded                    │ download → rescale → upload → `ready`
 ///  taskFailedTerminal               │ mark `failed` (clear the task id)
-///  timedOutLeftRunning              │ NO write — doc stays `generating` with
-///                                    │ its task id (the 5-minute deadline ran
-///                                    │ out; the server-side task may still
-///                                    │ finish and boot-resume re-polls it)
+///  timedOutLeftRunning              │ mark `failed` with a timeout message and
+///                                    │ KEEP the task id (the 5-minute deadline
+///                                    │ ran out; the server-side task may still
+///                                    │ finish — an explicit Retry re-polls the
+///                                    │ same paid task, never a new charge)
 ///  transientCapReached              │ mark `failed` but KEEP the task id so an
 ///                                    │ explicit Retry re-polls the SAME — paid
 ///                                    │ for — task instead of a new one

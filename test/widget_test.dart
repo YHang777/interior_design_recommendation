@@ -29,6 +29,18 @@ void main() {
     // The login screen should render with email/password fields
     await tester.pumpAndSettle();
     expect(find.text('Welcome back'), findsOneWidget);
+
+    // Regression for "I press Sign In and nothing happens": the submit
+    // button must be tappable, not stuck behind a spinner. Auth starts in
+    // `AsyncLoading` and the login screen treats that as busy, so the
+    // repository must deliver an initial state (as Firebase always does)
+    // or the button stays disabled forever.
+    final signInButton = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Sign In'),
+    );
+    expect(signInButton.onPressed, isNotNull,
+        reason: 'Sign In must be enabled once auth has resolved');
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 }
 
@@ -37,8 +49,15 @@ class _FakeAuthRepository implements IAuthRepository {
   final StreamController<AppUser?> _controller =
       StreamController<AppUser?>.broadcast();
 
+  /// Firebase's `authStateChanges()` always delivers the current state on
+  /// listen (signed-out = null). Emitting nothing instead left the auth
+  /// notifier in `AsyncLoading` for the whole test and the login button
+  /// spinning — which is why `pumpAndSettle` used to time out here.
   @override
-  Stream<AppUser?> authStateChanges() => _controller.stream;
+  Stream<AppUser?> authStateChanges() async* {
+    yield null;
+    yield* _controller.stream;
+  }
 
   @override
   Future<AppUser?> getCurrentUser() async => null;

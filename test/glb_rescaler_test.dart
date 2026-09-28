@@ -1,6 +1,13 @@
 // Tests for the GLB rescaler: downloaded AI models (arbitrary baked scale,
-// float-unsafe for exact dims) must be re-baked to exact W×H×D meters and
-// grounded at y = 0 so AR placement can use a uniform scale of 1.0.
+// e.g. a 0.70 m mesh for a product the seller declared as 0.50 m) must be
+// re-baked to the SELLER's declared size and grounded at y = 0 so AR
+// placement can use a uniform scale of 1.0.
+//
+// Two layers:
+//  * rescaleGlbToDimensions — the per-axis engine (exact W×H×D targets);
+//  * rescaleGlbToSellerSize — the decision layer the pipeline calls:
+//    all three dims → per-axis; some dims → uniform (height preferred);
+//    no dims → MissingDimensionsException (never a guessed size).
 //
 // Pure Dart tests (no widgets / platform channels) — fast and deterministic.
 
@@ -11,6 +18,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_rescaler.dart';
+import 'package:interior_design_recommendation/models/product.dart';
+
+/// A deterministic mesh from the (still-supported) finish generator: a wall
+/// panel 2.4 × 2.7 × 0.05 m before any rescale.
+Uint8List wallSource() => generateWallGlb(
+    finish: const WallFinish(
+        type: WallFinishType.paint, colorArgb: 0xFFE9E4DA));
+
+/// A mesh at a known arbitrary scale: 0.6 × 0.7 × 0.4 m — the 0.70 m
+/// height of the spec's "seller 0.50 m vs Tripo 0.70 m" example.
+Uint8List meshAt070Height() => rescaleGlbToDimensions(
+      wallSource(),
+      targetWidthM: 0.6,
+      targetHeightM: 0.7,
+      targetDepthM: 0.4,
+    );
 
 /// Parses [bytes] and verifies the GLB container header.
 GlbBounds parseGlb(Uint8List bytes) {
@@ -37,18 +60,29 @@ Map<String, dynamic> jsonChunkOf(Uint8List bytes) {
   return jsonDecode(utf8.decode(jsonBytes)) as Map<String, dynamic>;
 }
 
+/// The POSITION accessor whose min/max match [bounds] (there may be several
+/// accessors — normals/UVs — so we locate the position one by value).
+Map<String, dynamic> positionAccessor(Map<String, dynamic> json, GlbBounds b) {
+  final accessors = json['accessors'] as List<dynamic>;
+  for (final a in accessors) {
+    final m = a as Map<String, dynamic>;
+    if (m['min'] is! List || m['max'] is! List) continue;
+    final min = (m['min'] as List).cast<num>();
+    final max = (m['max'] as List).cast<num>();
+    if (min.length != 3 || max.length != 3) continue;
+    if ((min[0].toDouble() - b.minX).abs() < 1e-5 &&
+        (max[1].toDouble() - b.maxY).abs() < 1e-5) {
+      return m;
+    }
+  }
+  fail('no POSITION accessor with min/max matching the parsed bounds');
+}
+
 void main() {
-  group('rescaleGlbToDimensions', () {
-    test('table 0.8 × 0.7 × 0.5 m → 1.0 × 1.5 × 0.6 m extents match', () {
-      final source = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 0.8,
-        heightM: 0.7,
-        depthM: 0.5,
-      );
+  group('rescaleGlbToDimensions (per-axis engine)', () {
+    test('wall 2.4 × 2.7 × 0.05 m → 1.0 × 1.5 × 0.6 m extents match', () {
       final rescaled = rescaleGlbToDimensions(
-        source,
+        wallSource(),
         targetWidthM: 1.0,
         targetHeightM: 1.5,
         targetDepthM: 0.6,
@@ -63,21 +97,14 @@ void main() {
     });
 
     test('accessor min/max arrays are rewritten to the scaled extents', () {
-      final source = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 0.8,
-        heightM: 0.7,
-        depthM: 0.5,
-      );
+      final source = wallSource();
+      final srcBounds = GlbBounds.fromGlbBytes(source);
       final before = jsonChunkOf(source);
-      final accessor0Before = (before['accessors'] as List<dynamic>)[0]
-          as Map<String, dynamic>;
-      // Source extents were authored exactly.
-      expectNear(
-          (accessor0Before['min'] as List)[0] as double, -0.4, 1e-6, 'src minX');
-      expectNear(
-          (accessor0Before['max'] as List)[1] as double, 0.7, 1e-6, 'src maxY');
+      final posBefore = positionAccessor(before, srcBounds);
+      expectNear((posBefore['min'] as List)[0] as double, srcBounds.minX,
+          1e-6, 'src minX');
+      expectNear((posBefore['max'] as List)[1] as double, srcBounds.maxY,
+          1e-6, 'src maxY');
 
       final rescaled = rescaleGlbToDimensions(
         source,
@@ -86,12 +113,13 @@ void main() {
         targetDepthM: 0.6,
       );
       final json = jsonChunkOf(rescaled);
+      final target = GlbBounds.fromGlbBytes(rescaled);
       final accessors = json['accessors'] as List<dynamic>;
       expect(accessors.length, before['accessors'].length,
           reason: 'accessor count unchanged');
-      final pos = accessors[0] as Map<String, dynamic>;
-      final min = (pos['min'] as List).cast<num>().toList();
-      final max = (pos['max'] as List).cast<num>().toList();
+      final pos = positionAccessor(json, target);
+      final min = (pos['min'] as List).cast<num>();
+      final max = (pos['max'] as List).cast<num>();
       expectNear(min[0].toDouble(), -0.5, 0.01, 'min[0] (X)');
       expectNear(min[1].toDouble(), 0.0, 1e-6, 'min[1] (Y grounded)');
       expectNear(min[2].toDouble(), -0.3, 0.01, 'min[2] (Z)');
@@ -127,13 +155,7 @@ void main() {
     });
 
     test('rescale to square targets keeps byte determinism', () {
-      final source = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Sofa',
-        widthM: 2.2,
-        heightM: 0.85,
-        depthM: 0.9,
-      );
+      final source = wallSource();
       Uint8List run() => rescaleGlbToDimensions(
             source,
             targetWidthM: 1.8,
@@ -144,15 +166,8 @@ void main() {
     });
 
     test('rejects non-positive target dimensions', () {
-      final bytes = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 1.0,
-        heightM: 0.75,
-        depthM: 0.6,
-      );
       expect(
-        () => rescaleGlbToDimensions(bytes,
+        () => rescaleGlbToDimensions(wallSource(),
             targetWidthM: 0, targetHeightM: 1, targetDepthM: 1),
         throwsArgumentError,
       );
@@ -168,13 +183,7 @@ void main() {
 
     test('rescaled model still parses identically on a second pass '
         '(round trip through GlbBounds)', () {
-      final source = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Bed',
-        widthM: 1.6,
-        heightM: 1.2,
-        depthM: 2.0,
-      );
+      final source = wallSource();
       final once = rescaleGlbToDimensions(
         source,
         targetWidthM: 1.9,
@@ -194,6 +203,110 @@ void main() {
       expectNear(parseGlb(twice).heightM, 0.6, 0.01, 'height');
       expectNear(parseGlb(twice).widthM, 1.9, 0.01, 'width');
       expectNear(parseGlb(twice).depthM, 2.1, 0.01, 'depth');
+    });
+  });
+
+  group('rescaleGlbToSellerSize (seller dims drive the final size)', () {
+    test('SPEC EXAMPLE: seller height 0.50 m, mesh height 0.70 m → 0.50 m '
+        '(uniform, height-driven)', () {
+      final mesh = meshAt070Height();
+      expectNear(GlbBounds.fromGlbBytes(mesh).heightM, 0.70, 0.005,
+          'source mesh really is 0.70 m tall');
+
+      final out = rescaleGlbToSellerSize(
+        mesh,
+        const ProductDimensions(heightM: 0.50),
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.heightM, 0.50, 0.005, 'output height is 0.50 m');
+      // Uniform: the other axes scale by the same 50/70 factor.
+      expectNear(bounds.widthM, 0.6 * 50 / 70, 0.005, 'width follows');
+      expectNear(bounds.depthM, 0.4 * 50 / 70, 0.005, 'depth follows');
+      expectNear(bounds.minY, 0.0, 1e-6, 'grounded');
+    });
+
+    test('all three dims present → per-axis rescale to the exact W×H×D',
+        () {
+      final out = rescaleGlbToSellerSize(
+        meshAt070Height(),
+        const ProductDimensions(widthM: 1.2, heightM: 0.5, depthM: 0.7),
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.widthM, 1.2, 0.01, 'exact width');
+      expectNear(bounds.heightM, 0.5, 0.01, 'exact height');
+      expectNear(bounds.depthM, 0.7, 0.01, 'exact depth');
+      expectNear(bounds.minY, 0.0, 1e-6, 'grounded');
+    });
+
+    test('only width given → uniform scale driven by the width', () {
+      final out = rescaleGlbToSellerSize(
+        meshAt070Height(),
+        const ProductDimensions(widthM: 1.2), // 0.6 → 1.2, factor 2
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.widthM, 1.2, 0.01, 'width honored');
+      expectNear(bounds.heightM, 1.4, 0.01, 'height scaled uniformly (×2)');
+      expectNear(bounds.depthM, 0.8, 0.01, 'depth scaled uniformly (×2)');
+    });
+
+    test('only depth given → uniform scale driven by the depth', () {
+      final out = rescaleGlbToSellerSize(
+        meshAt070Height(),
+        const ProductDimensions(depthM: 0.2), // 0.4 → 0.2, factor 0.5
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.depthM, 0.2, 0.01, 'depth honored');
+      expectNear(bounds.widthM, 0.3, 0.01, 'width scaled uniformly (×0.5)');
+      expectNear(bounds.heightM, 0.35, 0.01, 'height scaled uniformly (×0.5)');
+    });
+
+    test('height wins when several axes are given but not all three', () {
+      final out = rescaleGlbToSellerSize(
+        meshAt070Height(),
+        const ProductDimensions(widthM: 9.9, heightM: 0.35), // 0.7 → 0.35
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.heightM, 0.35, 0.005, 'height drives the scale');
+      expectNear(bounds.widthM, 0.3, 0.005, 'width NOT forced to 9.9');
+    });
+
+    test('zero dims → MissingDimensionsException (never a guessed size)',
+        () {
+      expect(
+        () => rescaleGlbToSellerSize(
+            meshAt070Height(), const ProductDimensions()),
+        throwsA(isA<MissingDimensionsException>()),
+      );
+      expect(
+        () => rescaleGlbToSellerSize(
+            meshAt070Height(),
+            const ProductDimensions(
+                widthM: 0, heightM: 0, depthM: 0)),
+        throwsA(isA<MissingDimensionsException>()),
+      );
+      expect(
+        () => rescaleGlbToSellerSize(meshAt070Height(), null),
+        throwsA(isA<MissingDimensionsException>()),
+      );
+    });
+
+    test('negative dims are treated as absent', () {
+      expect(
+        () => rescaleGlbToSellerSize(meshAt070Height(),
+            const ProductDimensions(widthM: -1, heightM: -1, depthM: -1)),
+        throwsA(isA<MissingDimensionsException>()),
+      );
+    });
+
+    test('malformed source → parse failure surfaces (no silent default)',
+        () {
+      expect(
+        () => rescaleGlbToSellerSize(
+          Uint8List.fromList([1, 2, 3]),
+          const ProductDimensions(widthM: 1),
+        ),
+        throwsA(isA<GlbParseException>()),
+      );
     });
   });
 }

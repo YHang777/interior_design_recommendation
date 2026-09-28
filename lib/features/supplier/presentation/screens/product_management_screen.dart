@@ -14,6 +14,7 @@ import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/filter_chip_bar.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/quantity_stepper.dart';
 import '../../../../shared/widgets/search_bar.dart';
@@ -143,26 +144,12 @@ class _ProductManagementScreenState
                 ),
               ],
             ),
+            actionsAlignment: MainAxisAlignment.center,
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(
-                  'Cancel',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: AppColors.textOnDark,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                ),
-                child: const Text('Save'),
+              ConfirmDialogActions(
+                confirmLabel: 'Save',
+                onCancel: () => Navigator.pop(ctx, false),
+                onConfirm: () => Navigator.pop(ctx, true),
               ),
             ],
           );
@@ -332,12 +319,64 @@ class _ProductManagementScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Products'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Container(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _goNew,
+        backgroundColor: AppColors.accent,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          color: AppColors.accent,
+          child: isLoading
+              ? const _ProductsSkeletonList()
+              : productsAsync.hasError && all.isEmpty
+                  ? _scrollableState(
+                      EmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Could not load products',
+                        subtitle: 'Check your connection and try again.',
+                        actionLabel: 'Retry',
+                        onAction: _refresh,
+                      ),
+                    )
+                  : mine.isEmpty
+                      ? _scrollableState(
+                          EmptyState(
+                            icon: Icons.storefront_outlined,
+                            title: 'No products yet',
+                            subtitle: 'Post your first product and it will '
+                                'appear in the marketplace right away.',
+                            actionLabel: 'Add your first product',
+                            onAction: _goNew,
+                          ),
+                        )
+                      : _content(
+                          mine.length, activeCount, lowCount, visible, mine),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final _ = await ref.refresh(marketplaceProductsProvider.future);
+    } catch (_) {
+      // Pull-to-refresh is best effort; the stream surfaces errors itself.
+    }
+  }
+
+  Widget _content(
+      int total, int active, int low, List<Product> visible, List<Product> allMine) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
+      children: [
+        PageHeading(
+          title: 'Products',
+          actions: [
+            Container(
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [AppColors.accent, AppColors.gradientGreen],
@@ -361,60 +400,9 @@ class _ProductManagementScreenState
                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _goNew,
-        backgroundColor: AppColors.accent,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        color: AppColors.accent,
-        child: isLoading
-            ? const _ProductsSkeletonList()
-            : productsAsync.hasError && all.isEmpty
-                ? _scrollableState(
-                    EmptyState(
-                      icon: Icons.cloud_off_outlined,
-                      title: 'Could not load products',
-                      subtitle: 'Check your connection and try again.',
-                      actionLabel: 'Retry',
-                      onAction: _refresh,
-                    ),
-                  )
-                : mine.isEmpty
-                    ? _scrollableState(
-                        EmptyState(
-                          icon: Icons.storefront_outlined,
-                          title: 'No products yet',
-                          subtitle: 'Post your first product and it will '
-                              'appear in the marketplace right away.',
-                          actionLabel: 'Add your first product',
-                          onAction: _goNew,
-                        ),
-                      )
-                    : _content(
-                        mine.length, activeCount, lowCount, visible, mine),
-      ),
-    );
-  }
-
-  Future<void> _refresh() async {
-    try {
-      final _ = await ref.refresh(marketplaceProductsProvider.future);
-    } catch (_) {
-      // Pull-to-refresh is best effort; the stream surfaces errors itself.
-    }
-  }
-
-  Widget _content(
-      int total, int active, int low, List<Product> visible, List<Product> allMine) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
+          ],
+        ),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
@@ -654,10 +642,16 @@ class _ProductTile extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 5),
-                          Row(
+                          // Wrap (not Row): stock + shipping pills plus the
+                          // edit affordance can exceed the text column on
+                          // 360dp screens and would otherwise overflow.
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               _stockPill(product),
-                              const SizedBox(width: 4),
+                              _shippingPill(product),
                               InkWell(
                                 onTap: busy ? null : onEditStock,
                                 borderRadius: BorderRadius.circular(10),
@@ -833,6 +827,20 @@ class _ProductTile extends StatelessWidget {
       return _Pill(label: 'Low · ${p.stock} left', color: AppColors.warning);
     }
     return _Pill(label: 'In stock · ${p.stock}', color: AppColors.success);
+  }
+
+  /// At-a-glance delivery setting for this listing — the seller-set fee
+  /// when "Charge for delivery" is on, otherwise an explicit free label.
+  /// Reads `shippingCharge`, so a stored amount with the toggle off never
+  /// misreports as paid shipping.
+  Widget _shippingPill(Product p) {
+    final charge = p.shippingCharge;
+    if (charge > 0) {
+      return _Pill(
+          label: 'Shipping ${Formatters.myr(charge)}',
+          color: AppColors.secondaryAccent);
+    }
+    return _Pill(label: 'Free shipping', color: AppColors.success);
   }
 }
 

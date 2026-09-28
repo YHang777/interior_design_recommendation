@@ -93,9 +93,15 @@ final ecoOnlyProvider = StateProvider<bool>((ref) => false);
 
 final inStockOnlyProvider = StateProvider<bool>((ref) => false);
 
-/// Verified-seller gate. Defaults ON; buyers can widen to all sellers from
-/// the filters sheet (the switch is now user-visible).
-final verifiedOnlyProvider = StateProvider<bool>((ref) => true);
+/// Verified-seller gate. Defaults OFF — buyers can switch it on from the
+/// filters sheet.
+///
+/// It has to start OFF now that suppliers register unverified: with the gate
+/// on and no seller approved yet, every new supplier's listings would be
+/// filtered out and the marketplace would look empty. The badge is a trust
+/// signal to compare sellers by, not a wall that hides them. Flip this to
+/// `true` once there are enough approved suppliers to make gating useful.
+final verifiedOnlyProvider = StateProvider<bool>((ref) => false);
 
 /// An inclusive [min, max] price band selected in the filters sheet.
 class PriceFilter {
@@ -157,7 +163,7 @@ class MarketplaceFilterState {
     required this.priceActive,
     required this.stockActive,
     required this.ecoActive,
-    required this.verifiedOff,
+    required this.verifiedActive,
   });
 
   final bool searchActive;
@@ -167,7 +173,10 @@ class MarketplaceFilterState {
   final bool priceActive;
   final bool stockActive;
   final bool ecoActive;
-  final bool verifiedOff;
+
+  /// True when the buyer has switched on the verified-seller gate. Off is
+  /// the default, so it is "active" only when narrowed.
+  final bool verifiedActive;
 
   /// Whether ANY non-default state is active.
   bool get anyActive => totalCount > 0;
@@ -182,7 +191,7 @@ class MarketplaceFilterState {
         priceActive,
         stockActive,
         ecoActive,
-        verifiedOff,
+        verifiedActive,
       ].where((b) => b).length;
 
   /// Count of the FILTERS-SHEET-owned states only. Search and sort have
@@ -194,7 +203,7 @@ class MarketplaceFilterState {
         priceActive,
         stockActive,
         ecoActive,
-        verifiedOff,
+        verifiedActive,
       ].where((b) => b).length;
 
   /// Whether the filters sheet alone deviates from its defaults.
@@ -215,7 +224,7 @@ final marketplaceFilterStateProvider =
         ref.watch(productPriceBoundsProvider)),
     stockActive: ref.watch(inStockOnlyProvider),
     ecoActive: ref.watch(ecoOnlyProvider),
-    verifiedOff: !ref.watch(verifiedOnlyProvider),
+    verifiedActive: ref.watch(verifiedOnlyProvider),
   );
 });
 
@@ -243,7 +252,7 @@ void resetMarketplaceFilters(
   ref.read(selectedStyleFilterProvider.notifier).state = 'All';
   ref.read(ecoOnlyProvider.notifier).state = false;
   ref.read(inStockOnlyProvider.notifier).state = false;
-  ref.read(verifiedOnlyProvider.notifier).state = true;
+  ref.read(verifiedOnlyProvider.notifier).state = false;
   ref.read(priceRangeFilterProvider.notifier).state = null;
 }
 

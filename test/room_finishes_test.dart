@@ -73,16 +73,24 @@ void main() {
       }
     });
 
-    test('floor size options are positive and sorted ascending', () {
+    test('floor size presets are positive and sorted, Custom sentinel kept',
+        () {
       final options = RoomFinishCatalog.floorSizeOptionsM;
       expect(options, isNotEmpty);
-      for (var i = 0; i < options.length; i++) {
-        expect(options[i], greaterThan(0));
+      // The list ends with a -1.0 sentinel for the "Custom" chip (it opens
+      // the text-input dialog); every REAL preset must be positive and
+      // strictly ascending.
+      final presets = options.where((o) => o >= 0).toList();
+      expect(presets, isNotEmpty);
+      for (var i = 0; i < presets.length; i++) {
+        expect(presets[i], greaterThan(0));
         if (i > 0) {
-          expect(options[i], greaterThan(options[i - 1]),
-              reason: 'floor size options must be strictly sorted');
+          expect(presets[i], greaterThan(presets[i - 1]),
+              reason: 'floor size presets must be strictly sorted');
         }
       }
+      expect(options, contains(-1.0),
+          reason: 'the documented Custom sentinel (-1) must stay in the list');
       expect(options, contains(RoomFinishCatalog.defaultFloorSizeM));
     });
 

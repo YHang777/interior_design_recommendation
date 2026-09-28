@@ -9,6 +9,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../models/order.dart';
 import '../../../../models/product.dart';
 import '../../../../shared/widgets/empty_state.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/quick_action_button.dart';
 import '../../../../shared/widgets/section_header.dart';
@@ -86,7 +87,6 @@ class _SupplierDashboardScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Dashboard')),
       body: RefreshIndicator(
         onRefresh: _refresh,
         color: AppColors.accent,
@@ -108,13 +108,14 @@ class _SupplierDashboardScreenState
                   )
                 : coldProducts || coldOrders
                     ? const _DashboardSkeleton()
-                    : _content(user, mine, allOrders, monthRevenue,
+                    : _content(context, user, mine, allOrders, monthRevenue,
                         pendingCount, recentOrders, lowStock),
       ),
     );
   }
 
   Widget _content(
+    BuildContext context,
     AppUser user,
     List<Product> mine,
     List<Order> allOrders,
@@ -132,8 +133,11 @@ class _SupplierDashboardScreenState
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
+        const PageHeading(title: 'Dashboard'),
+        const SizedBox(height: 16),
+
         // ── Greeting header ──
         Container(
           padding: const EdgeInsets.all(18),
@@ -217,13 +221,11 @@ class _SupplierDashboardScreenState
         const SizedBox(height: 16),
 
         // ── Quick actions ──
-        Wrap(
-          spacing: 16,
-          runSpacing: 12,
-          alignment: WrapAlignment.spaceEvenly,
+        // Row + Expanded keeps all 4 in one run at every phone width
+        // (the old Wrap + SizedBox(width: 72) needed 336dp and wrapped below it).
+        Row(
           children: [
-            SizedBox(
-              width: 72,
+            Expanded(
               child: QuickActionButton(
                 icon: Icons.add_business_outlined,
                 label: 'Add product',
@@ -231,8 +233,8 @@ class _SupplierDashboardScreenState
                 onTap: _goAddProduct,
               ),
             ),
-            SizedBox(
-              width: 72,
+            const SizedBox(width: 12),
+            Expanded(
               child: QuickActionButton(
                 icon: Icons.storefront_outlined,
                 label: 'Products',
@@ -240,8 +242,8 @@ class _SupplierDashboardScreenState
                 onTap: () => _goTab(RouteNames.supplierProducts),
               ),
             ),
-            SizedBox(
-              width: 72,
+            const SizedBox(width: 12),
+            Expanded(
               child: QuickActionButton(
                 icon: Icons.receipt_long_outlined,
                 label: 'Orders',
@@ -249,8 +251,8 @@ class _SupplierDashboardScreenState
                 onTap: () => _goTab(RouteNames.supplierOrders),
               ),
             ),
-            SizedBox(
-              width: 72,
+            const SizedBox(width: 12),
+            Expanded(
               child: QuickActionButton(
                 icon: Icons.insights_outlined,
                 label: 'Analytics',
@@ -263,50 +265,66 @@ class _SupplierDashboardScreenState
         const SizedBox(height: 18),
 
         // ── Stats ──
+        // 12px gutters (matching the shortcut row) so the gradient cards
+        // read as separate tiles instead of sticking together.
         Row(
           children: [
-            _StatCard(
-              icon: Icons.payments_outlined,
-              label: 'Revenue',
-              value: Formatters.myr(monthRevenue),
-              gradientColors: const [AppColors.accent, AppColors.gradientGreen],
+            Expanded(
+              child: _StatCard(
+                icon: Icons.payments_outlined,
+                label: 'Revenue',
+                value: Formatters.myr(monthRevenue),
+                gradientColors: const [AppColors.accent, AppColors.gradientGreen],
+              ),
             ),
-            const SizedBox(width: 10),
-            _StatCard(
-              icon: Icons.hourglass_top_outlined,
-              label: 'Pending',
-              value: '$pendingCount',
-              gradientColors: const [AppColors.warning, AppColors.gradientOrange],
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.hourglass_top_outlined,
+                label: 'Pending',
+                value: '$pendingCount',
+                gradientColors: const [AppColors.warning, AppColors.gradientOrange],
+              ),
             ),
-            _StatCard(
-              icon: Icons.visibility_outlined,
-              label: 'Active',
-              value: '${mine.where((p) => p.isActive).length}',
-              gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.visibility_outlined,
+                label: 'Active',
+                value: '${mine.where((p) => p.isActive).length}',
+                gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Row(
           children: [
-            _StatCard(
-              icon: Icons.priority_high_outlined,
-              label: 'Low stock',
-              value: '${lowStock.length}',
-              gradientColors: const [AppColors.primary, AppColors.primaryLight],
+            Expanded(
+              child: _StatCard(
+                icon: Icons.priority_high_outlined,
+                label: 'Low stock',
+                value: '${lowStock.length}',
+                gradientColors: const [AppColors.primary, AppColors.primaryLight],
+              ),
             ),
-            const SizedBox(width: 10),
-            _StatCard(
-              icon: Icons.inventory_2_outlined,
-              label: 'Products',
-              value: '${mine.length}',
-              gradientColors: const [AppColors.accent, AppColors.gradientGreen],
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.inventory_2_outlined,
+                label: 'Products',
+                value: '${mine.length}',
+                gradientColors: const [AppColors.accent, AppColors.gradientGreen],
+              ),
             ),
-            _StatCard(
-              icon: Icons.receipt_long_outlined,
-              label: 'Orders',
-              value: '${allOrders.length}',
-              gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.receipt_long_outlined,
+                label: 'Orders',
+                value: '${allOrders.length}',
+                gradientColors: const [AppColors.secondaryAccent, AppColors.gradientBlue],
+              ),
             ),
           ],
         ),
@@ -415,7 +433,9 @@ class _RecentOrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = myLineItemCount(order, supplierId);
-    final total = mySubtotal(order, supplierId);
+    // What this seller earns on the order: their items + their own shipping
+    // share (matches the revenue helpers' semantics).
+    final total = mySubtotal(order, supplierId) + myShipping(order, supplierId);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -581,60 +601,62 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              gradientColors[0].withValues(alpha: 0.08),
-              gradientColors[1].withValues(alpha: 0.04),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: gradientColors[0].withValues(alpha: 0.12)),
-          boxShadow: [
-            BoxShadow(
-              color: gradientColors[0].withValues(alpha: 0.08),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            gradientColors[0].withValues(alpha: 0.08),
+            gradientColors[1].withValues(alpha: 0.04),
           ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: gradientColors,
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: gradientColors[0].withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: gradientColors[0].withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              child: Icon(icon, color: Colors.white, size: 18),
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 10),
-            Text(value,
+            child: Icon(icon, color: Colors.white, size: 18),
+          ),
+          const SizedBox(height: 10),
+          // scaleDown so money like "RM 12,345" shrinks instead of
+          // ellipsizing inside a 1/3-width card.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(value,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
-            Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                    fontSize: 11, color: AppColors.textSecondary)),
-          ],
-        ),
+          ),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                  fontSize: 11, color: AppColors.textSecondary)),
+        ],
       ),
     );
   }

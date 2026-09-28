@@ -63,20 +63,30 @@ class _StatCardState extends State<StatCard> {
           children: [
             Icon(widget.icon, color: Colors.white, size: 32),
             const SizedBox(height: 10),
-            Text(
-              widget.value,
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                letterSpacing: -0.3,
-                height: 1.2,
+            // scaleDown (not ellipsis): money values like "RM 12,345"
+            // must never be cut to "RM 12,3…" in a 1/3-width card —
+            // shrink to fit instead of clipping or truncating.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                widget.value,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
+                  height: 1.2,
+                ),
               ),
             ),
             const SizedBox(height: 4),
             Text(
               widget.label,
-              maxLines: 1,
+              // Two lines so labels like "Total products" fit on narrow
+              // dashboard cards instead of ellipsizing mid-word.
+              maxLines: 2,
+              textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.poppins(
                 color: Colors.white.withValues(alpha: 0.9),

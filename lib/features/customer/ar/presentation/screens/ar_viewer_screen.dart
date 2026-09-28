@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../models/product.dart';
+import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
 import '../../data/furniture_model_library.dart';
@@ -100,11 +101,12 @@ class _BarEntry {
 /// product this screen was opened from.
 ///
 /// Two entry modes:
-///  * [product] mode (marketplace) — resolves the product's own true-size
-///    GLB (via [ModelGlbResolver]) into the leading catalog slot and places
-///    it at its real W×H×D dimensions. When no true-size model exists it
-///    falls back to the bundled category model (old behavior) or, if the
-///    product has no category, to the plain catalog.
+///  * [product] mode (marketplace) — the catalog holds ONLY the product's
+///    own slot, resolved via [ModelGlbResolver] (a ready Tripo download,
+///    rescaled to the seller's declared W×H×D). There is no substitution:
+///    while the model generates the slot shows progress, and any failure
+///    shows the resolver's specific reason — a bundled library model never
+///    stands in for a product.
 ///  * [items] / plain mode (room plans, scanner) — the bundled library
 ///    models, exactly as before.
 ///
@@ -144,10 +146,20 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   ARAnchorManager? _anchors;
 
   /// Catalog bar entries, front to back. Built once in [initState]; the
-  /// product slot (when present, at index 0) is updated in place when its
-  /// GLB resolves, and on resolution failure the list is rebuilt to the
-  /// fallback catalog.
+  /// product slot (when present, and the ONLY slot in product mode) is
+  /// updated in place as its resolution progresses — resolved file,
+  /// generation progress, or a specific failure reason.
   late final List<_BarEntry> _entries = _buildCatalog();
+
+  /// True while the product's Tripo generation is still running — the slot
+  /// and the hint show progress ("Generating 3D model… 40s"), not an error.
+  bool _productGenerating = false;
+
+  /// When the visible generation was submitted (elapsed copy anchor).
+  DateTime? _generationStartedAt;
+
+  /// 1 s ticker re-rendering the elapsed generation copy.
+  Timer? _generationTicker;
 
   int _selectedIndex = 0;
 
@@ -232,21 +244,22 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       ? null
       : _entries[_selectedIndex];
 
-  /// Catalog to offer. When [ArViewerScreen.items] is null or empty the full
-  /// bundled library is used; a product (if any) always leads.
+  /// Catalog to offer.
+  ///
+  /// Product mode holds ONLY the product's own slot — Tripo is the single
+  /// model source for products, so a bundled library model must never be
+  /// listed next to it as something the user could place instead. Scanner /
+  /// room-plan mode ([ArViewerScreen.product] null) is unchanged: explicit
+  /// [ArViewerScreen.items], or the full library when none were passed.
   List<_BarEntry> _buildCatalog() {
-    final result = <_BarEntry>[];
     final product = widget.product;
     if (product != null) {
-      result.add(_BarEntry.product(ArProductEntry(product: product)));
+      return [_BarEntry.product(ArProductEntry(product: product))];
     }
     final items = (widget.items == null || widget.items!.isEmpty)
         ? ArFurnitureLibrary.all
         : widget.items!;
-    for (final item in items) {
-      result.add(_BarEntry.library(item));
-    }
-    return result;
+    return [for (final item in items) _BarEntry.library(item)];
   }
 
   @override
@@ -260,6 +273,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   void dispose() {
     _watchdog?.cancel();
     _chipTimer?.cancel();
+    _generationTicker?.cancel();
     _session?.dispose();
     super.dispose();
   }
@@ -280,73 +294,100 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // ─── Product true-size mode ───
 
   /// Resolves the opened product's true-size GLB in the background (download
-  /// + rescale, procedural generation, or a cache hit) and swaps it into the
-  /// leading catalog slot once ready.
+  /// + rescale to the seller's dimensions, or a cache hit) and swaps it into
+  /// the product slot once ready.
   ///
-  /// On [No3dAvailableException] the screen falls back to the bundled
-  /// category model — the pre-Loop-3 experience — and to the plain catalog
-  /// (plus an explanatory message) when the product has no category either.
+  /// There is exactly one outcome per state — no substitution:
+  ///  * resolved → the slot becomes placeable;
+  ///  * `generating` sentinel → progress UI (elapsed seconds from
+  ///    `ar3d.submittedAt`, ticked every second), NOT an error;
+  ///  * [No3dAvailableException] with any other reason → the slot records
+  ///    that specific reason and the user sees it — a bundled model is never
+  ///    shown in its place.
   Future<void> _resolveProductModel() async {
     final product = widget.product;
     if (product == null) return;
 
     final resolver = ModelGlbResolver();
     ResolvedGlb? resolved;
+    String? failure;
     try {
       resolved = await resolver.resolveProductGlb(product);
-    } on No3dAvailableException {
-      // Expected — the fallback paths below take over.
-    } catch (_) {
-      // Not expected (I/O trouble while writing the cache, …) — treat the
-      // same as "no model available"; the screen still works with the
-      // bundled catalog.
+    } on No3dAvailableException catch (e) {
+      failure = e.reason ??
+          'No 3D model is available for this product yet — tap Regenerate '
+              '3D in the seller’s product list to create one.';
+    } catch (e) {
+      failure = 'The 3D model could not be prepared ($e). Check the '
+          'connection and reopen AR — re-downloading is free.';
     } finally {
       resolver.dispose();
     }
     if (!mounted) return;
 
-    final file = resolved?.file;
-    if (file != null) {
-      // The model is ready — swap the prepared slot for the real entry.
+    if (resolved != null) {
+      final file = resolved.file;
       setState(() {
+        _productGenerating = false;
+        _generationTicker?.cancel();
+        _generationTicker = null;
         for (final entry in _entries) {
           if (entry.isProduct) {
-            entry.product = ArProductEntry(
-                product: product,
-                resolvedFile: file,
-                procedural: resolved?.procedural ?? true);
+            entry.product =
+                ArProductEntry(product: product, resolvedFile: file);
           }
         }
       });
       return;
     }
 
-    // True-size 3D is unavailable. Prefer the bundled category model (the
-    // exact catalog the marketplace passed before Loop 3)…
-    final fallback = fallbackFor(product);
-    if (fallback != null) {
+    if (failure == 'generating') {
+      // Progress, not an error: "Generating 3D model… 40s".
       setState(() {
-        _entries
-          ..clear()
-          ..add(_BarEntry.library(fallback));
-        _selectedIndex = 0;
+        _productGenerating = true;
+        _generationStartedAt =
+            product.ar3d?.submittedAt ?? DateTime.now();
       });
-      _showMessage('True-size 3D unavailable — showing a catalog model',
-          color: AppColors.warning);
+      _generationTicker?.cancel();
+      _generationTicker =
+          Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        setState(() {}); // re-render the elapsed copy only
+      });
       return;
     }
 
-    // …and when the product has no category either, keep the plain catalog.
+    // Hard stop with the specific reason — recorded on the slot so the
+    // hint/tap surfaces it verbatim. No catalog substitution exists.
     setState(() {
-      _entries.removeWhere((e) => e.isProduct);
-      if (_selectedIndex >= _entries.length) _selectedIndex = 0;
+      _productGenerating = false;
+      _generationTicker?.cancel();
+      _generationTicker = null;
+      for (final entry in _entries) {
+        if (entry.isProduct) {
+          entry.product = ArProductEntry(
+              product: product, productError: failure);
+        }
+      }
     });
     _showMessage(
-      'No 3D model is available for this product yet. Add its real-world '
-      'dimensions (or wait for the AI model) to view it in AR at true size.',
+      failure ?? 'No 3D model is available for this product yet.',
       color: AppColors.warning,
       duration: const Duration(seconds: 6),
     );
+  }
+
+  /// "40s" / "1m 05s" — elapsed time of the visible generation.
+  String get _generationElapsed {
+    final since = _generationStartedAt;
+    if (since == null) return '';
+    final total = DateTime.now().difference(since).inSeconds;
+    if (total < 0) return '0s';
+    if (total < 60) return '${total}s';
+    return '${total ~/ 60}m ${(total % 60).toString().padLeft(2, '0')}s';
   }
 
   /// Floats the "placed at true size" / "placed finish" chip above the
@@ -488,8 +529,21 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final entry = _selectedEntry;
     if (entry == null) return;
     if (!entry.placeable) {
-      _showMessage('The 3D model is still preparing — try again in a moment.',
-          color: AppColors.primaryLight);
+      final p = entry.product;
+      if (p != null && p.hasError) {
+        // The resolver's specific, actionable reason — never "no model".
+        _showMessage(p.productError!, color: AppColors.warning,
+            duration: const Duration(seconds: 6));
+      } else if (p != null && _productGenerating) {
+        _showMessage(
+            'Generating 3D model… $_generationElapsed — this product '
+            'places only once its model is ready.',
+            color: AppColors.primaryLight);
+      } else {
+        _showMessage('The 3D model is still preparing — try again in a '
+            'moment.',
+            color: AppColors.primaryLight);
+      }
       return;
     }
 
@@ -1702,13 +1756,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             suffixText: 'm',
           ),
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
+          ConfirmDialogActions(
+            confirmLabel: 'Apply',
+            onCancel: () => Navigator.pop(ctx),
+            onConfirm: () {
               final value = double.tryParse(controller.text);
               if (value != null && value > 0 && value <= 20) {
                 Navigator.pop(ctx, value);
@@ -1721,7 +1774,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                 );
               }
             },
-            child: const Text('Apply'),
           ),
         ],
       ),
@@ -2021,7 +2073,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final entry = _entries[index];
     final selected = index == _selectedIndex;
     return GestureDetector(
-      onTap: () => setState(() => _selectedIndex = index),
+      onTap: () {
+        setState(() => _selectedIndex = index);
+        // Selecting a failed product slot surfaces WHY it cannot place.
+        final p = entry.product;
+        if (p != null && p.hasError) {
+          _showMessage(p.productError!, color: AppColors.warning,
+              duration: const Duration(seconds: 6));
+        }
+      },
       child: Container(
         width: entry.isProduct ? 96 : 76,
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -2061,10 +2121,49 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Product tile: source badge + name + dimensions while the true-size GLB
-  /// is ready; a small spinner with "Preparing 3D…" while it loads.
+  /// Product tile in three states:
+  ///  * resolved — AI badge + name + dimensions (placeable);
+  ///  * generating — spinner + "Generating 3D model…" + elapsed seconds
+  ///    (progress, not an error);
+  ///  * failed — an error icon + name + "Tap for details"; the specific
+  ///    reason is surfaced by the snackbar on tap / place attempt.
   Widget _buildProductSlot(ArProductEntry entry) {
     if (!entry.isResolved) {
+      if (entry.hasError) {
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 18,
+                color: AppColors.warning),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                entry.name,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white),
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              'Tap for details',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                  fontSize: 7.5,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.warning),
+            ),
+          ],
+        );
+      }
+      final generating = _productGenerating;
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -2076,7 +2175,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
           const SizedBox(height: 5),
           Text(
-            'Preparing 3D…',
+            generating
+                ? 'Generating… $_generationElapsed'
+                : 'Preparing 3D…',
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -2157,6 +2258,17 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final entry = _selectedEntry;
     final name = entry?.name ?? 'furniture';
     if (entry != null && !entry.placeable) {
+      final p = entry.product;
+      if (p != null && p.hasError) {
+        // Short copy here (the banner is 2 lines) — the full reason shows
+        // in the snackbar when the slot is tapped.
+        return 'This product’s 3D model is not ready — tap its slot for '
+            'details.';
+      }
+      if (p != null && _productGenerating) {
+        return 'Generating 3D model… $_generationElapsed — this product '
+            'places only once its model is ready.';
+      }
       return 'Preparing the true-size 3D model — keep moving your phone, '
           'then tap to place once it is ready';
     }
@@ -2179,7 +2291,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 }
 
-/// Tiny colored chip for the product slot's source ('AI' / 'Auto').
+/// Tiny colored chip for the product slot's source. Tripo is the only
+/// product-model source, so the text is always 'AI'.
 class _SourceBadge extends StatelessWidget {
   const _SourceBadge({required this.text});
 

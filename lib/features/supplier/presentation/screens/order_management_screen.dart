@@ -9,14 +9,16 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../models/order.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/filter_chip_bar.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier's incoming orders. Totals shown per order are for THIS supplier's
-/// line items only — shared (multi-seller) orders never leak other sellers'
-/// money figures into the summary row.
+/// Supplier's incoming orders. Totals shown per order are for THIS supplier
+/// only — their line items plus their own shipping share — so shared
+/// (multi-seller) orders never leak other sellers' money figures into the
+/// summary row.
 class OrderManagementScreen extends ConsumerStatefulWidget {
   const OrderManagementScreen({super.key});
 
@@ -60,32 +62,33 @@ class _OrderManagementScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Orders')),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        color: AppColors.accent,
-        child: isLoading
-            ? const _OrdersSkeletonList()
-            : ordersAsync.hasError && all.isEmpty
-                ? _scrollableState(
-                    EmptyState(
-                      icon: Icons.cloud_off_outlined,
-                      title: 'Could not load orders',
-                      subtitle: 'Check your connection and try again.',
-                      actionLabel: 'Retry',
-                      onAction: _refresh,
-                    ),
-                  )
-                : all.isEmpty
-                    ? _scrollableState(
-                        EmptyState(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'No orders yet',
-                          subtitle: 'Orders placed on your products by '
-                              'buyers will show up here instantly.',
-                        ),
-                      )
-                    : _content(supplierId, filtered, all.length),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          color: AppColors.accent,
+          child: isLoading
+              ? const _OrdersSkeletonList()
+              : ordersAsync.hasError && all.isEmpty
+                  ? _scrollableState(
+                      EmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Could not load orders',
+                        subtitle: 'Check your connection and try again.',
+                        actionLabel: 'Retry',
+                        onAction: _refresh,
+                      ),
+                    )
+                  : all.isEmpty
+                      ? _scrollableState(
+                          EmptyState(
+                            icon: Icons.receipt_long_outlined,
+                            title: 'No orders yet',
+                            subtitle: 'Orders placed on your products by '
+                                'buyers will show up here instantly.',
+                          ),
+                        )
+                      : _content(supplierId, filtered, all.length),
+        ),
       ),
     );
   }
@@ -102,8 +105,11 @@ class _OrderManagementScreenState
   Widget _content(String supplierId, List<Order> filtered, int total) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
+        const PageHeading(title: 'Orders'),
+        const SizedBox(height: 16),
         FilterChipBar<_OrderBucket>(
           prefixIcon: const Padding(
             padding: EdgeInsets.only(left: 4),
@@ -143,6 +149,7 @@ class _OrderManagementScreenState
                 supplierId: supplierId,
                 myCount: myLineItemCount(o, supplierId),
                 myTotal: mySubtotal(o, supplierId),
+                myShipping: myShipping(o, supplierId),
                 onTap: () => _open(o),
               )),
           const SizedBox(height: 8),
@@ -179,6 +186,7 @@ class _OrderTile extends StatelessWidget {
     required this.supplierId,
     required this.myCount,
     required this.myTotal,
+    required this.myShipping,
     required this.onTap,
   });
 
@@ -186,6 +194,10 @@ class _OrderTile extends StatelessWidget {
   final String supplierId;
   final int myCount;
   final int myTotal;
+
+  /// This supplier's delivery-charge share on the order (0 = they charge
+  /// no shipping); shown under the items total when non-zero.
+  final int myShipping;
   final VoidCallback onTap;
 
   @override
@@ -279,13 +291,28 @@ class _OrderTile extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    Formatters.myr(myTotal),
-                    style: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.accent,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        Formatters.myr(myTotal),
+                        style: GoogleFonts.poppins(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.accent,
+                        ),
+                      ),
+                      if (myShipping > 0) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          '+ ${Formatters.myr(myShipping)} shipping',
+                          style: GoogleFonts.poppins(
+                            fontSize: 10.5,
+                            color: AppColors.textHint,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),

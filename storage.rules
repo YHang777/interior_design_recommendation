@@ -7,5 +7,17 @@ service firebase.storage {
       allow read: if true;
       allow write: if request.auth != null;
     }
+
+    // Supplier verification documents — IC (identity card) photos and
+    // supporting files. These are sensitive PII: NOBODY may read them
+    // through the Storage SDK — only the Admin SDK (the admin console
+    // backend, behind authenticate + requireAdmin) serves the bytes.
+    // The owner may only write into their OWN folder (path segment uid
+    // must equal the caller's uid), and the document metadata lives in
+    // Firestore verification_applications/{uid}.
+    match /verification/{uid}/{file} {
+      allow read: if false;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
   }
 }

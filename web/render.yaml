@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Render Blueprint — admin console (API + static frontend).
+#
+# Lives at web/render.yaml because this repo is a monorepo (the Flutter app
+# owns the repository root). Render's dashboard supports a custom blueprint
+# path when you connect the repo; if your flow only auto-detects render.yaml
+# at the repo root, copy/symlink this file to the root — the rootDir paths
+# below are repo-root-relative either way. You can also skip the blueprint
+# entirely and create the two services by hand (see README § "Deploy on
+# Render" for the same settings as a checklist).
+#
+# Env vars marked `sync: false` are NOT in the file — set them in Render's
+# dashboard (Environment tab) after the first deploy. Secrets stay out of git.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── 1. Admin API (Node web service) ────────────────────────────────────────
+  - type: web
+    name: intellar-admin-api
+    runtime: node
+    rootDir: web/backend
+    # Render native Node build — no Dockerfile needed. `npm run build` is
+    # `tsc` → dist/; `npm start` runs the compiled dist/index.js.
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    # The backend already has GET /api/health (public, no user data).
+    healthCheckPath: /api/health
+    envVars:
+      # PORT is injected by Render automatically — never hardcode it.
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_PROJECT_ID
+        value: interior-design-256c5
+      # The ONLY origin allowed by CORS. Must be EXACTLY the frontend's
+      # Render URL (https://<site>.onrender.com, no trailing slash) or the
+      # browser will block login with a CORS error.
+      - key: FRONTEND_ORIGIN
+        sync: false
+      # Firebase Web API key — powers the login proxy (503 LOGIN_NOT_CONFIGURED
+      # without it).
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      # Comma-separated Firebase Auth UIDs allowed to use the API.
+      # (Or grant claims with: npm run claim-admin -- <uid>)
+      - key: ADMIN_UIDS
+        sync: false
+      # The whole service-account JSON as ONE env var (Render has no secrets
+      # folder). Paste it on a single line:  jq -c . service-account.json
+      # This WINS over SERVICE_ACCOUNT_PATH / GOOGLE_APPLICATION_CREDENTIALS.
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+
+  # ── 2. Admin frontend (static site) ────────────────────────────────────────
+  - type: static_site
+    name: intellar-admin-frontend
+    rootDir: web/frontend
+    staticPublishPath: dist
+    buildCommand: npm ci && npm run build
+    envVars:
+      # BUILD-TIME variable (Vite inlines it) — set it BEFORE the first
+      # build; changing it later requires a manual deploy to take effect.
+      # Value: https://intellar-admin-api.onrender.com/api  (…/api suffix!)
+      - key: VITE_API_BASE_URL
+        sync: false

@@ -32,27 +32,55 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
   final IAuthRepository _repository;
   StreamSubscription<AppUser?>? _authSub;
 
+  /// True while `authStateChanges()` must not overwrite [state].
+  ///
+  /// Set for the duration of an explicit `login()` / `register()` call, and
+  /// **kept set after a failed sign-in** until the next explicit action.
+  ///
+  /// Why it cannot just be an in-flight guard cleared in `finally`: a
+  /// rejected sign-in (e.g. unverified email) throws *and* the repository
+  /// signs the user out, so `authStateChanges()` emits `data(null)` a moment
+  /// later — after `finally` has already run. That emission wiped the
+  /// `AsyncError` the failure had just recorded, before any listener could
+  /// surface it, leaving the login button dead and silent.
+  bool _authStreamSuspended = false;
+
   AuthStateNotifier(this._repository) : super(const AsyncValue.loading()) {
     // Listen to auth state changes from the repository
     _authSub = _repository.authStateChanges().listen(
       (user) {
+        if (_authStreamSuspended) return;
         state = AsyncValue.data(user);
       },
       onError: (error, stack) {
+        if (_authStreamSuspended) return;
         state = AsyncValue.error(error, stack);
       },
     );
   }
 
   Future<void> login(String email, String password) async {
-    state = const AsyncValue.loading();
-    // Keep previous value while loading so the UI doesn't flash
-    state = AsyncValue.data(state.valueOrNull);
+    // A new attempt makes the stream authoritative again, so a successful
+    // sign-in still lands even if a previous attempt left it suspended.
+    _authStreamSuspended = true;
+    // Keep the previous value while loading so the UI doesn't flash empty.
+    // (Setting `AsyncLoading` and then immediately overwriting it with
+    // `AsyncData` — as this used to — meant the button never showed a
+    // spinner and stayed tappable for the whole attempt.)
+    state = const AsyncValue<AppUser?>.loading().copyWithPrevious(state);
     try {
       final user = await _repository.login(email, password);
       state = AsyncValue.data(user);
+      // Settled happy: let the stream take over again (token refresh, other
+      // tabs, a later sign-out).
+      _authStreamSuspended = false;
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      // Stay suspended — the `signOut()` this failure performs will emit
+      // `data(null)` and would wipe the message before the UI can show it.
+      // Rethrow so the caller can surface the message itself rather than
+      // relying solely on `ref.listen` observing this state.
+      rethrow;
     }
   }
 
@@ -68,8 +96,12 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
     String? phone,
     String? address,
   }) async {
-    state = const AsyncValue.loading();
-    state = AsyncValue.data(state.valueOrNull);
+    _authStreamSuspended = true;
+    // Same contract as [login]: stay in loading for the whole attempt.
+    // (Setting `AsyncLoading` and then immediately overwriting it with
+    // `AsyncData` — as this used to — meant the button never showed a
+    // spinner and stayed tappable for the whole attempt.)
+    state = const AsyncValue<AppUser?>.loading().copyWithPrevious(state);
     try {
       final user = await _repository.register(
         email: email,
@@ -79,15 +111,19 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
         phone: phone,
         address: address,
       );
+      // Signed-out pending email verification.
       state = AsyncValue.data(null);
       return user;
     } catch (e, st) {
       state = AsyncValue.error(e, st);
+      // Stay suspended so a post-failure sign-out can't wipe the message.
       return null;
     }
   }
 
   Future<void> logout() async {
+    // Explicit sign-out: the stream's `data(null)` is exactly what we want.
+    _authStreamSuspended = false;
     await _repository.logout();
   }
 

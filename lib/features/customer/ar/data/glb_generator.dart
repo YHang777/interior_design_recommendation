@@ -7,9 +7,18 @@ import 'room_finishes.dart' show RoomFinishCatalog;
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure-Dart procedural glTF 2.0 GLB writer.
 //
+// IMPORTANT — what this file is (and is NOT) for:
+//   * PRODUCT AR MODELS DO NOT COME FROM HERE. A product's 3D model is a
+//     Tripo AI model, rescaled to the seller's dimensions (see
+//     services/model_generation/ + rescaleGlbToSellerSize). There is no
+//     procedural furniture path anymore — this file only produces the
+//     room-scanner's floor/wall finish overlay slabs (Room Planner), and
+//     hosts resolveShapeFamily (the keyword classifier the supplier product
+//     form shares for dimension autofill).
+//
 // Everything is authored IN METERS (Y-up, right-handed), so the bounding
 // boxes of generated models are true 1:1 world dimensions and can be placed
-// in AR at exact product size without plugin-side normalization.
+// in AR at exact size without plugin-side normalization.
 //
 // Geometry: one mesh with a single primitive. Vertices are interleaved into
 // one bufferView as pos3 + normal3 + color3 (36-byte stride, float32);
@@ -27,8 +36,6 @@ const int _kChunkBin = 0x004E4942; // 'BIN\0'
 const int _kComponentFloat = 5126;
 const int _kComponentUint16 = 5123;
 const int _kComponentUint32 = 5125;
-
-const double _kPi2 = 6.283185307179586;
 
 // ─── Floor / wall finish specs (Loop 4 customization) ───────────────────────
 
@@ -84,12 +91,6 @@ class _Rand {
     return _state / 0x80000000;
   }
 
-  /// Uniform int in [0, bound).
-  int nextInt(int bound) {
-    _advance();
-    return _state % bound;
-  }
-
   /// Uniform in [min, max].
   double range(double min, double max) => min + (max - min) * nextDouble();
 }
@@ -117,16 +118,6 @@ int _mix(int a, int b, double t) {
       ch(a & 0xFF, b & 0xFF);
 }
 
-/// Clamp that can never throw. Dart's `num.clamp` requires `lo <= hi` and
-/// throws an ArgumentError otherwise, which crashes the generator on absurdly
-/// squat products. Callers that have no real room for a part additionally
-/// degrade the part out of existence instead of clamping blindly.
-double _clampSafe(double v, double lo, double hi) {
-  final a = math.min(lo, hi);
-  final b = math.max(lo, hi);
-  return v.clamp(a, b).toDouble();
-}
-
 const int _kGrey = 0xFFA0A0A0;
 
 List<double> _rgb(int argb) => [
@@ -134,18 +125,6 @@ List<double> _rgb(int argb) => [
       ((argb >> 8) & 0xFF) / 255.0,
       (argb & 0xFF) / 255.0,
     ];
-
-/// Palettes per shape family; which entry is used is RNG-chosen (and
-/// therefore still deterministic for a given name + seed).
-const List<int> _wood = [
-  0xFF8B5A2B, 0xFFA0714F, 0xFF6F4E37, 0xFF9C6B3E, 0xFF7C5433,
-];
-const List<int> _fabric = [
-  0xFFB0A69A, 0xFF9C938A, 0xFFC2B8AA, 0xFF8D857B, 0xFFA79F96,
-];
-const List<int> _metal = [0xFF3B3B38, 0xFF55524E, 0xFF2B2B29, 0xFF45433F];
-const List<int> _shadeWarm = [0xFFC9A878, 0xFFE3D2B3, 0xFFB98F63, 0xFFD8C3A5];
-const List<int> _decor = [0xFF9A6B53, 0xFFC08552, 0xFFB99362, 0xFF8C6F5A];
 
 // ─── Geometry ───────────────────────────────────────────────────────────────
 
@@ -156,11 +135,6 @@ class _Vec3 {
   _Vec3 operator -(final _Vec3 o) => _Vec3(x - o.x, y - o.y, z - o.z);
 
   double dot(final _Vec3 o) => x * o.x + y * o.y + z * o.z;
-
-  _Vec3 normalized() {
-    final l = math.sqrt(dot(this));
-    return l == 0 ? this : _Vec3(x / l, y / l, z / l);
-  }
 
   static _Vec3 cross(final _Vec3 a, final _Vec3 b) => _Vec3(
       a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
@@ -231,55 +205,6 @@ class _Mesh {
     quad(_Vec3(x1, y0, z0), _Vec3(x0, y0, z0), _Vec3(x0, y1, z0),
         _Vec3(x1, y1, z0), const _Vec3(0, 0, -1), color);
   }
-
-  /// Regular [sides]-sided prism / frustum between y0 and y1 centered on
-  /// (cx, cz), bottom radius r0, top radius r1 (r0 == r1 → cylinder, r0 >
-  /// r1 → tapered shade). Flat per-side normals.
-  void prism({
-    required int sides,
-    required double r0,
-    required double r1,
-    required double y0,
-    required double y1,
-    double cx = 0,
-    double cz = 0,
-    required int color,
-    bool closeBottom = false,
-    bool closeTop = false,
-  }) {
-    assert(sides >= 3 && y1 > y0);
-    for (var k = 0; k < sides; k++) {
-      final t0 = k * _kPi2 / sides;
-      final t1 = (k + 1) * _kPi2 / sides;
-      final a = _Vec3(cx + r0 * math.cos(t0), y0, cz + r0 * math.sin(t0));
-      final b = _Vec3(cx + r0 * math.cos(t1), y0, cz + r0 * math.sin(t1));
-      final c = _Vec3(cx + r1 * math.cos(t1), y1, cz + r1 * math.sin(t1));
-      final d = _Vec3(cx + r1 * math.cos(t0), y1, cz + r1 * math.sin(t0));
-      // Outward normal of the flat side plane.
-      final tm = (t0 + t1) / 2;
-      var n = _Vec3.cross(b - a, d - a);
-      if (n.dot(_Vec3(math.cos(tm), 0, math.sin(tm))) < 0) {
-        n = _Vec3.cross(d - a, b - a);
-      }
-      quad(a, b, c, d, n.normalized(), color);
-    }
-    if (closeBottom) _cap(r0, y0, cx, cz, false, sides, color);
-    if (closeTop) _cap(r1, y1, cx, cz, true, sides, color);
-  }
-
-  void _cap(double r, double y, double cx, double cz, bool top, int sides,
-      int color) {
-    if (r <= 0) return;
-    final center = _Vec3(cx, y, cz);
-    final normal = top ? const _Vec3(0, 1, 0) : const _Vec3(0, -1, 0);
-    for (var k = 0; k < sides; k++) {
-      final t0 = k * _kPi2 / sides;
-      final t1 = (k + 1) * _kPi2 / sides;
-      final a = _Vec3(cx + r * math.cos(t0), y, cz + r * math.sin(t0));
-      final b = _Vec3(cx + r * math.cos(t1), y, cz + r * math.sin(t1));
-      _tri(center, b, a, normal, color);
-    }
-  }
 }
 
 // ─── Shape-family classification (shared with product_form_screen.dart) ──────
@@ -304,10 +229,13 @@ String _decorKeywordFamily(String n) {
   return 'default';
 }
 
-/// Maps a product (category + name) onto the furniture shape family to build.
-/// This is the single implementation the generator AND the product form's
-/// dimension guessing share, so both always mis-classify the same products
-/// (and neither one does).
+/// Maps a product (category + name) onto a furniture shape family.
+///
+/// KEPT for the supplier product form: `product_form_screen.dart` imports
+/// this classifier to pick the right default W/H/D when autofilling the
+/// dimension fields. It is NOT part of any AR model path anymore — a
+/// product's 3D model is a Tripo AI model rescaled to the seller's numbers,
+/// never a procedurally built shape.
 ///
 /// The category is the primary hint:
 ///  * 'lighting' → everything is a lamp (even a "Table Lamp" or "Desk");
@@ -346,7 +274,7 @@ String resolveShapeFamily({required String category, required String name}) {
   return 'default';
 }
 
-// ─── Public entry points ─────────────────────────────────────────────────────
+// ─── Deterministic seeding ───────────────────────────────────────────────────
 
 /// Deterministic FNV-1a over the lower-cased [text]; model output must not
 /// depend on VM string hashing.
@@ -356,261 +284,6 @@ int _nameSeed(String text) {
     h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF;
   }
   return h;
-}
-
-/// Generates a furniture GLB (all dimensions real-world meters, Y-up,
-/// base centered at the origin and resting on y = 0).
-///
-/// The shape is picked by [resolveShapeFamily] (category hint + name-keyword
-/// sweep). [seedOrColor] varies the — still deterministic — palette/part
-/// tones for a given name.
-Uint8List generateFurnitureGlb({
-  required String category,
-  required String name,
-  required double widthM,
-  required double heightM,
-  required double depthM,
-  int seedOrColor = 0,
-}) {
-  if (widthM <= 0 || heightM <= 0 || depthM <= 0) {
-    throw ArgumentError.value(
-      [widthM, heightM, depthM],
-      'dimensions',
-      'generateFurnitureGlb requires positive widthM/heightM/depthM '
-          '(got $widthM × $heightM × $depthM m).',
-    );
-  }
-  final rng = _Rand(_nameSeed(name) ^ (seedOrColor & 0x7FFFFFFF));
-  final cat = category.toLowerCase();
-  final mesh = _Mesh();
-  final family = resolveShapeFamily(category: category, name: name);
-
-  switch (family) {
-    case 'table':
-      _buildTable(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'sofa':
-      _buildSofa(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'chair':
-    case 'armchair':
-      _buildChair(mesh, widthM, heightM, depthM, rng,
-          armrests: family == 'armchair');
-      break;
-    case 'bed':
-      _buildBed(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'cabinet':
-      _buildCabinet(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'lamp':
-      _buildLamp(mesh, widthM, heightM, rng);
-      break;
-    case 'rug':
-      _buildRug(mesh, widthM, depthM, rng);
-      break;
-    case 'vase':
-      _buildVase(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'mirror':
-      _buildWallArt(mesh, widthM, heightM, depthM, rng);
-      break;
-    case 'cushion':
-      _buildCushion(mesh, widthM, heightM, depthM, rng);
-      break;
-    default:
-      // Default cuboid (desk, stool, tv stand, unclassified decor…).
-      final palette =
-          cat.contains('textile') || cat.contains('fab') ? _fabric : _wood;
-      mesh.box(-widthM / 2, 0, -depthM / 2, widthM / 2, heightM, depthM / 2,
-          _tone(palette[rng.nextInt(palette.length)], 0.96));
-  }
-
-  if (mesh.indexCount == 0) {
-    throw StateError('Shape "$name" produced no geometry.');
-  }
-  return mesh.buildGlb(name.isEmpty ? 'furniture' : name);
-}
-
-/// Flat rug / carpet slab, 2 cm thick. Only products whose NAME says rug or
-/// carpet reach this builder (resolveShapeFamily never routes plain decor
-/// here), so a 40 cm vase can never collapse into a mat.
-void _buildRug(_Mesh m, double w, double d, _Rand rng) {
-  m.box(-w / 2, 0, -d / 2, w / 2, 0.02, d / 2,
-      _decor[rng.nextInt(_decor.length)]);
-}
-
-/// Round pot / vase: an 8-sided prism, grounded at y = 0. Prism radii are
-/// circular, so the footprint fills min(w, d); the body tapers toward the
-/// mouth and the bottom is capped (it reads as a vase/planter from above).
-/// Bounds: min(w,d) × h × min(w,d) when w == d, i.e. the product's own
-/// extents — never a 2 cm mat.
-void _buildVase(_Mesh m, double w, double h, double d, _Rand rng) {
-  final c = _decor[rng.nextInt(_decor.length)];
-  final r = math.min(w, d) / 2;
-  m.prism(
-      sides: 8,
-      r0: r,
-      r1: r * 0.55,
-      y0: 0,
-      y1: h,
-      color: _tone(c, rng.range(0.95, 1.05)),
-      closeBottom: true);
-}
-
-/// Wall art / mirror / framed picture: a thin slab of the full W×H face and
-/// ~3 cm of depth (capped at the seller's depth when it is thinner).
-void _buildWallArt(_Mesh m, double w, double h, double d, _Rand rng) {
-  final halfT = math.min(0.03, d) / 2;
-  m.box(-w / 2, 0, -halfT, w / 2, h, halfT,
-      _tone(_metal[rng.nextInt(_metal.length)], 1.0));
-}
-
-/// Cushion / pillow: a soft low slab. Sellers often type a cubic "height"
-/// for pillows; a cushion is flat, so the height is capped at 15 cm (the
-/// thickness of a typical throw cushion) while W and D stay exact.
-void _buildCushion(_Mesh m, double w, double h, double d, _Rand rng) {
-  final hc = math.min(h, 0.15);
-  m.box(-w / 2, 0, -d / 2, w / 2, hc, d / 2,
-      _tone(_fabric[rng.nextInt(_fabric.length)], rng.range(0.95, 1.05)));
-}
-
-void _buildTable(_Mesh m, double w, double h, double d, _Rand rng) {
-  final base = _wood[rng.nextInt(_wood.length)];
-  final topC = _tone(base, rng.range(0.96, 1.02));
-  final legC = _tone(base, rng.range(0.8, 0.9));
-  final topBottom = h - 0.05;
-  if (topBottom <= 0.01) {
-    m.box(-w / 2, 0, -d / 2, w / 2, h, d / 2, topC);
-    return;
-  }
-  m.box(-w / 2, topBottom, -d / 2, w / 2, h, d / 2, topC); // top slab, 5 cm
-  // 4 legs, 8×8 cm cross-section, inset 8 % from the edges.
-  final insetX = w * 0.08;
-  final insetZ = d * 0.08;
-  for (final sx in const [-1.0, 1.0]) {
-    for (final sz in const [-1.0, 1.0]) {
-      final cx = sx * (w / 2 - insetX) - (sx > 0 ? 0.04 : -0.04);
-      final cz = sz * (d / 2 - insetZ) - (sz > 0 ? 0.04 : -0.04);
-      m.box(cx - 0.04, 0, cz - 0.04, cx + 0.04, topBottom, cz + 0.04, legC);
-    }
-  }
-}
-
-void _buildSofa(_Mesh m, double w, double h, double d, _Rand rng) {
-  final base = _fabric[rng.nextInt(_fabric.length)];
-  final seatH = _clampSafe(h * 0.42, h * 0.25, h * 0.5);
-  m.box(-w / 2, 0, -d / 2, w / 2, seatH, d / 2,
-      _tone(base, rng.range(0.88, 0.96))); // base / seat
-  // Backrest and arms need ≥ 8 cm of headroom above the seat; an absurdly
-  // squat product degrades to the seat slab instead of throwing (the old
-  // clamps had lo > hi and crashed on small heights).
-  final backRoom = h - seatH;
-  if (backRoom < 0.08) return;
-  m.box(-w / 2, seatH, -d / 2, w / 2, h, -d / 2 + 0.18,
-      _tone(base, rng.range(1.0, 1.08))); // backrest (18 cm thick)
-  final armTop = _clampSafe(h * 0.55, seatH + 0.03, h - 0.05);
-  m.box(-w / 2, 0, -d / 2, -w / 2 + 0.18, armTop, d / 2,
-      _tone(base, rng.range(0.92, 1.0))); // left arm
-  m.box(w / 2 - 0.18, 0, -d / 2, w / 2, armTop, d / 2,
-      _tone(base, rng.range(0.92, 1.0))); // right arm
-}
-
-void _buildChair(_Mesh m, double w, double h, double d, _Rand rng,
-    {required bool armrests}) {
-  final base = _fabric[rng.nextInt(_fabric.length)];
-  if (h < 0.2) {
-    // No room for legs + a raised seat (the formulas below need h ≥ 0.2):
-    // degrade to a low stool slab with a short back instead of throwing.
-    final seatTop = _clampSafe(h * 0.75, 0.03, h);
-    m.box(-w / 2, 0, -d / 2, w / 2, seatTop, d / 2,
-        _tone(base, rng.range(0.95, 1.05))); // seat slab
-    final backH = h - seatTop;
-    if (backH > 0.02) {
-      m.box(-w / 2, seatTop, -d / 2, w / 2, h, -d / 2 + 0.06,
-          _tone(base, rng.range(1.0, 1.1))); // back (6 cm thick)
-    }
-    return;
-  }
-  final seatTop = _clampSafe(h * 0.45, 0.1, h - 0.1);
-  final legH = _clampSafe(seatTop - 0.08, 0.02, seatTop);
-  // 4 legs, 5 cm cross-section, inset 8 %.
-  final insetX = w * 0.08;
-  final insetZ = d * 0.08;
-  for (final sx in const [-1.0, 1.0]) {
-    for (final sz in const [-1.0, 1.0]) {
-      final cx = sx * (w / 2 - insetX) - (sx > 0 ? 0.025 : -0.025);
-      final cz = sz * (d / 2 - insetZ) - (sz > 0 ? 0.025 : -0.025);
-      m.box(cx - 0.025, 0, cz - 0.025, cx + 0.025, legH, cz + 0.025,
-          _tone(base, rng.range(0.8, 0.9)));
-    }
-  }
-  m.box(-w / 2, seatTop - 0.08, -d / 2, w / 2, seatTop, d / 2,
-      _tone(base, rng.range(0.95, 1.05))); // seat slab
-  m.box(-w / 2, seatTop, -d / 2, w / 2, h, -d / 2 + 0.06,
-      _tone(base, rng.range(1.0, 1.1))); // back (6 cm thick)
-  if (armrests) {
-    final armTop = _clampSafe(h * 0.6, seatTop + 0.02, h - 0.05);
-    final armC = _tone(base, rng.range(0.9, 1.0));
-    m.box(-w / 2, seatTop - 0.05, -d / 2 + 0.03, -w / 2 + 0.08, armTop,
-        d / 2 - 0.03, armC);
-    m.box(w / 2 - 0.08, seatTop - 0.05, -d / 2 + 0.03, w / 2, armTop,
-        d / 2 - 0.03, armC);
-  }
-}
-
-void _buildBed(_Mesh m, double w, double h, double d, _Rand rng) {
-  final base = _wood[rng.nextInt(_wood.length)];
-  final frameH = math.min(0.3, h * 0.5);
-  m.box(-w / 2, 0, -d / 2, w / 2, frameH, d / 2,
-      _tone(base, rng.range(0.85, 0.95))); // frame
-  m.box(-w / 2, frameH, -d / 2, w / 2, h, -d / 2 + 0.1,
-      _tone(base, rng.range(1.0, 1.1))); // headboard at the back edge
-}
-
-void _buildCabinet(_Mesh m, double w, double h, double d, _Rand rng) {
-  final base = _wood[rng.nextInt(_wood.length)];
-  final bodyC = _tone(base, rng.range(0.92, 1.0));
-  final shelfC = _tone(base, rng.range(0.6, 0.74));
-  m.box(-w / 2, 0, -d / 2, w / 2, h, d / 2, bodyC);
-  // Shelf slabs: dark bands just proud of the front (−Z) face so they read
-  // as shelf lines head-on.
-  final shelves = h > 1.2 ? 3 : 2;
-  const bandThick = 0.025;
-  for (var i = 1; i <= shelves; i++) {
-    final y0 = h * i / (shelves + 1) - bandThick / 2;
-    m.box(-w / 2 + 0.02, y0, -d / 2 - 0.007, w / 2 - 0.02, y0 + bandThick,
-        -d / 2 + 0.01, shelfC);
-  }
-}
-
-void _buildLamp(_Mesh m, double w, double h, _Rand rng) {
-  final metal = _metal[rng.nextInt(_metal.length)];
-  final metalC = _tone(metal, 1.0);
-  final shadeC = _shadeWarm[rng.nextInt(_shadeWarm.length)];
-  final rStem = math.max(0.008, math.min(0.03, 0.03 * w));
-  final rBase = _clampSafe(0.1 * w, rStem * 2, 0.15);
-  final baseH = _clampSafe(h * 0.04, 0.015, 0.05);
-  final shadeBottomY = h * 0.6;
-  // Pedestal.
-  m.prism(
-      sides: 8,
-      r0: rBase,
-      r1: rBase * 0.9,
-      y0: 0,
-      y1: baseH,
-      color: _tone(metalC, 0.85),
-      closeBottom: true);
-  // 8-sided pole stem.
-  m.prism(sides: 8, r0: rStem, r1: rStem, y0: baseH, y1: shadeBottomY, color: metalC);
-  // Tapered shade — widest at the bottom so the model's max width ≈ W.
-  m.prism(
-      sides: 8,
-      r0: 0.48 * w,
-      r1: 0.24 * w,
-      y0: shadeBottomY,
-      y1: h * 0.95,
-      color: shadeC);
 }
 
 // ─── Floor / wall generators ─────────────────────────────────────────────────

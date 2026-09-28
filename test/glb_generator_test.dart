@@ -1,8 +1,12 @@
-// Tests for the pure-Dart procedural GLB generator + GLB bounds parser.
+// Tests for the parts of the procedural GLB generator that are still alive:
+// room-scanner floor/wall finish overlays, the resolveShapeFamily keyword
+// classifier (shared with the supplier product form's dimension autofill),
+// and the GLB bounds parser (including a regression guard on a real bundled
+// asset).
 //
-// AR cannot run on the emulator, so these tests prove the geometry pipeline:
-// every generated model is round-tripped through the GLB parser and its
-// bounding box is asserted against the requested real-world dimensions.
+// The FURNITURE generator was deleted with the procedural product-model
+// path: a product's 3D model is a Tripo AI model rescaled to the seller's
+// dimensions (see model_glb_resolver_test.dart / glb_rescaler_test.dart).
 //
 // Pure Dart tests (no widgets); fast and deterministic.
 
@@ -31,144 +35,7 @@ void expectNear(double actual, double expected, double tolerance,
 }
 
 void main() {
-  group('generated furniture GLBs', () {
-    test('header: magic, version, length (table)', () {
-      final bytes = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 1.0,
-        heightM: 0.75,
-        depthM: 0.6,
-      );
-      expect(bytes, isNotEmpty);
-      parseGlb(bytes); // asserts magic/version/length internally
-    });
-
-    test('table 1.0 × 0.75 × 0.6 m parses to matching extents', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 1.0,
-        heightM: 0.75,
-        depthM: 0.6,
-      ));
-      expectNear(bounds.widthM, 1.0, 0.05, 'table width');
-      expectNear(bounds.heightM, 0.75, 0.05, 'table height');
-      expectNear(bounds.depthM, 0.6, 0.05, 'table depth');
-    });
-
-    test('sofa keeps its requested width and has positive extents', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Three Seater Sofa',
-        widthM: 2.2,
-        heightM: 0.85,
-        depthM: 0.9,
-      ));
-      expect(bounds.widthM, greaterThan(0));
-      expect(bounds.heightM, greaterThan(0));
-      expect(bounds.depthM, greaterThan(0));
-      expectNear(bounds.widthM, 2.2, 0.05, 'sofa width');
-    });
-
-    test('chair keeps its requested width', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Wooden Chair',
-        widthM: 0.6,
-        heightM: 0.9,
-        depthM: 0.6,
-      ));
-      expect(bounds.heightM, greaterThan(0));
-      expectNear(bounds.widthM, 0.6, 0.05, 'chair width');
-    });
-
-    test('armchair includes armrests but still spans its width', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Leather Armchair',
-        widthM: 0.9,
-        heightM: 1.0,
-        depthM: 0.85,
-      ));
-      expectNear(bounds.widthM, 0.9, 0.05, 'armchair width');
-      expect(bounds.heightM, greaterThan(0.6));
-    });
-
-    test('lamp parses with width ≈ requested shade width', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Lighting',
-        name: 'Floor Lamp',
-        widthM: 0.45,
-        heightM: 1.5,
-        depthM: 0.45,
-      ));
-      expect(bounds.heightM, greaterThan(1.0));
-      expectNear(bounds.widthM, 0.45, 0.05, 'lamp width');
-    });
-
-    test('default shape (no keyword) is an exact cuboid', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Ottoman',
-        widthM: 0.8,
-        heightM: 0.4,
-        depthM: 0.6,
-      ));
-      expectNear(bounds.widthM, 0.8, 0.001, 'cuboid width');
-      expectNear(bounds.heightM, 0.4, 0.001, 'cuboid height');
-      expectNear(bounds.depthM, 0.6, 0.001, 'cuboid depth');
-    });
-
-    test('bed parses and matches width', () {
-      final bounds = parseGlb(generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Double Bed',
-        widthM: 1.8,
-        heightM: 1.0,
-        depthM: 2.0,
-      ));
-      expectNear(bounds.widthM, 1.8, 0.05, 'bed width');
-      expectNear(bounds.depthM, 2.0, 0.05, 'bed depth');
-      expect(bounds.heightM, greaterThan(0.5));
-    });
-
-    test('output is byte-identical for the same inputs (deterministic)', () {
-      Uint8List gen() => generateFurnitureGlb(
-            category: 'Furniture',
-            name: 'Dining Table',
-            widthM: 1.0,
-            heightM: 0.75,
-            depthM: 0.6,
-            seedOrColor: 42,
-          );
-      expect(gen(), gen());
-      // A different seed produces different bytes.
-      final other = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 1.0,
-        heightM: 0.75,
-        depthM: 0.6,
-        seedOrColor: 7,
-      );
-      expect(other, isNot(equals(gen())));
-    });
-
-    test('rejects non-positive dimensions', () {
-      expect(
-        () => generateFurnitureGlb(
-            category: 'Furniture',
-            name: 'Table',
-            widthM: 0,
-            heightM: 0.75,
-            depthM: 0.6),
-        throwsArgumentError,
-      );
-    });
-  });
-
-  group('floor / wall finish GLBs', () {
+  group('floor / wall finish GLBs (room scanner overlays)', () {
     test('wood plank floor parses to ≈ 3 × 3 m', () {
       final bounds = parseGlb(generateFloorGlb(
           finish: const FloorFinish(
@@ -187,6 +54,14 @@ void main() {
       expectNear(bounds.depthM, 3.0, 0.05, 'tile floor depth');
     });
 
+    test('parquet floor parses to ≈ 3 × 3 m', () {
+      final bounds = parseGlb(generateFloorGlb(
+          finish: const FloorFinish(
+              type: FloorFinishType.parquet, colorArgb: 0xFFC09A6B)));
+      expectNear(bounds.widthM, 3.0, 0.05, 'parquet floor width');
+      expectNear(bounds.depthM, 3.0, 0.05, 'parquet floor depth');
+    });
+
     test('custom-size cement floor honors sizeM', () {
       final bounds = parseGlb(generateFloorGlb(
           finish: const FloorFinish(
@@ -195,6 +70,24 @@ void main() {
               sizeM: 4.0)));
       expectNear(bounds.widthM, 4.0, 0.05, 'cement floor width');
       expectNear(bounds.depthM, 4.0, 0.05, 'cement floor depth');
+    });
+
+    test('same finish → byte-identical output (deterministic)', () {
+      Uint8List gen() => generateFloorGlb(
+          finish: const FloorFinish(
+              type: FloorFinishType.woodPlanks, colorArgb: 0xFFB08D6B));
+      expect(gen(), gen());
+    });
+
+    test('non-positive sizeM is rejected', () {
+      expect(
+        () => generateFloorGlb(
+            finish: const FloorFinish(
+                type: FloorFinishType.cement,
+                colorArgb: 0xFFB9B9B4,
+                sizeM: 0)),
+        throwsArgumentError,
+      );
     });
 
     test('brick wall parses to ≈ 2.4 wide × 2.7 high', () {
@@ -221,6 +114,98 @@ void main() {
               type: WallFinishType.paint, colorArgb: 0xFFE9E4DA)));
       expectNear(bounds.widthM, 2.4, 0.05, 'wall width');
       expectNear(bounds.heightM, 2.7, 0.05, 'wall height');
+    });
+
+    test('custom wall panel size is honored', () {
+      final bounds = parseGlb(
+          generateWallGlb(
+              finish: const WallFinish(
+                  type: WallFinishType.paint, colorArgb: 0xFFE9E4DA),
+              widthM: 3.0,
+              heightM: 2.5));
+      expectNear(bounds.widthM, 3.0, 0.05, 'custom wall width');
+      expectNear(bounds.heightM, 2.5, 0.05, 'custom wall height');
+    });
+
+    test('non-positive panel size is rejected', () {
+      expect(
+        () => generateWallGlb(
+            finish: const WallFinish(
+                type: WallFinishType.paint, colorArgb: 0xFFE9E4DA),
+            widthM: 0,
+            heightM: 2.7),
+        throwsArgumentError,
+      );
+    });
+  });
+
+  group('resolveShapeFamily (supplier form autofill — not an AR path)', () {
+    test('lighting category maps everything to lamp', () {
+      expect(
+        resolveShapeFamily(category: 'Lighting', name: 'Desk Fan'),
+        'lamp',
+      );
+      expect(
+        resolveShapeFamily(category: 'lighting', name: 'Table Lamp'),
+        'lamp',
+      );
+    });
+
+    test('decor category uses name keywords', () {
+      expect(
+        resolveShapeFamily(category: 'Decor', name: 'Wool Rug'),
+        'rug',
+      );
+      expect(
+        resolveShapeFamily(category: 'Decor', name: 'Ceramic Vase'),
+        'vase',
+      );
+      expect(
+        resolveShapeFamily(category: 'Decor', name: 'Picture Frame'),
+        'mirror',
+      );
+      // Unknown decor names stay a real object ('default'), never a mat.
+      expect(
+        resolveShapeFamily(category: 'Decor', name: 'Abstract Statue'),
+        'default',
+      );
+    });
+
+    test('name keywords map onto shape families', () {
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Oak Sofa'),
+          'sofa');
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Lounge Armchair'),
+          'armchair');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Wooden Chair'),
+          'chair');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Double Bed'),
+          'bed');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Dining Table'),
+          'table');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Bookcase'),
+          'cabinet');
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Floor Lamp'),
+          'lamp');
+    });
+
+    test('specific keywords win over generic ones', () {
+      // bedside/nightstand before 'bed'.
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Bedside Table'),
+          'cabinet');
+      // armchair before 'chair'.
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Recliner Armchair'),
+          'armchair');
+    });
+
+    test('unknown names fall through to default', () {
+      expect(
+        resolveShapeFamily(category: 'Furniture', name: 'Mystery Object'),
+        'default',
+      );
     });
   });
 
@@ -251,18 +236,15 @@ void main() {
       // min/max arrays from its JSON chunk (re-padding to 4-byte
       // alignment), then make sure GlbBounds still computes the same box
       // by scanning the raw vertex floats.
-      final original = generateFurnitureGlb(
-        category: 'Furniture',
-        name: 'Dining Table',
-        widthM: 1.0,
-        heightM: 0.75,
-        depthM: 0.6,
-      );
-      final headerLen = 12 + 8;
+      final original = generateFloorGlb(
+          finish: const FloorFinish(
+              type: FloorFinishType.woodPlanks, colorArgb: 0xFFB08D6B));
+      final expected = GlbBounds.fromGlbBytes(original);
+
+      const headerLen = 12 + 8;
       final jsonLen =
           ByteData.sublistView(original).getUint32(12, Endian.little);
-      final jsonBytes =
-          original.sublist(headerLen, headerLen + jsonLen);
+      final jsonBytes = original.sublist(headerLen, headerLen + jsonLen);
       final trimmed = String.fromCharCodes(jsonBytes)
           .replaceAll(RegExp(r',\s*"min"\s*:\s*\[[^\]]*\]'), '')
           .replaceAll(RegExp(r',\s*"max"\s*:\s*\[[^\]]*\]'), '');
@@ -275,7 +257,8 @@ void main() {
       final head = ByteData(12);
       head.setUint32(0, 0x46546C67, Endian.little);
       head.setUint32(4, 2, Endian.little);
-      head.setUint32(8, 12 + 8 + jsonPadded + rest.length, Endian.little);
+      head.setUint32(
+          8, 12 + 8 + jsonPadded + rest.length, Endian.little);
       builder.add(head.buffer.asUint8List());
       final chunk = ByteData(8);
       chunk.setUint32(0, jsonPadded, Endian.little);
@@ -288,9 +271,10 @@ void main() {
       builder.add(rest);
 
       final bounds = GlbBounds.fromGlbBytes(builder.toBytes());
-      expectNear(bounds.widthM, 1.0, 0.05, 'scanned width');
-      expectNear(bounds.heightM, 0.75, 0.05, 'scanned height');
-      expectNear(bounds.depthM, 0.6, 0.05, 'scanned depth');
+      expectNear(bounds.widthM, expected.widthM, 1e-5, 'scanned width');
+      expectNear(bounds.heightM, expected.heightM, 1e-5, 'scanned height');
+      expectNear(bounds.depthM, expected.depthM, 1e-5, 'scanned depth');
+      expectNear(bounds.minY, expected.minY, 1e-5, 'scanned minY');
     });
   });
 }

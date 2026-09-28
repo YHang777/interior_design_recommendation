@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../features/auth/data/models/app_user.dart' show UserRole;
+import '../../features/customer/ar/data/glb_rescaler.dart'
+    show hasAnySellerDimension;
 import '../../models/product.dart';
 import '../media/media_store.dart';
 import 'generation_decider.dart';
@@ -14,20 +16,21 @@ import 'tripo_generator.dart';
 /// product returned by a create/update save, from failure-retry chips and
 /// overflow-menu "Regenerate 3D" actions, and at boot for stuck products.
 ///
-/// The WHOLE decision table lives in [decideGeneration] (pure — unit-tested
-/// in generation_decision_test.dart). It guarantees, among other things:
+/// Tripo is the only model source; the WHOLE decision table lives in
+/// [decideGeneration] (pure — unit-tested in generation_decision_test.dart).
+/// It guarantees, among other things:
 ///  - a healthy `ready` model is never re-kicked automatically;
 ///  - a persisted Tripo task id is always re-POLLED first — resuming a stuck
 ///    or transiently-failed generation never submits a second (paid) task;
 ///  - brand-new Tripo submissions are capped at `autoAttemptsCap` for
 ///    AUTOMATIC kicks, while explicit seller actions (`force`) may always
 ///    submit;
-///  - forcing regeneration of a ready Tripo product never downgrades it to
-///    the procedural model when the AI route is unavailable.
+///  - forcing regeneration of a non-eligible product keeps its current ready
+///    model instead of clobbering it;
+///  - every refusal names the exact missing precondition (API key, photo,
+///    dimensions).
 ///
-/// Returns the [GenerationDecision] so the UI can pick its snackbar
-/// (fix: "Regenerate 3D" on a non-eligible ready Tripo product says the AI
-/// model was kept instead of silently overwriting it).
+/// Returns the [GenerationDecision] so the UI can pick its snackbar.
 ///
 /// All product-doc writes are PARTIAL `.update({'ar3d': …})` calls — never a
 /// full-document overwrite. Terminal writes carry the FULL ar3d key set
@@ -45,10 +48,9 @@ GenerationDecision kickOffProduct3DGeneration(
   final ar3d = product.ar3d;
   final decision = decideGeneration(
     status: ar3d?.status ?? 'none',
-    source: ar3d?.source ?? '',
     hasTaskId: ar3d?.hasTaskId ?? false,
     attempts: ar3d?.attempts ?? 0,
-    dimsComplete: product.dimensions?.isComplete ?? false,
+    hasDimensions: hasAnySellerDimension(product.dimensions),
     hasNetworkImage: product.hasNetworkImage,
     tripoConfigured: Tripo3DGenerator.isConfigured,
     force: force,
@@ -68,7 +70,7 @@ GenerationDecision kickOffProduct3DGeneration(
       );
     }
     final generator = Tripo3DGenerator(
-      firestore,
+      FirestoreAr3dStore(firestore),
       mediaStore: mediaStore ?? MediaStore.instance,
     );
     if (decision.action == GenerationAction.submitNewTripo) {
@@ -79,26 +81,20 @@ GenerationDecision kickOffProduct3DGeneration(
     return decision;
   }
 
-  // ── Local writes (free; the deterministic generator materializes on
-  //    demand in the AR viewer). Every map carries the full ar3d key set. ──
+  // ── Local writes (free). Every map carries the full ar3d key set. ──────
   final attempts = ar3d?.attempts ?? 0;
   switch (decision.action) {
     case GenerationAction.stampProcedural:
-      _setAr3d(
-        firestore,
-        id,
-        {
-          'status': 'ready',
-          'source': 'procedural',
-          'url': '',
-          'error': '',
-          'taskId': '', // no AI task left to poll
-          'attempts': attempts,
-          'generatedAt': DateTime.now().toUtc().toIso8601String(),
-        },
-      );
+      // Unreachable — the procedural product-model path was deleted and
+      // decideGeneration never returns this action (kept in the enum only
+      // for the supplier screen's exhaustive switch). Assert-silent no-op.
+      debugPrint('[model-3d] BUG: stampProcedural requested for $id — '
+          'the procedural model source no longer exists; ignoring.');
       break;
     case GenerationAction.markFailed:
+      // decideGeneration only chooses markFailed when there is no pollable
+      // task left (taskId already absent) — clearing it here is a no-op
+      // in that case and never discards a resumable generation.
       _setAr3d(
         firestore,
         id,
@@ -107,7 +103,7 @@ GenerationDecision kickOffProduct3DGeneration(
           'source': ar3d?.source ?? '',
           'url': '',
           'error': decision.message,
-          'taskId': '', // nothing to re-poll
+          'taskId': '',
           'attempts': attempts,
         },
       );

@@ -30,6 +30,37 @@ enum OrderStatus {
       orElse: () => OrderStatus.pending,
     );
   }
+
+  // ── Transition guards (pure, shared by the repository write path) ──
+  //
+  // Legal forward chain: pending → confirmed → shipped → delivered.
+  // Terminal states (delivered, cancelled) are frozen. Cancellation is
+  // allowed from any non-terminal state.
+
+  /// Throws a [StateError] unless [to] is exactly the single legal next step
+  /// out of [from] — rejects terminal orders ('Order is already x') and any
+  /// jump/skip/backwards move ('Cannot move from A to B'). Messages match
+  /// what `MarketplaceRepository.updateOrderStatus` has always thrown.
+  static void ensureAdvance(OrderStatus from, OrderStatus to) {
+    if (from.isTerminal) {
+      throw StateError('Order is already ${from.label.toLowerCase()}');
+    }
+    if (from.next != to) {
+      throw StateError(
+          'Cannot move from ${from.label} to ${to.label}');
+    }
+  }
+
+  /// Throws a [StateError] when the order is already terminal. Any
+  /// non-terminal status (pending/confirmed/shipped) may be cancelled.
+  /// `MarketplaceRepository.cancelOrder` short-circuits an already-cancelled
+  /// order before calling this (idempotent cancel).
+  static void ensureCancellable(OrderStatus from) {
+    if (from.isTerminal) {
+      throw StateError(
+          'A ${from.label.toLowerCase()} order cannot be cancelled.');
+    }
+  }
 }
 
 /// Possible refund states on an order.
@@ -125,6 +156,13 @@ class Order {
   /// Supplier uids fulfilled by this order. Derives from items when empty.
   final List<String> supplierIds;
 
+  /// Delivery charge each supplier earned on this order
+  /// (`{supplierUid: share}`), recorded at checkout from product-level
+  /// shipping settings. Shares always sum to [shippingFee] for orders
+  /// placed after product-level shipping shipped. Empty on legacy orders
+  /// — those fall back in [shippingShareFor].
+  final Map<String, int> shippingBySupplier;
+
   final DateTime createdAt;
 
   /// Timestamp per status transition — map key is the [OrderStatus] name
@@ -155,6 +193,7 @@ class Order {
     this.tax = 0,
     this.membershipTier = '',
     this.supplierIds = const [],
+    this.shippingBySupplier = const {},
     this.statusHistory = const {},
     this.refundStatus,
     this.refundReason,
@@ -179,6 +218,24 @@ class Order {
           .toSet()
           .toList();
 
+  /// [supplierId]'s portion of this order's [shippingFee] — what they
+  /// earned from delivery charges, for revenue math and the detail screen.
+  ///
+  /// Modern orders carry [shippingBySupplier] (exact shares from checkout).
+  /// Legacy orders recorded only the aggregate fee, so we fall back:
+  ///   • one supplier on the order → that supplier paid the whole fee,
+  ///     so the full [shippingFee] is theirs;
+  ///   • several suppliers → the flat fee cannot honestly be split, so
+  ///     every share reads 0 rather than inventing an attribution.
+  int shippingShareFor(String supplierId) {
+    final recorded = shippingBySupplier[supplierId];
+    if (recorded != null) return recorded;
+    if (shippingBySupplier.isNotEmpty) return 0; // known shares, none is ours
+    final ids = resolvedSupplierIds;
+    if (ids.length == 1 && ids.first == supplierId) return shippingFee;
+    return 0;
+  }
+
   Order copyWith({
     String? id,
     String? orderNumber,
@@ -197,6 +254,7 @@ class Order {
     int? tax,
     String? membershipTier,
     List<String>? supplierIds,
+    Map<String, int>? shippingBySupplier,
     DateTime? createdAt,
     Map<String, DateTime>? statusHistory,
     RefundStatus? refundStatus,
@@ -222,6 +280,7 @@ class Order {
       tax: tax ?? this.tax,
       membershipTier: membershipTier ?? this.membershipTier,
       supplierIds: supplierIds ?? this.supplierIds,
+      shippingBySupplier: shippingBySupplier ?? this.shippingBySupplier,
       createdAt: createdAt ?? this.createdAt,
       statusHistory: statusHistory ?? this.statusHistory,
       refundStatus: clearRefund ? null : (refundStatus ?? this.refundStatus),
@@ -257,6 +316,7 @@ class Order {
               .where((s) => s.isNotEmpty)
               .toList() ??
           const [],
+      shippingBySupplier: _parseShippingBySupplier(json['shippingBySupplier']),
       createdAt: json['createdAt'] != null
           ? _parseOrderDate(json['createdAt']) ?? DateTime.now()
           : DateTime.now(),
@@ -285,6 +345,7 @@ class Order {
         'tax': tax,
         'membershipTier': membershipTier,
         'supplierIds': resolvedSupplierIds,
+        'shippingBySupplier': shippingBySupplier,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'statusHistory': statusHistory.map(
             (status, when) => MapEntry(status, when.toUtc().toIso8601String())),
@@ -305,6 +366,19 @@ Map<String, DateTime> _parseStatusHistory(dynamic raw) {
     if (parsed != null) history[status] = parsed;
   });
   return history;
+}
+
+/// Parses `{supplierUid: shippingShare}`; malformed/negative entries are
+/// dropped (missing supplier → share 0 via `Order.shippingShareFor`).
+Map<String, int> _parseShippingBySupplier(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return const {};
+  final shares = <String, int>{};
+  raw.forEach((supplierId, share) {
+    if (supplierId.isEmpty) return;
+    if (share is! num || share < 0) return;
+    shares[supplierId] = share.toInt();
+  });
+  return shares;
 }
 
 /// Parses a date that may be an ISO-8601 string or a Firestore Timestamp.

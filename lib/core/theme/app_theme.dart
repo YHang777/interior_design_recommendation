@@ -22,21 +22,23 @@ class AppTheme {
       ),
       scaffoldBackgroundColor: AppColors.background,
 
-      // AppBar — dark, clean, no shadow, no scroll elevation
+      // AppBar — light safety net only. Screens use in-body `PageHeading`
+      // instead of an AppBar; this keeps any stray AppBar from painting a
+      // dark band across the top.
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.primary,
-        foregroundColor: AppColors.textOnDark,
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.textPrimary,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: GoogleFonts.poppins(
-          color: AppColors.textOnDark,
+          color: AppColors.textPrimary,
           fontWeight: FontWeight.w600,
           fontSize: 20,
         ),
         systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarBrightness: Brightness.dark,
-          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.light,
+          statusBarIconBrightness: Brightness.dark,
         ),
       ),
 
@@ -139,16 +141,18 @@ class AppTheme {
         unselectedLabelStyle: GoogleFonts.poppins(fontSize: 11),
       ),
 
-      // Navigation Bar (Material 3)
+      // Navigation Bar (Material 3) — matches the floating pill
       navigationBarTheme: NavigationBarThemeData(
-        height: 72,
+        height: 64,
         indicatorColor: AppColors.accent.withValues(alpha: 0.12),
         backgroundColor: AppColors.surface,
-        elevation: 2,
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final isSelected = states.contains(WidgetState.selected);
           return GoogleFonts.poppins(
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
             color: isSelected ? AppColors.accent : AppColors.textHint,
           );

@@ -10,25 +10,32 @@ import 'firebase_options.dart';
 import 'services/marketplace_repository.dart';
 import 'services/model_generation/model_generation_trigger.dart';
 
-/// Preference key gating the one-time marketplace seed/migration. The flag
+/// Preference key gating the one-time marketplace catalogue seed. The flag
 /// is written only after a SUCCESSFUL run so a failed attempt can retry on
 /// the next launch.
 const _seedDoneKey = 'marketplace_seed_v1';
 
+/// How long to hold post-sign-in background work so it does not compete with
+/// the login transition's own Firestore reads. See [_scheduleSeedAfterSignIn].
+const _bootWorkDelay = Duration(seconds: 3);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Edge-to-edge display — status bar overlays the AppBar.
+  // Edge-to-edge display — status bar overlays page content.
+  // Dark icons: pages are light and header-less. Full-bleed dark stages
+  // (AR camera, scanner, photo heroes) opt back into light icons via
+  // AnnotatedRegion<SystemUiOverlayStyle>.
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarIconBrightness: Brightness.dark,
   ));
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // The catalogue seed + legacy migration WRITE to Firestore, and the
+  // The catalogue seed WRITES to Firestore, and the
   // security rules only allow writes for authenticated users. Fire-and-
   // forgetting at boot therefore always fails with PERMISSION_DENIED
   // (writes hit the sandbox before a session exists). Instead, subscribe to
@@ -50,16 +57,18 @@ void main() async {
 void _scheduleSeedAfterSignIn() {
   FirebaseAuth.instance.authStateChanges().listen((user) async {
     if (user == null) return;
+    // Hold this background work until the sign-in transition has settled.
+    // It fires on the same auth event as the login itself, and its write
+    // burst plus `users/{uid}` and `products` reads race the login's own
+    // profile read on the same Firestore client — landing exactly while the
+    // splash is waiting on the network. Deferring costs nothing (this work is
+    // idempotent and never urgent) and keeps the transition snappy.
+    await Future<void>.delayed(_bootWorkDelay);
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!(prefs.getBool(_seedDoneKey) ?? false)) {
         final repo = MarketplaceRepository(FirebaseFirestore.instance);
         await repo.seedMarketplaceIfEmpty();
-        final migrated = await repo.migrateLegacyProducts();
-        if (migrated > 0) {
-          debugPrint('[bootstrap] legacy supplier backfill: '
-              '$migrated products promoted to verified');
-        }
         await prefs.setBool(_seedDoneKey, true);
       }
     } catch (e) {

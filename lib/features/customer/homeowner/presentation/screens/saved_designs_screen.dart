@@ -6,7 +6,9 @@ import '../../../../../core/constants/app_colors.dart';
 import '../../../../../models/room_design.dart';
 import '../../../ar/data/furniture_model_library.dart';
 
+import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/section_header.dart';
 import '../providers/design_providers.dart';
 
@@ -76,10 +78,12 @@ class SavedDesignsScreen extends ConsumerWidget {
 
   Widget _buildEmpty(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 16, 24, MediaQuery.paddingOf(context).bottom + 24),
       child: Column(
         children: [
-          const SizedBox(height: 48),
+          const PageHeading(title: 'Saved Designs'),
+          const SizedBox(height: 24),
           // Icon
           Container(
             width: 88,
@@ -120,6 +124,10 @@ class SavedDesignsScreen extends ConsumerWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,
+                // Tight 52px wrapper — keep the label's line box
+                // (e.g. the 'g' in "Design") inside the button.
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -140,10 +148,12 @@ class SavedDesignsScreen extends ConsumerWidget {
   Widget _buildContent(
       BuildContext context, WidgetRef ref, List<RoomDesign> designs) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const PageHeading(title: 'Saved Designs'),
           const SizedBox(height: 16),
           SectionHeader(
             title: 'Saved Designs (${designs.length})',
@@ -255,17 +265,11 @@ class SavedDesignsScreen extends ConsumerWidget {
                         title: const Text('Delete Design'),
                         content: Text('Delete "${design.name}"?'),
                         actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.error,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('Delete'),
+                          ConfirmDialogActions(
+                            confirmLabel: 'Delete',
+                            destructive: true,
+                            onCancel: () => Navigator.pop(ctx, false),
+                            onConfirm: () => Navigator.pop(ctx, true),
                           ),
                         ],
                       ),

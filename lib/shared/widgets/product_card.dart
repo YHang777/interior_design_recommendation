@@ -5,6 +5,7 @@ import '../../core/utils/formatters.dart';
 import '../../models/product.dart';
 import 'product_image.dart';
 import 'rating_stars.dart';
+import 'verified_badge.dart';
 
 /// Reusable product card used in marketplace grid and related-product rails.
 /// All colors from AppColors — no raw Color() values.
@@ -247,6 +248,19 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
+
+                      // Seller + verified pill — own row (never inside the
+                      // ellipsised name row); renders nothing at all for
+                      // unverified suppliers.
+                      VerifiedSellerLine(
+                        supplier: product.supplier,
+                        nameStyle: GoogleFonts.poppins(
+                          fontSize: compact ? 9 : 10,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textHint,
+                          height: 1.2,
+                        ),
+                      ),
 
                       // Rating (or "New" for unreviewed items)
                       if (!compact) ...[

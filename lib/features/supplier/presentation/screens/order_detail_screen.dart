@@ -9,6 +9,9 @@ import '../../../../models/order.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
+import '../../../../shared/widgets/float_button.dart';
+import '../../../../shared/widgets/page_heading.dart';
+import '../../../../shared/widgets/price_summary.dart';
 import '../../../../shared/widgets/product_image.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -86,12 +89,17 @@ class _SupplierOrderDetailScreenState
   }
 
   Future<void> _cancel(Order order) async {
+    // One order can span several sellers: the repository cancels the WHOLE
+    // document (restocking every item), so say that out loud before the
+    // seller commits to a decision that hits their peers too.
+    final sharedOrder = order.resolvedSupplierIds.length > 1;
     final confirmed = await showConfirmDialog(
       context,
       title: 'Cancel this order?',
-      message:
-          'The buyer will be notified and product stock for every item in '
-          'the order is restored automatically. This cannot be undone.',
+      message: 'The buyer will be notified and product stock for every item in '
+          'the order is restored automatically. This cannot be undone.'
+          '${sharedOrder ? '\n\nThis order also contains items from other '
+              'sellers — cancelling ends the ENTIRE order for everyone.' : ''}',
       confirmLabel: 'Cancel order',
       destructive: true,
     );
@@ -151,30 +159,38 @@ class _SupplierOrderDetailScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text(
-          order == null ? 'Order detail' : 'Order ${order.orderNumber}',
-        ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : order == null
+                    ? ordersAsync.hasError
+                        ? EmptyState(
+                            icon: Icons.cloud_off_outlined,
+                            title: 'Could not load this order',
+                            subtitle: 'Check your connection and try again.',
+                            actionLabel: 'Go back',
+                            onAction: () =>
+                                Navigator.of(context).maybePop(),
+                          )
+                        : EmptyState(
+                            icon: Icons.receipt_long_outlined,
+                            title: 'Order not found',
+                            subtitle: 'It may have been removed.',
+                            actionLabel: 'Go back',
+                            onAction: () =>
+                                Navigator.of(context).maybePop(),
+                          )
+                    : _body(order),
+          ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: const FloatingBackButton(),
+          ),
+        ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : order == null
-              ? ordersAsync.hasError
-                  ? EmptyState(
-                      icon: Icons.cloud_off_outlined,
-                      title: 'Could not load this order',
-                      subtitle: 'Check your connection and try again.',
-                      actionLabel: 'Go back',
-                      onAction: () => Navigator.of(context).maybePop(),
-                    )
-                  : EmptyState(
-                      icon: Icons.receipt_long_outlined,
-                      title: 'Order not found',
-                      subtitle: 'It may have been removed.',
-                      actionLabel: 'Go back',
-                      onAction: () => Navigator.of(context).maybePop(),
-                    )
-              : _body(order),
       bottomNavigationBar: order == null || order.status.isTerminal || _working
           ? null
           : _actionBar(order),
@@ -186,10 +202,16 @@ class _SupplierOrderDetailScreenState
     final myItems = orderItemsForSupplier(order, uid);
     final others = order.items.where((i) => i.supplierId != uid).toList();
     final myTotal = mySubtotal(order, uid);
+    // Named distinctly from the `myShipping` helper — a local of the same
+    // name would shadow it.
+    final shippingShare = myShipping(order, uid);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: EdgeInsets.fromLTRB(
+          16, 60, 16, MediaQuery.paddingOf(context).bottom + 32),
       children: [
+        PageHeading(title: 'Order ${order.orderNumber}'),
+        const SizedBox(height: 16),
         _sectionCard(
           'Order status',
           child: _StatusTimeline(order: order),
@@ -238,29 +260,26 @@ class _SupplierOrderDetailScreenState
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    const Spacer(),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'Your items total',
-                          style: GoogleFonts.poppins(
-                            fontSize: 10.5,
-                            color: AppColors.textHint,
-                          ),
-                        ),
-                        Text(
-                          Formatters.myr(myTotal),
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.accent,
-                          ),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 8),
+              // Seller-scoped breakdown: items + THIS seller's delivery share
+              // (never the whole order's fee on a shared order).
+              SummaryLine('Your items', Formatters.myr(myTotal)),
+              SummaryLine(
+                'Shipping (your charge)',
+                Formatters.myr(shippingShare),
+                valueColor: shippingShare > 0
+                    ? AppColors.textPrimary
+                    : AppColors.textHint,
+              ),
+              Divider(height: 1, thickness: 1, color: AppColors.divider),
+              SummaryLine(
+                'Your earnings',
+                Formatters.myr(myTotal + shippingShare),
+                bold: true,
+                valueColor: AppColors.accent,
               ),
             ],
           ),
@@ -418,20 +437,23 @@ class _SupplierOrderDetailScreenState
   Widget _actionBar(Order order) {
     final next = order.status.next;
     final actions = <Widget>[];
-    if (order.status == OrderStatus.pending) {
+    // Cancellation is offered until the order SHIPS (pending/confirmed) —
+    // the repository rejects it after that (and for terminal states). On a
+    // shared multi-seller order it cancels the entire document; `_cancel`
+    // spells that out in its confirmation dialog.
+    if (order.status == OrderStatus.pending ||
+        order.status == OrderStatus.confirmed) {
       actions.add(_actionButton(
         label: 'Cancel order',
         filled: false,
         onTap: _working ? null : () => _cancel(order),
       ));
+    }
+    if (next != null) {
       actions.add(_actionButton(
-        label: 'Confirm order',
-        filled: true,
-        onTap: _working ? null : () => _advance(order, OrderStatus.confirmed),
-      ));
-    } else if (next != null) {
-      actions.add(_actionButton(
-        label: 'Mark as ${next.label.toLowerCase()}',
+        label: order.status == OrderStatus.pending
+            ? 'Confirm order'
+            : 'Mark as ${next.label.toLowerCase()}',
         filled: true,
         onTap: _working ? null : () => _advance(order, next),
       ));
@@ -492,6 +514,9 @@ class _SupplierOrderDetailScreenState
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.transparent,
                   disabledForegroundColor: AppColors.textHint,
+                  // Tight 52px wrapper — keep the label's line box inside.
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -513,6 +538,8 @@ class _SupplierOrderDetailScreenState
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
                 side: BorderSide(color: AppColors.error.withValues(alpha: .5)),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -555,8 +582,10 @@ class _StatusTimeline extends StatelessWidget {
       (OrderStatus.shipped, 'Shipped', 'On its way to the buyer'),
       (OrderStatus.delivered, 'Delivered', 'Order complete'),
     ];
-    // Only `createdAt` is stored per order (no per-status timestamps), so the
-    // timeline shows the placed date under the first node and no others.
+    // Per-step dates come from `statusHistory` (the repository writes one
+    // entry per transition); the pending step falls back to `createdAt` for
+    // orders stored before history existed. Steps not yet reached show no
+    // date at all — never a fabricated one.
     return Column(
       children: [
         for (var i = 0; i < steps.length; i++)
@@ -566,12 +595,23 @@ class _StatusTimeline extends StatelessWidget {
             status: steps[i].$1,
             isCurrent: i == currentIndex,
             isDone: i < currentIndex,
-            caption: i == 0
-                ? 'Placed ${Formatters.shortDateTime(order.createdAt)}'
-                : null,
+            caption: _stepCaption(i, steps[i].$1, currentIndex),
           ),
       ],
     );
+  }
+
+  /// Date under a reached step: 'Placed …' for the first node, 'Reached …'
+  /// for later ones, null while the step is ahead of the current status or
+  /// when no timestamp was ever recorded for it.
+  String? _stepCaption(int index, OrderStatus status, int currentIndex) {
+    if (index > currentIndex) return null;
+    final when = index == 0
+        ? (order.statusHistory[status.name] ?? order.createdAt)
+        : order.statusHistory[status.name];
+    if (when == null) return null;
+    final verb = index == 0 ? 'Placed' : 'Reached';
+    return '$verb ${Formatters.shortDateTime(when)}';
   }
 
   Widget _cancelled() {
@@ -601,7 +641,9 @@ class _StatusTimeline extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Placed ${Formatters.shortDateTime(order.createdAt)}',
+                  order.statusHistory[OrderStatus.cancelled.name] != null
+                      ? 'Cancelled ${Formatters.shortDateTime(order.statusHistory[OrderStatus.cancelled.name]!)}'
+                      : 'Placed ${Formatters.shortDateTime(order.createdAt)}',
                   style: GoogleFonts.poppins(
                     fontSize: 11.5,
                     color: AppColors.textSecondary,

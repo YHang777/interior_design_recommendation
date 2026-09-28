@@ -7,13 +7,17 @@ import '../../../../../core/utils/formatters.dart';
 import '../../../../../core/utils/pricing.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/order.dart';
+import '../../../../../models/product.dart';
 import '../../../../../models/review.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/float_button.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/price_summary.dart';
 import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/status_badge.dart';
+import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
 /// Buyer-facing single-order view: live status timeline (per-step dates),
@@ -125,41 +129,44 @@ class _BuyerOrderDetailScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        leading: canPop
-            ? null
-            : IconButton(
-                tooltip: 'Back to home',
-                icon: const Icon(Icons.home_outlined),
-                onPressed: () =>
-                    context.goNamed(RouteNames.homeownerDashboard),
-              ),
-        title: Text(
-          order == null ? 'Order detail' : 'Order ${order.orderNumber}',
-          overflow: TextOverflow.ellipsis,
-        ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: orderAsync.isLoading && order == null
+                ? const _OrderSkeleton()
+                : orderAsync.hasError
+                    ? EmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Could not load this order',
+                        subtitle: 'Check your connection and try again.',
+                        actionLabel: 'Retry',
+                        onAction: () => ref.invalidate(
+                            orderDetailProvider(widget.orderId)),
+                      )
+                    : order == null
+                        ? EmptyState(
+                            icon: Icons.receipt_long_outlined,
+                            title: 'Order not found',
+                            subtitle:
+                                'It may have been removed from your account.',
+                            actionLabel: 'Back to orders',
+                            onAction: () => context
+                                .goNamed(RouteNames.homeownerOrderHistory),
+                          )
+                        : _OrderBody(order: order),
+          ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: FloatingBackButton(
+              // Deep-linked with no pop history → home dashboard fallback.
+              onTap: canPop
+                  ? null
+                  : () => context.goNamed(RouteNames.homeownerDashboard),
+            ),
+          ),
+        ],
       ),
-      body: orderAsync.isLoading && order == null
-          ? const _OrderSkeleton()
-          : orderAsync.hasError
-              ? EmptyState(
-                  icon: Icons.cloud_off_outlined,
-                  title: 'Could not load this order',
-                  subtitle: 'Check your connection and try again.',
-                  actionLabel: 'Retry',
-                  onAction: () => ref.invalidate(
-                      orderDetailProvider(widget.orderId)),
-                )
-              : order == null
-                  ? EmptyState(
-                      icon: Icons.receipt_long_outlined,
-                      title: 'Order not found',
-                      subtitle: 'It may have been removed from your account.',
-                      actionLabel: 'Back to orders',
-                      onAction: () =>
-                          context.goNamed(RouteNames.homeownerOrderHistory),
-                    )
-                  : _OrderBody(order: order),
       bottomNavigationBar: order == null ? null : _actionBar(order),
     );
   }
@@ -181,6 +188,9 @@ class _BuyerOrderDetailScreenState
               backgroundColor: Colors.transparent,
               shadowColor: Colors.transparent,
               foregroundColor: Colors.white,
+              // Tight 52px wrapper: shrink vertical padding so the label's
+              // line box (and descenders) always fits the 52px button.
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -202,6 +212,7 @@ class _BuyerOrderDetailScreenState
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.error,
               side: BorderSide(color: AppColors.error.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -259,9 +270,23 @@ class _OrderBody extends ConsumerWidget {
       total: order.total,
     );
 
+    // Line items snapshot only `supplierId`; the buyer-facing verified badge
+    // needs the live denormalised `supplier`, which admin approvals keep in
+    // sync on the product doc. Products that were deleted (or re-listed
+    // under another seller) resolve to nothing, so no badge is shown.
+    final liveProducts = {
+      for (final p
+          in ref.watch(marketplaceProductsProvider).valueOrNull ??
+              const <Product>[])
+        p.id: p,
+    };
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      // Top clearance for the pinned floating back button.
+      padding: const EdgeInsets.fromLTRB(16, 60, 16, 24),
       children: [
+        PageHeading(title: 'Order ${order.orderNumber}'),
+        const SizedBox(height: 16),
         _StatusCard(order: order),
         const SizedBox(height: 14),
         _sectionCard(
@@ -271,7 +296,10 @@ class _OrderBody extends ConsumerWidget {
             children: [
               for (var i = 0; i < order.items.length; i++) ...[
                 if (i > 0) const Divider(height: 14, thickness: 0.6),
-                _ItemRow(item: order.items[i]),
+                _ItemRow(
+                  item: order.items[i],
+                  liveProduct: _liveProductFor(order.items[i], liveProducts),
+                ),
               ],
             ],
           ),
@@ -378,6 +406,15 @@ class _OrderBody extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Live catalogue product behind [item], or null when the listing is gone.
+/// The supplierId must still match the order snapshot so a re-listed or
+/// re-owned product can never lend its verified badge to an old order line.
+Product? _liveProductFor(OrderItem item, Map<String, Product> liveProducts) {
+  final product = liveProducts[item.productId];
+  if (product == null) return null;
+  return product.resolvedSupplierId == item.supplierId ? product : null;
 }
 
 /// Opens the write-review bottom sheet for one line item, then refreshes the
@@ -681,12 +718,17 @@ class _StatusTimeline extends StatelessWidget {
 // ── Line item row ───────────────────────────────────────────────────────────
 
 class _ItemRow extends StatelessWidget {
-  const _ItemRow({required this.item});
+  const _ItemRow({required this.item, this.liveProduct});
 
   final OrderItem item;
 
+  /// Live catalogue product behind this line — supplier attribution only.
+  /// Null when the listing is gone; then no verified badge is shown.
+  final Product? liveProduct;
+
   @override
   Widget build(BuildContext context) {
+    final seller = liveProduct?.supplier;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -719,6 +761,17 @@ class _ItemRow extends StatelessWidget {
                     height: 1.3,
                   ),
                 ),
+                // Seller + verified pill; renders nothing when unknown or
+                // not admin-verified.
+                if (seller != null)
+                  VerifiedSellerLine(
+                    supplier: seller,
+                    nameStyle: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textHint,
+                      height: 1.3,
+                    ),
+                  ),
                 const SizedBox(height: 2),
                 Text(
                   '${item.quantity} × ${Formatters.myr(item.unitPrice)}',
@@ -1092,7 +1145,8 @@ class _OrderSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      // Top clearance for the pinned floating back button.
+      padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
       physics: const NeverScrollableScrollPhysics(),
       children: [
         for (var i = 0; i < 4; i++) ...[

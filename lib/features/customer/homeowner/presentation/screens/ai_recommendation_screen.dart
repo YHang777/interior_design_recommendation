@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_colors.dart';
 import '../../../../../config/app_config.dart';
 import '../../../../../services/gemini_service.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 
 class AiRecommendationScreen extends ConsumerStatefulWidget {
   const AiRecommendationScreen({super.key});
@@ -125,29 +126,33 @@ class _AiRecommendationScreenState
   @override
   Widget build(BuildContext context) {
     return GradientScaffold(
-      appBar: AppBar(
-        title: Text(
-            _selectedStyle != null
-                ? '$_selectedStyle Design'
-                : 'AI Recommendations',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        actions: [
-          if (_selectedStyle != null && _selectedRoom != null)
-            TextButton.icon(
-              onPressed: () => setState(() {
-                _selectedStyle = null;
-                _selectedRoom = null;
-                _msgs.clear();
-              }),
-              icon: const Icon(Icons.refresh, color: Colors.white, size: 18),
-              label: Text('Change',
-                  style: GoogleFonts.poppins(
-                      color: Colors.white, fontSize: 12)),
-            ),
-        ],
-      ),
       child: Column(
         children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: PageHeading(
+              title: _selectedStyle != null
+                  ? '$_selectedStyle Design'
+                  : 'AI Recommendations',
+              actions: [
+                if (_selectedStyle != null && _selectedRoom != null)
+                  TextButton.icon(
+                    onPressed: () => setState(() {
+                      _selectedStyle = null;
+                      _selectedRoom = null;
+                      _msgs.clear();
+                    }),
+                    icon: const Icon(Icons.refresh,
+                        color: AppColors.accent, size: 18),
+                    label: Text('Change',
+                        style: GoogleFonts.poppins(
+                            color: AppColors.accent, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+
           // Inline selection or chat
           Expanded(
             child: _msgs.isEmpty
@@ -335,7 +340,8 @@ class _AiRecommendationScreenState
           // Input bar (only when chat is active)
           if (_readyToChat)
             Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              padding: EdgeInsets.fromLTRB(
+                  12, 8, 12, MediaQuery.paddingOf(context).bottom + 8),
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 boxShadow: [

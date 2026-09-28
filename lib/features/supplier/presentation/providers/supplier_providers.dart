@@ -77,6 +77,12 @@ int myLineItemCount(Order order, String supplierId) =>
 int mySubtotal(Order order, String supplierId) => orderItemsForSupplier(order, supplierId)
     .fold(0, (sum, i) => sum + i.lineTotal);
 
+/// [supplierId]'s delivery-charge share on this order — derived from the
+/// product-level shipping settings recorded at checkout
+/// (`Order.shippingShareFor`; 0 for orders/sellers that charge none).
+int myShipping(Order order, String supplierId) =>
+    order.shippingShareFor(supplierId);
+
 /// Whether [order] contains anything fulfilled by [supplierId].
 bool orderInvolvesSupplier(Order order, String supplierId) =>
     order.items.any((i) => i.supplierId == supplierId) ||
@@ -84,7 +90,9 @@ bool orderInvolvesSupplier(Order order, String supplierId) =>
 
 // ─── Revenue semantics ────────────────────────────────────────────────────────
 //
-// Revenue helpers count orders whose status is NOT cancelled (pending,
+// Revenue = the supplier's item sales + their own shipping share (what the
+// buyer actually paid them for fulfilment — never the whole order's fee on
+// a shared order). Orders whose status is NOT cancelled count (pending,
 // confirmed, shipped and delivered are all "sold"; a cancelled order is
 // refunded and restocks, so it never contributes revenue). This single rule
 // keeps the dashboard, analytics and top-product figures consistent.
@@ -93,14 +101,16 @@ bool orderInvolvesSupplier(Order order, String supplierId) =>
 Iterable<Order> revenueOrders(Iterable<Order> orders, String supplierId) =>
     orders.where((o) => orderInvolvesSupplier(o, supplierId) && o.status != OrderStatus.cancelled);
 
-/// All-time revenue for [supplierId] (their items only).
+/// All-time revenue for [supplierId] (their items + their shipping share).
 int totalRevenue(Iterable<Order> orders, String supplierId) =>
-    revenueOrders(orders, supplierId).fold(0, (sum, o) => sum + mySubtotal(o, supplierId));
+    revenueOrders(orders, supplierId)
+        .fold(0, (sum, o) => sum + mySubtotal(o, supplierId) + myShipping(o, supplierId));
 
 /// Revenue generated in the calendar month starting at [month].
 int revenueInMonth(Iterable<Order> orders, String supplierId, DateTime month) {
   return revenueOrders(orders, supplierId)
       .where((o) =>
           o.createdAt.year == month.year && o.createdAt.month == month.month)
-      .fold(0, (sum, o) => sum + mySubtotal(o, supplierId));
+      .fold(0,
+          (sum, o) => sum + mySubtotal(o, supplierId) + myShipping(o, supplierId));
 }

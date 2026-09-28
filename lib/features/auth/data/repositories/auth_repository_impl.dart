@@ -21,6 +21,10 @@ class AuthRepositoryImpl implements IAuthRepository {
         _firestoreDatasource = firestoreDatasource,
         _verificationDatasource = verificationDatasource;
 
+  /// In-flight profile fetch, keyed by uid — see [_buildAppUser].
+  String? _profileFetchUid;
+  Future<AppUser>? _profileFetch;
+
   @override
   Stream<AppUser?> authStateChanges() {
     return _authDatasource.authStateChanges().asyncMap((fbUser) async {
@@ -83,11 +87,16 @@ class AuthRepositoryImpl implements IAuthRepository {
 
       final isSupplier = role == UserRole.supplier;
 
-      // Suppliers are trusted on registration so their listings are visible
-      // to buyers immediately (buyer feeds filter on `verificationStatus`).
-      // TODO(future): replace with an admin approval flow that flips
-      // `verificationStatus` from 'pending' once moderation exists.
-      const verificationStatus = 'verified';
+      // New accounts start UNVERIFIED. A supplier's "Verified" badge is an
+      // admin decision — it is granted only after they upload their IC and
+      // supporting documents and an admin approves them. Writing 'verified'
+      // here would make the badge meaningless.
+      //
+      // This is also a hard requirement of `firestore.rules`: the `users`
+      // rule refuses any client write of `verificationStatus: 'verified'`,
+      // so stamping it at signup would deny every registration outright.
+      // Only the admin backend (Admin SDK, bypasses rules) may set it.
+      const verificationStatus = 'none';
 
       // Create Firestore document.
       await _firestoreDatasource.createUser(
@@ -165,7 +174,9 @@ class AuthRepositoryImpl implements IAuthRepository {
       'businessPhone': businessPhone ?? '',
       'businessAddress': businessAddress ?? '',
     });
-    return _buildAppUser(fbUser);
+    // Deliberately bypasses the [_buildAppUser] memo: this read must observe
+    // the write above, never a profile fetch that was already in flight.
+    return _fetchAppUser(fbUser);
   }
 
   @override
@@ -197,8 +208,45 @@ class AuthRepositoryImpl implements IAuthRepository {
     return _authDatasource.isEmailVerified;
   }
 
-  /// Fetches Firestore user document and builds AppUser.
-  Future<AppUser> _buildAppUser(fb.User fbUser) async {
+  /// Builds the [AppUser] for [fbUser], de-duplicating concurrent calls.
+  ///
+  /// `login()` and the `authStateChanges()` stream both resolve a profile for
+  /// the same uid within the same event-loop turn: sign-in makes Firebase Auth
+  /// emit on its stream while `login()` carries on to its own lookup. Each
+  /// used to issue a separate `users/{uid}` read, so one sign-in paid for two
+  /// concurrent network round trips — and the stream's copy was then discarded
+  /// by the notifier's suspension guard, making it pure waste on the exact
+  /// critical path the splash screen waits on.
+  ///
+  /// Concurrent callers for the same uid now share one read. The memo lives
+  /// only until that shared future settles, so a later call — or a different
+  /// uid — always starts fresh and no stale profile can be observed.
+  Future<AppUser> _buildAppUser(fb.User fbUser) {
+    final inFlight = _profileFetch;
+    if (inFlight != null && _profileFetchUid == fbUser.uid) {
+      return inFlight;
+    }
+    final fetch = _fetchAppUser(fbUser);
+    _profileFetchUid = fbUser.uid;
+    _profileFetch = fetch;
+    // Clear on both outcomes. This `onError` consumes the error for the
+    // derived future only — callers still receive it from `fetch` itself.
+    unawaited(fetch.then(
+      (_) => _clearProfileFetch(fetch),
+      onError: (_) => _clearProfileFetch(fetch),
+    ));
+    return fetch;
+  }
+
+  void _clearProfileFetch(Future<AppUser> fetch) {
+    if (identical(_profileFetch, fetch)) {
+      _profileFetch = null;
+      _profileFetchUid = null;
+    }
+  }
+
+  /// Reads `users/{uid}` and maps it to an [AppUser]. Always hits Firestore.
+  Future<AppUser> _fetchAppUser(fb.User fbUser) async {
     final doc = await _firestoreDatasource.getUser(fbUser.uid);
 
     if (!doc.exists) {

@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -567,17 +568,19 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
     // Use a plain Column instead of a nested Scaffold to avoid layout
     // conflicts with the outer HomeownerShell Scaffold.
-    return ColoredBox(
-      color: bgColor,
-      child: Column(
-        children: [
-          // ── Custom app bar ──
-          SafeArea(
-            bottom: false,
-            child: SizedBox(
-              height: kToolbarHeight,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // Dark camera stages keep white status icons; the light plan stage
+      // matches the app-wide dark icons (main.dart flips them globally).
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      child: ColoredBox(
+        color: bgColor,
+        child: Column(
+          children: [
+            // ── Page controls (no AppBar band) ──
+            SafeArea(
+              bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.fromLTRB(12, 12, 4, 4),
                 child: Row(
                   children: [
                     const SizedBox(width: 8),
@@ -590,11 +593,21 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               ? 'Edit: ${widget.existingDesign!.name}'
                               : 'Room Planner',
                         },
-                        style: GoogleFonts.poppins(
-                          color: fgColor,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 20,
-                        ),
+                        // Light plan stage uses the in-body page-heading look;
+                        // dark camera stages keep the compact white title.
+                        style: isDark
+                            ? GoogleFonts.poppins(
+                                color: fgColor,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 20,
+                              )
+                            : GoogleFonts.poppins(
+                                color: fgColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 24,
+                                letterSpacing: -0.3,
+                                height: 1.2,
+                              ),
                       ),
                     ),
                     if (_stage == _Stage.plan) ...[
@@ -631,7 +644,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                 ),
               ),
             ),
-          ),
           // ── Body ──
           Expanded(
             child: switch (_stage) {
@@ -642,6 +654,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             },
           ),
         ],
+        ),
       ),
     );
   }
@@ -906,6 +919,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   // ─── Floor plan editor ───
   Widget _planEditor() {
+    // The shell's floating pill overlays tab content (extendBody: true), so
+    // the plan editor's action rows need to clear it.
+    final bottomClearance = MediaQuery.paddingOf(context).bottom + 8;
     return Column(
       children: [
         // Detected items — tappable chips that auto-add to plan
@@ -986,6 +1002,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(Icons.crop_square, size: 16, color: AppColors.accent),
                     const SizedBox(width: 6),
@@ -995,9 +1012,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary)),
                     const SizedBox(width: 6),
-                    Text('— then add furniture from the catalog below',
-                        style: GoogleFonts.poppins(
-                            fontSize: 11, color: AppColors.textHint)),
+                    // Flexible: this hint is the longest of the three and was
+                    // an unbounded Row child, so it pushed past the container
+                    // edge and produced the RenderFlex overflow the user saw.
+                    // Wrapping keeps the full sentence instead of clipping it.
+                    Expanded(
+                      child: Text('— then add furniture from the catalog below',
+                          style: GoogleFonts.poppins(
+                              fontSize: 11, color: AppColors.textHint)),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1627,6 +1650,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ],
           ),
         ),
+        // Clearance so the floating pill never covers the action row.
+        SizedBox(height: bottomClearance),
       ],
     );
   }

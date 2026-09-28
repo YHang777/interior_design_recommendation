@@ -326,7 +326,8 @@ class MarketplaceRepository {
   ///
   /// Runs inside a transaction so concurrent status changes (e.g. two
   /// suppliers acting on the same order) cannot both win, and validates the
-  /// transition against the CURRENT stored status:
+  /// transition against the CURRENT stored status via the shared pure guard
+  /// `OrderStatus.ensureAdvance`:
   /// - terminal orders (delivered/cancelled) are immutable;
   /// - the requested status must be the exact next step of the stored
   ///   status — illegal jumps are rejected with a readable StateError.
@@ -339,15 +340,7 @@ class MarketplaceRepository {
       }
       final now = DateTime.now();
       final current = Order.fromJson(snapshot.data()!);
-      if (current.status.isTerminal) {
-        throw StateError(
-            'Order is already ${current.status.label.toLowerCase()}');
-      }
-      final expected = current.status.next;
-      if (expected == null || expected != status) {
-        throw StateError('Cannot move from ${current.status.label} '
-            'to ${status.label}');
-      }
+      OrderStatus.ensureAdvance(current.status, status);
       final updated = current.copyWith(
         status: status,
         // Record when this step was reached so timelines can date each stage.
@@ -359,6 +352,11 @@ class MarketplaceRepository {
   }
 
   /// Cancels an order and restores stock for every item, atomically.
+  ///
+  /// Idempotent for an already-cancelled order; any other terminal state
+  /// (delivered) is rejected by the shared `OrderStatus.ensureCancellable`
+  /// guard. Allowed from pending/confirmed/shipped — a multi-supplier order
+  /// is cancelled in FULL for every seller (surfaced in the UI dialog).
   Future<Order> cancelOrder(String orderId) async {
     return _db.runTransaction((txn) async {
       final orderRef = _orders.doc(orderId);
@@ -368,10 +366,7 @@ class MarketplaceRepository {
       }
       final order = Order.fromJson(orderSnap.data()!);
       if (order.status == OrderStatus.cancelled) return order;
-      if (order.status.isTerminal) {
-        throw StateError(
-            'A ${order.status.label.toLowerCase()} order cannot be cancelled.');
-      }
+      OrderStatus.ensureCancellable(order.status);
 
       final productRefs = <String, DocumentReference<Map<String, dynamic>>>{};
       for (final item in order.items) {
@@ -552,31 +547,6 @@ class MarketplaceRepository {
       batch.set(_products.doc(id), product.toJson());
     }
     await batch.commit();
-  }
-
-  /// Backfills products whose embedded `supplier.verificationStatus` is the
-  /// legacy `'pending'` value (written before supplier verification existed).
-  /// Such listings would otherwise stay hidden behind the buyer
-  /// "Verified sellers only" filter, which defaults to ON. Promotes them to
-  /// `'verified'` in one batched write; returns the number of products
-  /// updated. Best-effort: requires a signed-in session (Firestore rules
-  /// gate writes), so failures are the caller's to log.
-  Future<int> migrateLegacyProducts() async {
-    final snap = await _products
-        .where('supplier.verificationStatus', isEqualTo: 'pending')
-        .get();
-    if (snap.docs.isEmpty) return 0;
-
-    final batch = _db.batch();
-    for (final doc in snap.docs) {
-      final data = Map<String, dynamic>.from(doc.data());
-      final supplier = Map<String, dynamic>.from(
-          data['supplier'] as Map<String, dynamic>? ?? const {});
-      supplier['verificationStatus'] = 'verified';
-      batch.update(doc.reference, {'supplier': supplier});
-    }
-    await batch.commit();
-    return snap.docs.length;
   }
 
   static String _dateStamp(DateTime dt) {

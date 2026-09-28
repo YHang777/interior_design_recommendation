@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/validators.dart';
+import '../../../../shared/widgets/float_button.dart';
+import '../../../../shared/widgets/page_heading.dart';
 import '../../data/models/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_providers.dart';
@@ -97,29 +99,23 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text('Create Account',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Get started',
-                  style: GoogleFonts.poppins(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 4),
-              Text('Fill in your details below',
-                  style: GoogleFonts.poppins(
-                      fontSize: 14, color: AppColors.textSecondary)),
-              const SizedBox(height: 20),
+      // Header-less: in-body PageHeading + pinned FloatingBackButton replace
+      // the old AppBar (same pattern as other pushed screens).
+      body: Stack(
+        children: [
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const PageHeading(
+                      title: 'Create Account',
+                      subtitle: 'Fill in your details below',
+                    ),
+                    const SizedBox(height: 20),
 
               // -- Role selector --
               SegmentedButton<UserRole>(
@@ -241,8 +237,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     prefixIcon: Icon(Icons.lock_outlined)),
               ),
               const SizedBox(height: 32),
-              SizedBox(
-                height: 52,
+              // Min-height only — a tight 52px clipped the label's descenders
+              // (see login_screen.dart); this grows with text scale instead.
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 52),
                 child: ElevatedButton(
                   onPressed: loading ? null : _register,
                   style: ElevatedButton.styleFrom(
@@ -289,6 +287,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ],
           ),
         ),
+      ),
+      ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: const FloatingBackButton(),
+          ),
+        ],
       ),
     );
   }

@@ -162,7 +162,11 @@ class Supplier {
   final String phone;
   final String address;
   final String email;
-  final String verificationStatus; // 'verified', 'pending', 'rejected'
+  /// Admin-granted verification: 'none' | 'pending' | 'verified' | 'rejected'.
+  /// Denormalised onto each product so the buyer's feed can badge a seller
+  /// without a second read. Defaults to 'none' — never claim a verification
+  /// that was not granted.
+  final String verificationStatus;
 
   const Supplier({
     required this.id,
@@ -170,7 +174,7 @@ class Supplier {
     required this.phone,
     required this.address,
     required this.email,
-    this.verificationStatus = 'verified',
+    this.verificationStatus = 'none',
   });
 
   bool get isVerified => verificationStatus == 'verified';
@@ -185,7 +189,7 @@ class Supplier {
         email: json['email'] ?? '',
         verificationStatus: json['verificationStatus']?.toString() ??
             json['isVerified']?.toString() ??
-            'verified',
+            'none',
       );
 
   Map<String, dynamic> toJson() => {
@@ -236,6 +240,30 @@ class Product {
   /// Auto-generated 3D state (nullable = never requested / legacy record).
   final Ar3dInfo? ar3d;
 
+  // ── Shipping (Task B: seller-configured delivery charges) ──
+  // Defaults are deliberately conservative: products written before these
+  // fields existed load as FREE shipping (no charge, no notice), matching
+  // how they behaved for buyers at the time they were listed.
+
+  /// Whether this product adds a delivery charge at checkout. When false,
+  /// [shippingFee] is ignored and the product ships free.
+  final bool shippingEnabled;
+
+  /// Seller-set delivery charge in whole ringgit. Charged once per order
+  /// for this product line regardless of quantity (see
+  /// [shippingBySupplierFor]).
+  final int shippingFee;
+
+  /// Whether the product page shows [longDistanceNotice] to buyers
+  /// ("deliveries over 30 km incur extra charges").
+  final bool shippingLongDistanceNotice;
+
+  /// Buyer-facing copy for [shippingLongDistanceNotice]. Kept as a constant
+  /// so the supplier form preview and the customer product page can never
+  /// drift apart.
+  static const String longDistanceNotice =
+      'Deliveries over 30 km incur extra charges.';
+
   const Product({
     required this.id,
     required this.name,
@@ -256,6 +284,9 @@ class Product {
     this.createdAt,
     this.dimensions,
     this.ar3d,
+    this.shippingEnabled = false,
+    this.shippingFee = 0,
+    this.shippingLongDistanceNotice = false,
   });
 
   // ─── Computed ──────────────────────────────────────────────────────────
@@ -282,6 +313,12 @@ class Product {
     return ((originalPrice! - price) / originalPrice! * 100).round();
   }
 
+  /// What this product actually adds to an order's shipping fee: the
+  /// seller-set [shippingFee] when the charge is switched on, else 0.
+  /// Single gate every consumer (checkout, order attribution, UI) uses so
+  /// "disabled" can never leak a stored fee.
+  int get shippingCharge => shippingEnabled ? shippingFee : 0;
+
   // ─── copyWith ──────────────────────────────────────────────────────────
 
   Product copyWith({
@@ -304,6 +341,9 @@ class Product {
     DateTime? createdAt,
     ProductDimensions? dimensions,
     Ar3dInfo? ar3d,
+    bool? shippingEnabled,
+    int? shippingFee,
+    bool? shippingLongDistanceNotice,
     bool clearOriginalPrice = false,
     bool clearDimensions = false,
     bool clearAr3d = false,
@@ -330,6 +370,10 @@ class Product {
       dimensions:
           clearDimensions ? null : (dimensions ?? this.dimensions),
       ar3d: clearAr3d ? null : (ar3d ?? this.ar3d),
+      shippingEnabled: shippingEnabled ?? this.shippingEnabled,
+      shippingFee: shippingFee ?? this.shippingFee,
+      shippingLongDistanceNotice:
+          shippingLongDistanceNotice ?? this.shippingLongDistanceNotice,
     );
   }
 
@@ -386,6 +430,10 @@ class Product {
       ar3d: json['ar3d'] is Map<String, dynamic>
           ? Ar3dInfo.fromJson(json['ar3d'] as Map<String, dynamic>)
           : null,
+      // Legacy docs predate these keys → free shipping, notice off.
+      shippingEnabled: json['shippingEnabled'] == true,
+      shippingFee: _parseShippingFee(json['shippingFee']),
+      shippingLongDistanceNotice: json['shippingLongDistanceNotice'] == true,
     );
   }
 
@@ -405,6 +453,10 @@ class Product {
         'rating': rating,
         'ratingCount': ratingCount,
         'isEcoFriendly': isEcoFriendly,
+        // Always written (even defaults) so every product doc is explicit.
+        'shippingEnabled': shippingEnabled,
+        'shippingFee': shippingFee,
+        'shippingLongDistanceNotice': shippingLongDistanceNotice,
         if (originalPrice != null) 'originalPrice': originalPrice,
         if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
         if (dimensions != null) 'dimensions': dimensions!.toJson(),
@@ -425,3 +477,52 @@ DateTime? _parseDate(dynamic value) {
   } catch (_) {}
   return DateTime.tryParse(value.toString());
 }
+
+/// Delivery fee in whole ringgit; non-numeric/negative values clamp to 0
+/// so a corrupt doc can never produce a negative charge at checkout.
+int _parseShippingFee(dynamic value) {
+  if (value is num) {
+    final fee = value.toInt();
+    return fee < 0 ? 0 : fee;
+  }
+  final parsed = int.tryParse(value?.toString() ?? '');
+  if (parsed == null || parsed < 0) return 0;
+  return parsed;
+}
+
+// ── Product-level shipping math (checkout + order attribution) ─────────────
+//
+// The multi-supplier shipping rule, kept in ONE place:
+//   1. Each distinct product line adds its `shippingCharge` to the order
+//      exactly ONCE — quantity never multiplies shipping (carts merge by
+//      productId, so there is one line per product).
+//   2. Per-supplier shipping = sum of that supplier's product charges.
+//   3. Order shipping = sum of the per-supplier charges.
+//   4. The store free-shipping threshold in `computePriceBreakdown` may
+//      zero the WHOLE order's fee (binary 0-or-full). When it does, every
+//      supplier's share is zeroed too — so shares always sum to
+//      `Order.shippingFee` (see `Order.shippingShareFor`).
+
+/// Groups the shipping charges of [products] by their resolved supplier:
+/// `{supplierUid: shareOfOrderShipping}`. Products with no charge are
+/// skipped (their supplier's share reads as 0); a product id appearing
+/// twice still bills once.
+Map<String, int> shippingBySupplierFor(Iterable<Product> products) {
+  final bySupplier = <String, int>{};
+  final seenProductIds = <String>{};
+  for (final product in products) {
+    final charge = product.shippingCharge;
+    if (charge <= 0) continue;
+    if (product.id.isNotEmpty && !seenProductIds.add(product.id)) continue;
+    final supplierId = product.resolvedSupplierId;
+    if (supplierId.isEmpty) continue;
+    bySupplier[supplierId] = (bySupplier[supplierId] ?? 0) + charge;
+  }
+  return bySupplier;
+}
+
+/// Order-level shipping fee derived from [products] — the sum of
+/// [shippingBySupplierFor] shares. Pass this to
+/// `computePriceBreakdown(shippingFee: …)` instead of any store constant.
+int totalShippingFor(Iterable<Product> products) =>
+    shippingBySupplierFor(products).values.fold(0, (sum, v) => sum + v);

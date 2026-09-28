@@ -2,12 +2,16 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import '../../../../models/product.dart';
-import 'furniture_model_library.dart';
 import 'glb_bounds.dart';
 
 /// A product's slot in the AR viewer catalog bar, backed by its TRUE-SIZE
-/// GLB (the product's own auto-generated 3D model, resolved to a local
-/// file by [ModelGlbResolver]).
+/// GLB (the product's own Tripo AI model, rescaled to the seller's declared
+/// dimensions and resolved to a local file by `ModelGlbResolver`).
+///
+/// There is exactly one model source: a Tripo generation. No procedural
+/// generation and no bundled-catalog fallback exists for products — if the
+/// GLB cannot be resolved, the slot reports the failure instead of
+/// substituting another model.
 ///
 /// Pure Dart (no Flutter / AR-plugin / Firebase imports) so the catalog
 /// model and its display helpers are unit-testable headlessly.
@@ -15,7 +19,7 @@ class ArProductEntry {
   ArProductEntry({
     required this.product,
     this.resolvedFile,
-    this.procedural = true,
+    this.productError,
   });
 
   /// Parsed-once scale cache: reading + parsing a multi-MB GLB on the UI
@@ -26,21 +30,21 @@ class ArProductEntry {
   /// The product whose real-world dimensions drive the 3D model.
   final Product product;
 
-  /// Absolute path of the product's GLB on disk. Null while the model is
-  /// still being prepared (or once resolution failed and the screen fell
-  /// back to a bundled catalog model — then this entry is discarded).
+  /// Absolute path of the product's Tripo GLB (already rescaled to the
+  /// seller's size and grounded at y = 0) on disk. Null while the model is
+  /// still being prepared or when resolution failed — see [productError].
   final File? resolvedFile;
 
-  /// Whether the RESOLVED file's bytes came from the deterministic built-in
-  /// generator (true) or a downloaded AI (Tripo) model (false). Decided by
-  /// the resolver from the cache key the bytes were stored under — never
-  /// from the product's current `ar3d` record, which may describe a ready
-  /// Tripo model whose download failed and fell back to procedural. Only
-  /// meaningful when [resolvedFile] is non-null.
-  final bool procedural;
+  /// Why the model could not be resolved — a specific, actionable reason
+  /// (missing seller dimensions, Tripo not configured, generation failed, …).
+  /// Null while resolution is still in flight or succeeded.
+  final String? productError;
 
   /// True once the true-size GLB exists and can be placed.
   bool get isResolved => resolvedFile != null;
+
+  /// True when resolution failed and [productError] explains why.
+  bool get hasError => productError != null;
 
   /// Catalog slot name — the product's own name.
   String get name => product.name;
@@ -50,16 +54,13 @@ class ArProductEntry {
   String get dimsLabel => product.dimensions?.label ?? '';
 
   /// True when all three real-world dimensions are known (> 0) — only then
-  /// can a model be generated / rescaled and placed at a true size.
+  /// is the rescale per-axis (true size); with just some of them the rescale
+  /// stays uniform, and with none the model is refused entirely.
   bool get hasTrueDimensions => product.dimensions?.isComplete ?? false;
 
-  /// Max(W, H, D) in meters.
-  ///
-  /// Our generated and rescaled GLBs are authored IN METERS with their max
-  /// extent exactly equal to this value, and the AR plugin normalizes a
-  /// node's MAX extent to `node.scale.x` meters (scale-to-unit-cube). The
-  /// model therefore renders at true size when the node scale equals
-  /// [maxDimM] (the internal normalization factor becomes 1.0).
+  /// Max(W, H, D) in meters of the SELLER's declared dimensions, or null
+  /// when they are incomplete. Informational (UI copy); never used to size a
+  /// model — sizing comes from the resolved GLB itself.
   double? get maxDimM {
     final d = product.dimensions;
     if (d == null || !d.isComplete) return null;
@@ -69,56 +70,50 @@ class ArProductEntry {
   /// Node scale (meters on the model's max axis) to pass when placing the
   /// resolved GLB.
   ///
-  /// The AUTHORITATIVE source is the resolved file itself: the scale equals
-  /// the parsed GLB's true max extent in meters, so the plugin renders the
-  /// node at exactly the geometry's real-world size whatever the product
-  /// record claims. Falls back to the product's max(W, H, D) when the file
-  /// is not resolvable yet, and to a nominal 1.0 when the product has no
-  /// dimensions at all (no better scale is knowable).
+  /// The only source is the resolved file itself: the scale equals the
+  /// parsed GLB's true max extent in meters (the bytes were already
+  /// rescaled to the seller's size), so the plugin renders the node at
+  /// exactly the geometry's real-world size.
+  ///
+  /// Throws [StateError] when there is no resolved file or it cannot be
+  /// parsed — placement must never fall back to a guessed scale.
   double get scaleToMeters {
     final cached = _cachedScaleToMeters;
     if (cached != null) return cached;
     final file = resolvedFile;
-    if (file != null) {
-      try {
-        final bounds = GlbBounds.fromGlbBytes(file.readAsBytesSync());
-        if (bounds.maxExtent.isFinite && bounds.maxExtent > 0) {
-          return _cachedScaleToMeters = bounds.maxExtent;
-        }
-      } catch (_) {
-        // Unreadable / corrupt cache file — fall through to the dims.
-      }
+    if (file == null) {
+      throw StateError(
+          'ArProductEntry.scaleToMeters: product "${product.id}" has no '
+          'resolved GLB — refusing to guess a placement scale.');
     }
-    return maxDimM ?? 1.0;
+    // A corrupt / truncated file must fail like a missing one (StateError,
+    // per the doc contract) rather than leak GlbParseException to callers —
+    // either way placement refuses instead of guessing a scale.
+    final GlbBounds bounds;
+    try {
+      bounds = GlbBounds.fromGlbBytes(file.readAsBytesSync());
+    } on GlbParseException catch (e) {
+      throw StateError(
+          'ArProductEntry.scaleToMeters: resolved GLB for "${product.id}" '
+          'is not a parseable GLB ($e).');
+    }
+    final extent = bounds.maxExtent;
+    if (!extent.isFinite || extent <= 0) {
+      throw StateError(
+          'ArProductEntry.scaleToMeters: resolved GLB for "${product.id}" '
+          'has degenerate bounds (${bounds.widthM} × ${bounds.heightM} × '
+          '${bounds.depthM} m).');
+    }
+    return _cachedScaleToMeters = extent;
   }
 
-  /// Badge text for the catalog slot: 'AI' when the model actually came from
-  /// Tripo, 'Auto' when it came from our deterministic procedural generator.
-  ///
-  /// For a RESOLVED entry this follows the provenance of the resolved bytes
-  /// ([procedural]); while resolution is pending it follows the product's
-  /// `ar3d.source` as intent.
-  String get badgeText {
-    final aiModel = resolvedFile != null
-        ? !procedural
-        : (product.ar3d?.source == 'tripo');
-    return aiModel ? 'AI' : 'Auto';
-  }
+  /// Badge text for the catalog slot. Tripo is the only model source, so
+  /// every resolved product model is an 'AI' model; the badge is kept as a
+  /// stable UI affordance.
+  String get badgeText => 'AI';
 
   @override
   String toString() => 'ArProductEntry(${product.id}, $dimsLabel, '
-      'resolved: $isResolved)';
-}
-
-/// Best bundled-catalog fallback for a product whose true-size 3D model
-/// could not be resolved ([Product] lacks dimensions and has no ready AI
-/// model). Mirrors the pre-Loop-3 behavior of mapping the product's
-/// category onto a bundled .glb.
-///
-/// Returns null only when the product has no category to look up — the
-/// caller then shows the plain catalog with an explanatory message instead.
-ArFurnitureItem? fallbackFor(Product product) {
-  final category = product.category.trim();
-  if (category.isEmpty) return null;
-  return ArFurnitureLibrary.forCategory(category);
+      'resolved: $isResolved'
+      '${productError == null ? '' : ', error: $productError'})';
 }

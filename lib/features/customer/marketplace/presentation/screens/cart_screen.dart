@@ -7,11 +7,15 @@ import '../../../../../core/utils/formatters.dart';
 import '../../../../../core/utils/pricing.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/app_config_data.dart';
+import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/float_button.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/quantity_stepper.dart';
+import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
 /// Shopping cart with quantity controls, swipe-to-delete (with UNDO),
@@ -63,105 +67,137 @@ class CartScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Shopping Cart'),
-        actions: [
-          if (cart.isNotEmpty)
-            TextButton(
-              onPressed: () async {
-                final confirmed = await showConfirmDialog(
-                  context,
-                  title: 'Clear your cart?',
-                  message:
-                      'All $itemCount item${itemCount == 1 ? '' : 's'} will '
-                      'be removed from your cart.',
-                  confirmLabel: 'Clear all',
-                  destructive: true,
-                );
-                if (!confirmed || !context.mounted) return;
-                ref.read(cartProvider.notifier).clear();
-                showAppSnackbar(context, 'Cart cleared',
-                    color: AppColors.error);
-              },
-              child: const Text('Clear all',
-                  style: TextStyle(
-                      color: AppColors.textOnDark,
-                      fontWeight: FontWeight.w500)),
-            ),
-        ],
-      ),
-      body: isHydrating
-          ? const _CartSkeleton()
-          : cart.isEmpty
-              ? EmptyState(
-                  icon: Icons.shopping_cart_outlined,
-                  title: 'Your cart is empty',
-                  subtitle: 'Browse the marketplace to find items you love',
-                  actionLabel: 'Browse the store',
-                  onAction: () =>
-                      context.goNamed(RouteNames.homeownerMarketplace),
-                )
-              : Column(
-                  children: [
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.all(16),
+      body: Stack(
+        children: [
+          SafeArea(
+            top: true,
+            bottom: false,
+            child: isHydrating
+                ? const _CartSkeleton()
+                : cart.isEmpty
+                    ? EmptyState(
+                        icon: Icons.shopping_cart_outlined,
+                        title: 'Your cart is empty',
+                        subtitle:
+                            'Browse the marketplace to find items you love',
+                        actionLabel: 'Browse the store',
+                        onAction: () =>
+                            context.goNamed(RouteNames.homeownerMarketplace),
+                      )
+                    : Column(
                         children: [
-                          // The free-shipping banner and the checkout summary
-                          // must agree: both go through the shared calculator
-                          // (free once the POST-discount chargeable amount
-                          // reaches the threshold). Until store config has
-                          // loaded, a neutral skeleton is shown instead of
-                          // invented defaults.
-                          if (config == null)
-                            const _FreeShippingSkeleton()
-                          else
-                            _FreeShippingCard(
-                              shippingFee: config.shippingFee,
-                              freeShippingThreshold:
-                                  config.freeShippingThreshold,
-                              taxRate: config.taxRate,
-                              discountPercent: tier?.discountPercent ?? 0,
-                              chargeableBase: subtotal,
-                            ),
-                          const SizedBox(height: 12),
-                          for (var i = 0; i < rows.length; i++) ...[
-                            if (i > 0) const SizedBox(height: 10),
-                            Dismissible(
-                              key: ValueKey(
-                                  'cart-${rows[i].item.product.id}'),
-                              direction: DismissDirection.endToStart,
-                              onDismissed: (_) => removeItem(rows[i]),
-                              background: Container(
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.only(right: 20),
-                                margin: const EdgeInsets.only(bottom: 10),
-                                decoration: BoxDecoration(
-                                  color: AppColors.error,
-                                  borderRadius: BorderRadius.circular(14),
+                          Expanded(
+                            child: ListView(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 60, 16, 16),
+                              children: [
+                                PageHeading(
+                                  title: 'Shopping Cart',
+                                  actions: [
+                                    if (cart.isNotEmpty)
+                                      TextButton(
+                                        onPressed: () async {
+                                          final confirmed =
+                                              await showConfirmDialog(
+                                            context,
+                                            title: 'Clear your cart?',
+                                            message:
+                                                'All $itemCount item${itemCount == 1 ? '' : 's'} will '
+                                                    'be removed from your cart.',
+                                            confirmLabel: 'Clear all',
+                                            destructive: true,
+                                          );
+                                          if (!confirmed ||
+                                              !context.mounted) {
+                                            return;
+                                          }
+                                          ref
+                                              .read(cartProvider.notifier)
+                                              .clear();
+                                          showAppSnackbar(context,
+                                              'Cart cleared',
+                                              color: AppColors.error);
+                                        },
+                                        child: const Text('Clear all',
+                                            style: TextStyle(
+                                                color: AppColors.accent,
+                                                fontWeight:
+                                                    FontWeight.w500)),
+                                      ),
+                                  ],
                                 ),
-                                child: const Icon(Icons.delete_outline,
-                                    color: AppColors.textOnDark, size: 26),
-                              ),
-                              child: _CartItemCard(
-                                row: rows[i],
-                                onRemove: () => removeItem(rows[i]),
-                              ),
+                                const SizedBox(height: 16),
+                                // The free-shipping banner and the checkout summary
+                                // must agree: both go through the shared calculator
+                                // (free once the POST-discount chargeable amount
+                                // reaches the threshold). The raw fee itself comes
+                                // from the products' shipping settings — the same
+                                // derivation checkout commits. Until store config
+                                // has loaded, a neutral skeleton is shown instead
+                                // of invented defaults.
+                                if (config == null)
+                                  const _FreeShippingSkeleton()
+                                else
+                                  _FreeShippingCard(
+                                    shippingFee:
+                                        totalShippingFor(rows.map((r) => r.live)),
+                                    freeShippingThreshold:
+                                        config.freeShippingThreshold,
+                                    taxRate: config.taxRate,
+                                    discountPercent:
+                                        tier?.discountPercent ?? 0,
+                                    chargeableBase: subtotal,
+                                  ),
+                                const SizedBox(height: 12),
+                                for (var i = 0; i < rows.length; i++) ...[
+                                  if (i > 0) const SizedBox(height: 10),
+                                  Dismissible(
+                                    key: ValueKey(
+                                        'cart-${rows[i].item.product.id}'),
+                                    direction: DismissDirection.endToStart,
+                                    onDismissed: (_) => removeItem(rows[i]),
+                                    background: Container(
+                                      alignment: Alignment.centerRight,
+                                      padding:
+                                          const EdgeInsets.only(right: 20),
+                                      margin:
+                                          const EdgeInsets.only(bottom: 10),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.error,
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                      ),
+                                      child: const Icon(Icons.delete_outline,
+                                          color: AppColors.textOnDark,
+                                          size: 26),
+                                    ),
+                                    child: _CartItemCard(
+                                      row: rows[i],
+                                      onRemove: () => removeItem(rows[i]),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                          ],
+                          ),
+                          _CheckoutBar(
+                            itemCount: itemCount,
+                            subtotal: subtotal,
+                            hasInvalidRows: hasInvalidRows,
+                            tier: tier,
+                            onCheckout: () => context
+                                .pushNamed(RouteNames.homeownerCheckout),
+                          ),
                         ],
                       ),
-                    ),
-                    _CheckoutBar(
-                      itemCount: itemCount,
-                      subtotal: subtotal,
-                      hasInvalidRows: hasInvalidRows,
-                      tier: tier,
-                      onCheckout: () =>
-                          context.pushNamed(RouteNames.homeownerCheckout),
-                    ),
-                  ],
-                ),
+          ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: const FloatingBackButton(),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -187,6 +223,35 @@ class _FreeShippingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Nothing to progress toward when the products themselves ship free —
+    // a static success row is honest where "unlocked at RM X" would be
+    // meaningless.
+    if (shippingFee <= 0) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.celebration_outlined, size: 18, color: AppColors.success),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Free shipping on this cart',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.success,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final bd = computePriceBreakdown(
       subtotal: chargeableBase,
       discountPercent: discountPercent,
@@ -395,6 +460,9 @@ class _CartItemCard extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
+                    // Seller attribution — only rendered for admin-verified
+                    // suppliers (nothing at all otherwise).
+                    VerifiedSellerLine(supplier: product.supplier),
                     Text(
                       '${Formatters.myr(product.price)} each',
                       style: const TextStyle(
@@ -606,6 +674,10 @@ class _CheckoutBar extends StatelessWidget {
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       foregroundColor: Colors.white,
+                      // Tight 52px wrapper — keep the label's line box
+                      // (descenders included) inside the button at any scale.
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10, horizontal: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(26),
                       ),
@@ -630,7 +702,8 @@ class _CartSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      // Top clearance for the pinned floating back button.
+      padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
       children: [
         for (var i = 0; i < 4; i++) ...[
           if (i > 0) const SizedBox(height: 12),

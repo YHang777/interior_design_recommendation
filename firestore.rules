@@ -11,8 +11,38 @@ service cloud.firestore {
     }
 
     // ── Users: only the owner can read/write their own profile doc ──
+    //
+    // Tightened for the verification feature: an owner may still manage
+    // their OWN profile, but they must never be able to self-grant
+    // `verificationStatus: 'verified'` — only the admin backend (Admin SDK,
+    // which bypasses rules) approves suppliers. Any other status value
+    // ('none' | 'pending' | 'rejected') stays writable by the owner, e.g.
+    // when the app submits a verification application.
     match /users/{uid} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) &&
+          (!('verificationStatus' in request.resource.data) ||
+           request.resource.data.verificationStatus != 'verified');
+      allow update: if isOwner(uid) &&
+          (!request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['verificationStatus']) ||
+           request.resource.data.verificationStatus != 'verified');
+      allow delete: if isOwner(uid);
+    }
+
+    // ── Verification applications (IC + supporting documents) ──
+    // Document id IS the supplier's uid. The supplier may create and read
+    // ONLY their own application; nobody may update or delete it through
+    // the client — the admin backend writes the review outcome (status,
+    // reviewedAt, reviewedBy, reviewNote) with the Admin SDK, which bypasses
+    // these rules. There is no public read: list/get as an admin console
+    // user goes through the authenticated API, not the Firestore SDK.
+    // The file bytes live in Storage `verification/{uid}/…` (admin-only read).
+    match /verification_applications/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) &&
+          request.resource.data.uid == uid;
+      allow update, delete: if false;
     }
 
     // ── Products: public catalogue, authenticated sellers write ──

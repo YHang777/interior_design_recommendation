@@ -20,6 +20,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _emailCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
   bool _obscure = true;
+  bool _submitting = false;
 
   late final AnimationController _entranceController;
   late final Animation<double> _fadeAnimation;
@@ -53,17 +54,49 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-    await ref.read(authStateProvider.notifier).login(
-          _emailCtrl.text.trim(),
-          _pwdCtrl.text,
-        );
+    if (_submitting) return;
+    final form = _formKey.currentState;
+    if (form == null || !form.validate()) {
+      // Inline field errors can sit below the fold on short screens —
+      // make a failed validation unmissable.
+      _showError('Please check the highlighted fields');
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      await ref.read(authStateProvider.notifier).login(
+            _emailCtrl.text.trim(),
+            _pwdCtrl.text,
+          );
+    } catch (e) {
+      // The notifier records the error too, but the auth-state stream can
+      // overwrite that state before `ref.listen` observes it (an unverified
+      // sign-in triggers signOut(), which emits `data(null)` again). Surface
+      // the failure here so the user is never left with a dead button.
+      if (!mounted) return;
+      _showError(e is AuthException
+          ? e.message
+          : 'Could not sign in. Please try again.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(authStateProvider);
-    final loading = state is AsyncLoading<AppUser?>;
+    final loading = state is AsyncLoading<AppUser?> || _submitting;
 
     ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
       next.whenOrNull(error: (e, _) {
@@ -173,7 +206,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 controller: _pwdCtrl,
                                 obscureText: _obscure,
                                 textInputAction: TextInputAction.done,
-                                validator: Validators.password,
+                                // Only require a non-empty password here.
+                                // The strength policy (length / uppercase /
+                                // digit) belongs to registration — enforcing
+                                // it at sign-in silently rejects accounts whose
+                                // password predates the policy and hides the
+                                // real auth error behind a validation return.
+                                validator: (v) => Validators.required(v, 'Password'),
                                 onFieldSubmitted: (_) => _login(),
                                 decoration: InputDecoration(
                                   labelText: 'Password',
@@ -201,8 +240,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              SizedBox(
-                                height: 52,
+                              // Min-height only: a tight SizedBox(height: 52)
+                              // squeezed the label box (52 - theme padding 32
+                              // = 20px) below Poppins' ~22px line height, and
+                              // the paragraph clipped the 'g' descender.
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(minHeight: 52),
                                 child: ElevatedButton(
                                   onPressed: loading ? null : _login,
                                   style: ElevatedButton.styleFrom(

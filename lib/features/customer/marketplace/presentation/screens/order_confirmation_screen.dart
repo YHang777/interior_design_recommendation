@@ -250,6 +250,9 @@ class _SuccessView extends ConsumerWidget {
                 backgroundColor: Colors.transparent,
                 shadowColor: Colors.transparent,
                 foregroundColor: Colors.white,
+                // Tight 52px wrapper — keep the label's line box inside.
+                padding: const EdgeInsets.symmetric(
+                    vertical: 10, horizontal: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(26),
                 ),

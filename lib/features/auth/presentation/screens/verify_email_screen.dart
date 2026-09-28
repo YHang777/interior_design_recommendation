@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../shared/widgets/float_button.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
@@ -84,26 +85,25 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
     final uid = uri.queryParameters['uid'];
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(AppStrings.verifyEmailTitle,
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.background, Colors.white],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+      // Header-less: the centered hero heading below is the page title, and
+      // the pinned FloatingBackButton replaces the old AppBar back control.
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [AppColors.background, Colors.white],
+              ),
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                 // Animated pulsing email icon with gradient background
                 Center(
                   child: ScaleTransition(
@@ -204,6 +204,13 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
             ),
           ),
         ),
+      ),
+      Positioned(
+        top: MediaQuery.viewPaddingOf(context).top + 8,
+        left: 8,
+        child: const FloatingBackButton(),
+      ),
+        ],
       ),
     );
   }

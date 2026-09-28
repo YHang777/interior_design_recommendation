@@ -7,6 +7,8 @@ import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/float_button.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/rating_stars.dart';
 import '../providers/marketplace_providers.dart';
@@ -62,14 +64,10 @@ class WishlistScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        foregroundColor: AppColors.textPrimary,
-        elevation: 0,
-        title: Text('Wishlist (${wishlist.length})'),
-        centerTitle: false,
-      ),
-      body: productsAsync.when(
+      body: Stack(
+        children: [
+          SafeArea(
+            child: productsAsync.when(
         loading: () => ListView.builder(
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -112,33 +110,36 @@ class WishlistScreen extends ConsumerWidget {
           return Column(
             children: [
               Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final product = items[index];
-                    return _WishlistRow(
-                      product: product,
-                      onTap: () => context.pushNamed(
-                        RouteNames.homeownerProductDetail,
-                        pathParameters: {'id': product.id},
+                // 60px top inset clears the pinned FloatingBackButton.
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
+                  children: [
+                    const PageHeading(title: 'Wishlist'),
+                    const SizedBox(height: 16),
+                    for (var i = 0; i < items.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 10),
+                      _WishlistRow(
+                        product: items[i],
+                        onTap: () => context.pushNamed(
+                          RouteNames.homeownerProductDetail,
+                          pathParameters: {'id': items[i].id},
+                        ),
+                        onMoveToCart: !items[i].isOutOfStock
+                            ? () => _moveToCart(ref, context, items[i])
+                            : null,
+                        onRemove: () {
+                          ref
+                              .read(wishlistProvider.notifier)
+                              .remove(items[i].id);
+                          showAppSnackbar(
+                            context,
+                            'Removed from wishlist',
+                            color: AppColors.textSecondary,
+                          );
+                        },
                       ),
-                      onMoveToCart: !product.isOutOfStock
-                          ? () => _moveToCart(ref, context, product)
-                          : null,
-                      onRemove: () {
-                        ref
-                            .read(wishlistProvider.notifier)
-                            .remove(product.id);
-                        showAppSnackbar(
-                          context,
-                          'Removed from wishlist',
-                          color: AppColors.textSecondary,
-                        );
-                      },
-                    );
-                  },
+                    ],
+                  ],
                 ),
               ),
               // Pinned "add all" bar
@@ -177,6 +178,12 @@ class WishlistScreen extends ConsumerWidget {
                         child: addableCount == 0
                             ? ElevatedButton.icon(
                                 onPressed: null,
+                                style: ElevatedButton.styleFrom(
+                                  // Tight 52px wrapper: keep the label's line
+                                  // box (e.g. the 'g' in "Nothing") inside.
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10, horizontal: 16),
+                                ),
                                 icon: const Icon(Icons.shopping_cart_outlined,
                                     size: 20),
                                 label: const Text('Nothing in stock'),
@@ -194,6 +201,8 @@ class WishlistScreen extends ConsumerWidget {
                                     backgroundColor: Colors.transparent,
                                     shadowColor: Colors.transparent,
                                     foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 10, horizontal: 16),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(14),
                                     ),
@@ -217,6 +226,14 @@ class WishlistScreen extends ConsumerWidget {
             ],
           );
         },
+      ),
+        ),
+        Positioned(
+          top: MediaQuery.viewPaddingOf(context).top + 8,
+          left: 8,
+          child: const FloatingBackButton(),
+        ),
+        ],
       ),
     );
   }

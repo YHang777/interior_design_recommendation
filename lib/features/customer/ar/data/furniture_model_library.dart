@@ -39,17 +39,27 @@ class ArFurnitureItem {
   /// Which surface type this item should be placed on.
   final PlacementType placement;
 
-  /// URI used with `NodeType.localGLTF2`. The plugin resolves these URIs
-  /// through Flutter's `getLookupKeyForAsset`, i.e. against the app's
-  /// bundled Flutter assets. The files therefore live in `assets/models/`
-  /// (registered in pubspec.yaml under `flutter/assets`); the asset key
-  /// passed to `getLookupKeyForAsset` omits the leading `assets/`, so the
-  /// key is `models/<file>.glb`. Paths are case-sensitive at runtime.
-  String get uri => 'models/$modelFile';
+  /// URI used with `NodeType.localGLTF2`. The plugin (`ArView.kt`) resolves
+  /// these URIs through Flutter's `getLookupKeyForAsset`, which expects the
+  /// FULL pubspec-relative asset key — the same string used with
+  /// `rootBundle.load`, including the leading `assets/` segment. The files
+  /// live in `assets/models/` (registered in pubspec.yaml under
+  /// `flutter: assets:`), so the key — and therefore the URI — is
+  /// `assets/models/<file>.glb`; at runtime it resolves to
+  /// `flutter_assets/assets/models/<file>.glb` inside the packaged app.
+  /// Do NOT drop the `assets/` prefix: `models/<file>.glb` is not a
+  /// registered asset key and the plugin fails to load the model.
+  /// Paths are case-sensitive at runtime.
+  String get uri => 'assets/models/$modelFile';
 }
 
-/// Maps the app's furniture catalog / product categories to the bundled
-/// 3D models so saved floor plans can be viewed in real AR.
+/// Bundled 3D models for the ROOM SCANNER / SAVED-DESIGNS browsing catalog.
+///
+/// This library is a BROWSING feature only: the room planner lets users pick
+/// a bundled model to place in a scanned room. It is NOT a model source for
+/// marketplace products — a product's AR model is its Tripo AI model
+/// rescaled to the seller's dimensions (see ModelGlbResolver), and no
+/// category-based lookup exists for products anymore.
 class ArFurnitureLibrary {
   ArFurnitureLibrary._();
 
@@ -204,56 +214,10 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
   };
 
-  /// Maps marketplace product categories to 3D models.
-  static const Map<String, ArFurnitureItem> _byCategory = {
-    'furniture': ArFurnitureItem(
-        name: 'Furniture',
-        modelFile: 'three_seater_sofa.glb',
-        widthMeters: 2.2,
-        icon: Icons.weekend,
-        placement: PlacementType.floor),
-    'lighting': ArFurnitureItem(
-        name: 'Lighting',
-        modelFile: 'standing_desk.glb',
-        widthMeters: 1.4,
-        icon: Icons.lightbulb,
-        placement: PlacementType.floor),
-    'decor': ArFurnitureItem(
-        name: 'Decor',
-        modelFile: 'bauhaus_chair.glb',
-        widthMeters: 0.85,
-        icon: Icons.chair,
-        placement: PlacementType.any),
-    'flooring': ArFurnitureItem(
-        name: 'Flooring',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.0,
-        icon: Icons.view_agenda,
-        placement: PlacementType.floor),
-    'wall': ArFurnitureItem(
-        name: 'Wall',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.0,
-        icon: Icons.view_agenda,
-        placement: PlacementType.wall),
-    'textiles': ArFurnitureItem(
-        name: 'Textiles',
-        modelFile: 'corner_sofa.glb',
-        widthMeters: 2.6,
-        icon: Icons.weekend_outlined,
-        placement: PlacementType.floor),
-  };
-
   /// Returns the AR model for a room-scanner catalog `iconName`.
   static ArFurnitureItem forIconName(String? iconName) {
     if (iconName == null) return _fallback;
     return _byIconName[iconName.toLowerCase()] ?? _fallback;
-  }
-
-  /// Returns the AR model for a marketplace product category.
-  static ArFurnitureItem forCategory(String? category) {
-    if (category == null) return _fallback;
-    return _byCategory[category.toLowerCase()] ?? _fallback;
   }
 
   /// Builds the AR catalog for a list of catalog icon names
@@ -267,8 +231,4 @@ class ArFurnitureLibrary {
     }
     return result.isEmpty ? all : result;
   }
-
-  /// Builds a single-item catalog for a marketplace product category.
-  static List<ArFurnitureItem> fromCategory(String? category) =>
-      [forCategory(category)];
 }

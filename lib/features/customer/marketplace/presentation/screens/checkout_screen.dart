@@ -9,11 +9,16 @@ import '../../../../../core/utils/pricing.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/cart_item.dart';
 import '../../../../../models/order.dart';
+import '../../../../../models/product.dart';
 import '../../../../../services/marketplace_repository.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
+import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
+import '../../../../../shared/widgets/float_button.dart';
+import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/price_summary.dart';
 import '../../../../../shared/widgets/product_image.dart';
+import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
 /// Checkout — delivery form, payment method, priced order summary and the
@@ -108,6 +113,23 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     ];
   }
 
+  /// Shipping derived from PRODUCT-LEVEL settings (the seller's per-product
+  /// charge), never the old flat store constant. Multi-supplier rule —
+  /// documented in `models/product.dart`:
+  ///   1. each distinct product adds its `shippingCharge` once per order
+  ///      (quantity never multiplies shipping);
+  ///   2. per-supplier shipping = sum of that supplier's product charges;
+  ///   3. order shipping = sum of the per-supplier charges.
+  /// The store free-shipping threshold is applied by `computePriceBreakdown`
+  /// afterwards: it waives the fee binary-style, and the caller must zero
+  /// every share when it does (so recorded shares always sum to the fee
+  /// actually charged).
+  ({Map<String, int> shares, int fee}) _deriveShipping(List<CartRow> rows) {
+    final shares = shippingBySupplierFor(rows.map((r) => r.live));
+    final fee = shares.values.fold(0, (sum, v) => sum + v);
+    return (shares: shares, fee: fee);
+  }
+
   /// The failure copy for a blocked row — mirrors the cart screen's banners.
   String? _rowBlockMessage(CartRow row) {
     if (row.missing) return 'No longer available';
@@ -169,13 +191,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     // ── Money math (shared calculator — same numbers as the summary) ──────
     final subtotal = rows.fold<int>(
         0, (sum, r) => sum + r.live.price * r.effectiveQty);
+    final shipping = _deriveShipping(rows);
     final breakdown = computePriceBreakdown(
       subtotal: subtotal,
       discountPercent: tier?.discountPercent ?? 0,
-      shippingFee: config.shippingFee,
+      shippingFee: shipping.fee,
       freeShippingThreshold: config.freeShippingThreshold,
       taxRate: config.taxRate,
     );
+    // Free-shipping waiver zeroes the fee binary-style → zero every
+    // supplier's share too, so the recorded shares always sum to
+    // `breakdown.shippingFee` (the amount the buyer actually pays).
+    final shippingShares =
+        breakdown.shippingFee == 0 ? const <String, int>{} : shipping.shares;
 
     setState(() => _submitting = true);
 
@@ -209,6 +237,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         tax: breakdown.tax,
         membershipTier: tier?.name ?? 'Free',
         total: breakdown.total,
+        // Per-supplier shipping attribution recorded at checkout so each
+        // seller sees their own delivery earnings (see Order.shippingShareFor).
+        shippingBySupplier: shippingShares,
         createdAt: DateTime.now(),
       );
 
@@ -281,20 +312,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             height: 1.4,
           ),
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Stay here',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary)),
-          ),
-          ElevatedButton(
-            onPressed: () {
+          ConfirmDialogActions(
+            confirmLabel: 'Back to cart',
+            cancelLabel: 'Stay here',
+            onCancel: () => Navigator.pop(ctx),
+            onConfirm: () {
               Navigator.pop(ctx);
               context.pop();
             },
-            child: const Text('Back to cart'),
           ),
         ],
       ),
@@ -324,7 +351,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       breakdown = computePriceBreakdown(
         subtotal: subtotal,
         discountPercent: tier?.discountPercent ?? 0,
-        shippingFee: config.shippingFee,
+        // Product-level shipping — same derivation `_placeOrder` commits.
+        shippingFee: _deriveShipping(rows).fee,
         freeShippingThreshold: config.freeShippingThreshold,
         taxRate: config.taxRate,
       );
@@ -338,20 +366,29 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Checkout')),
-      body: buyNow == null && cart.isEmpty
-          ? EmptyState(
-              icon: Icons.remove_shopping_cart_outlined,
-              title: 'Your cart is empty',
-              subtitle: 'Add something you love before checking out.',
-              actionLabel: 'Browse the store',
-              onAction: () => context.goNamed(RouteNames.homeownerMarketplace),
-            )
-          : ListView(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              children: [
-                // ── Delivery details ──
+      body: Stack(
+        children: [
+          buyNow == null && cart.isEmpty
+              ? SafeArea(
+                  child: EmptyState(
+                    icon: Icons.remove_shopping_cart_outlined,
+                    title: 'Your cart is empty',
+                    subtitle: 'Add something you love before checking out.',
+                    actionLabel: 'Browse the store',
+                    onAction: () =>
+                        context.goNamed(RouteNames.homeownerMarketplace),
+                  ),
+                )
+              : SafeArea(
+                  child: ListView(
+                    controller: _scrollCtrl,
+                    padding: EdgeInsets.fromLTRB(16, 60, 16,
+                        MediaQuery.paddingOf(context).bottom + 32),
+                    children: [
+                      const PageHeading(title: 'Checkout'),
+                      const SizedBox(height: 16),
+
+                      // ── Delivery details ──
                 const _SectionTitle('Delivery details'),
                 const SizedBox(height: 10),
                 Form(
@@ -570,6 +607,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         backgroundColor: Colors.transparent,
                         shadowColor: Colors.transparent,
                         foregroundColor: Colors.white,
+                        // Tight 52px wrapper — shrink vertical padding so the
+                        // label's line box always fits the 52px button.
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(26),
                         ),
@@ -602,6 +643,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 ),
               ],
             ),
+          ),
+          Positioned(
+            top: MediaQuery.viewPaddingOf(context).top + 8,
+            left: 8,
+            child: const FloatingBackButton(),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -765,6 +814,15 @@ class _ItemSummaryRow extends StatelessWidget {
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
                     color: AppColors.textPrimary,
+                  ),
+                ),
+                // Verified sellers only — renders nothing otherwise.
+                VerifiedSellerLine(
+                  supplier: product.supplier,
+                  nameStyle: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.textHint,
+                    height: 1.2,
                   ),
                 ),
                 Text(
