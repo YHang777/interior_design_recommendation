@@ -318,7 +318,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           'No 3D model is available for this product yet — tap Regenerate '
               '3D in the seller’s product list to create one.';
     } catch (e) {
-      failure = 'The 3D model could not be prepared ($e). Check the '
+      failure = 'The 3D model could not be prepared. Check your '
           'connection and reopen AR — re-downloading is free.';
     } finally {
       resolver.dispose();
@@ -850,7 +850,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       });
     } catch (e) {
       _showMessage('Could not prepare the ${isFloor ? 'floor' : 'wall'} '
-          'finish. $e');
+          'finish. Please try again.');
     } finally {
       if (mounted) setState(() => _arming = false);
     }

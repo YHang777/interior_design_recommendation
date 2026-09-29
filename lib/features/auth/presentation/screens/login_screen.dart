@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../core/utils/validators.dart';
-import '../../domain/repositories/auth_repository.dart';
 import '../../data/models/app_user.dart';
 import '../providers/auth_providers.dart';
 
@@ -74,9 +74,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       // sign-in triggers signOut(), which emits `data(null)` again). Surface
       // the failure here so the user is never left with a dead button.
       if (!mounted) return;
-      _showError(e is AuthException
-          ? e.message
-          : 'Could not sign in. Please try again.');
+      _showError(userMessage(e, fallback: 'Could not sign in. Please try again.'));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -101,7 +99,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
       next.whenOrNull(error: (e, _) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e is AuthException ? e.message : 'Login failed'),
+          content: Text(userMessage(e,
+              fallback: 'Could not sign in. Please try again.')),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ));

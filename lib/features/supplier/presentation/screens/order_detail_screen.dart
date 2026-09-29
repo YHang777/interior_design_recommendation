@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../../models/order.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -78,9 +79,11 @@ class _SupplierOrderDetailScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not update the order',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not update the order. Please try again.'),
             isError: true,
-            detail: e.toString(),
             duration: const Duration(seconds: 4));
       }
     } finally {
@@ -115,9 +118,11 @@ class _SupplierOrderDetailScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not cancel the order',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not cancel the order. Please try again.'),
             isError: true,
-            detail: e.toString(),
             duration: const Duration(seconds: 4));
       }
     } finally {

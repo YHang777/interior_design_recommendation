@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../../models/product.dart';
 import '../../../../services/verification/verification_application_model.dart';
 import '../../../../shared/widgets/app_feedback.dart';
@@ -93,9 +94,11 @@ class _SupplierProfileScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not save your profile',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not save your profile. Please try again.'),
             isError: true,
-            detail: e.toString(),
             duration: const Duration(seconds: 3));
       }
     } finally {
@@ -139,9 +142,9 @@ class _SupplierProfileScreenState
       if (mounted) {
         showAppSnackbar(
           context,
-          'Could not send reset email',
+          userMessage(e,
+              fallback: 'Could not send the reset email. Please try again.'),
           isError: true,
-          detail: e.toString(),
           duration: const Duration(seconds: 3),
         );
       }

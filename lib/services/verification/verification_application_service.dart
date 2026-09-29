@@ -4,15 +4,24 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
+import '../../core/utils/user_errors.dart';
 import '../media/media_store.dart';
 import 'verification_application_model.dart';
 
-/// Raised when a verification submission cannot proceed — always carries a
-/// message safe to surface to the supplier.
-class VerificationException implements Exception {
-  const VerificationException(this.message);
+/// Raised when a verification submission cannot proceed.
+///
+/// [message] is the full technical form (logged); [userMessage] is the short
+/// sentence the supplier actually sees.
+class VerificationException implements Exception, UserFacingException {
+  const VerificationException(this.message, {String? userMessage})
+      : _userMessage = userMessage;
 
   final String message;
+  final String? _userMessage;
+
+  @override
+  String get userMessage =>
+      _userMessage ?? 'Could not submit your application. Please try again.';
 
   @override
   String toString() => 'VerificationException: $message';
@@ -199,10 +208,13 @@ class VerificationApplicationService {
       // from `storagePath` alone. The returned URL is deliberately unused:
       // the app only previews local picks, never downloads.
       await _media.uploadImageFile(file, storagePath);
-    } on MediaStoreException catch (e) {
-      throw VerificationException('Could not upload the $label: ${e.message}');
     } catch (e) {
-      throw VerificationException('Could not upload the $label: $e');
+      // Keep the technical cause for logs; the supplier only ever sees the
+      // short clause below.
+      throw VerificationException(
+        'Could not upload the $label: $e',
+        userMessage: 'Could not upload the $label. Please try again.',
+      );
     }
 
     return VerificationDocument(

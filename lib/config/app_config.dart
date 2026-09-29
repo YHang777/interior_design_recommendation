@@ -2,19 +2,8 @@ import 'local_config.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 class AppConfig {
-  // Prefer LocalConfig overrides; otherwise use compile-time environment with safe defaults.
-  static const String geminiApiKey = LocalConfig.geminiApiKey ??
-      String.fromEnvironment(
-        'GEMINI_API_KEY',
-        defaultValue: '',
-      );
-
-  // Gemini model name; can be overridden locally.
-  static const String geminiModel = LocalConfig.geminiModel ??
-      String.fromEnvironment(
-        'GEMINI_MODEL',
-        defaultValue: 'gemini-2.0-flash',
-      );
+  // NOTE: no Gemini (or any model) key lives in this app — AI chat goes
+  // through the backend proxy at [chatApiUrl], which holds GEMINI_API_KEY.
 
   // Tripo 3D API key (https://platform.tripo3d.ai) — empty = procedural-only.
   // Pay-as-you-go: ~US$0.30 per textured image-to-model output (free signup
@@ -84,6 +73,22 @@ class AppConfig {
   // Brevo and hosts the /verify-email/confirm page). Mirrors
   // [marketplaceApiUrl] including the Android-emulator localhost rewrite.
   static String get verificationApiUrl {
+    final fromLocal = LocalConfig.verificationApiUrl;
+    final fromEnv = const String.fromEnvironment('VERIFICATION_API_URL', defaultValue: '');
+    String url = fromLocal.isNotEmpty ? fromLocal : fromEnv;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      if (url.startsWith('http://localhost')) {
+        url = url.replaceFirst('http://localhost', 'http://10.0.2.2');
+      }
+    }
+    return url;
+  }
+
+  // AI chat proxy (POST /api/ai/chat) — the same server as
+  // [verificationApiUrl], so it reads the same config: the Gemini key is
+  // an env var on that backend, never in this app. Mirrors the
+  // Android-emulator localhost rewrite above.
+  static String get chatApiUrl {
     final fromLocal = LocalConfig.verificationApiUrl;
     final fromEnv = const String.fromEnvironment('VERIFICATION_API_URL', defaultValue: '');
     String url = fromLocal.isNotEmpty ? fromLocal : fromEnv;

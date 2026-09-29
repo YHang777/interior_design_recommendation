@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../core/utils/pricing.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/product.dart';
@@ -62,7 +63,10 @@ class _BuyerOrderDetailScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not cancel the order — $e',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not cancel the order. Please try again.'),
             color: AppColors.error, duration: const Duration(seconds: 4));
       }
     } finally {
@@ -113,7 +117,10 @@ class _BuyerOrderDetailScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not load products for reorder — $e',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not load those products. Please try again.'),
             color: AppColors.error, duration: const Duration(seconds: 4));
       }
     } finally {
@@ -963,7 +970,10 @@ class _ReviewSheetState extends ConsumerState<_ReviewSheet> {
     } catch (e) {
       if (mounted) {
         setState(() => _submitting = false);
-        showAppSnackbar(context, 'Could not submit your review — $e',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not submit your review. Please try again.'),
             color: AppColors.error, duration: const Duration(seconds: 4));
       }
     }

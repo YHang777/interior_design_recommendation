@@ -5,6 +5,8 @@ import cors from 'cors';
 import { apiRouter } from './routes/index';
 import { createVerifyEmailRouter } from './routes/verify-email.routes';
 import { defaultVerifyEmailDeps } from './services/verification-email.service';
+import { createAiChatRouter } from './routes/ai-chat.routes';
+import { defaultAiChatDeps } from './services/ai-chat.service';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { env } from './config/env';
 
@@ -19,6 +21,8 @@ export function resolveAdminStaticDir(): string {
  *
  *   /verify-email/*   email verification API + confirm page (the flow the
  *                     mobile app calls; port of the Dart server's routes)
+ *   /api/ai/*         design assistant for the mobile app (authenticated
+ *                     proxy onto Gemini — the API key stays server-side)
  *   /admin            the React admin console (static SPA)
  *   /admin/api/*      admin API (auth, users, stats, IC review)
  *   /api/*            same admin API — kept as an alias for local dev and
@@ -30,9 +34,10 @@ export function resolveAdminStaticDir(): string {
  *   CORS (locked to FRONTEND_ORIGIN; only matters for split-origin dev)
  *     → JSON body parsing
  *       → /verify-email routes
- *         → /api + /admin/api routes (each composed of authenticate →
- *           requireAdmin → validate → handler → services/ persistence)
- *           → SPA static + fallback → 404 → central error handler
+ *         → /api/ai routes (authenticate → validate → Gemini)
+ *           → /api + /admin/api routes (each composed of authenticate →
+ *             requireAdmin → validate → handler → services/ persistence)
+ *             → SPA static + fallback → 404 → central error handler
  */
 export function createApp(): express.Express {
   const app = express();
@@ -59,6 +64,11 @@ export function createApp(): express.Express {
 
   // Email verification for the mobile app (registration flow).
   app.use('/verify-email', createVerifyEmailRouter(defaultVerifyEmailDeps()));
+
+  // Design assistant for the mobile app. Mounted ahead of the admin /api
+  // alias so the path is claimed explicitly, and authenticated: it is a
+  // proxy onto a paid model, so it is never left open.
+  app.use('/api/ai', createAiChatRouter(defaultAiChatDeps()));
 
   // Admin API — mounted at the unified path AND the plain /api alias.
   app.use('/api', apiRouter);

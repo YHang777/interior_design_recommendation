@@ -3,12 +3,8 @@
 /// Edit these values to set keys/URLs without passing `--dart-define`.
 /// Keep in mind: avoid committing real secrets to a public repo.
 class LocalConfig {
-  /// Gemini API key. Set to your key string to enable AI chat.
-  /// Leave as `null` to use environment or default fallback.
-  static const String? geminiApiKey = null; // e.g., "AIza...your-key"
-
-  /// Gemini model override. Leave `null` to use the default from AppConfig.
-  static const String? geminiModel = null; // e.g., "gemini-2.0-flash"
+  // No Gemini settings here on purpose: AI chat goes through the backend
+  // proxy (`AppConfig.chatApiUrl`), which holds GEMINI_API_KEY server-side.
 
   /// Marketplace API base URL. Set to your backend list endpoint.
   /// Uses the local Dart server by default (run `cd server && dart run bin/server.dart`).

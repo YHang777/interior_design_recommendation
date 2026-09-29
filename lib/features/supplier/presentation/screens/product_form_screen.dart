@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../customer/ar/data/glb_generator.dart' show resolveShapeFamily;
 import '../../../../models/product.dart';
 import '../../../../models/product_category.dart';
@@ -827,10 +828,10 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       if (mounted) {
         showAppSnackbar(
           context,
-          _isEditing
-              ? 'Could not save changes'
-              : 'Could not publish product',
-          detail: e.toString(),
+          userMessage(e,
+              fallback: _isEditing
+                  ? 'Could not save your changes. Please try again.'
+                  : 'Could not publish the product. Please try again.'),
           isError: true,
           duration: const Duration(seconds: 4),
         );

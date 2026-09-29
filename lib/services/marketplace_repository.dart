@@ -369,6 +369,72 @@ class MarketplaceRepository {
     });
   }
 
+  /// Issues [supplierId]'s invoice for [orderId] and — only when the order is
+  /// still `pending` — accepts it (pending → confirmed) in the SAME Firestore
+  /// transaction. An accepted order therefore never exists without paperwork,
+  /// and on a multi-seller order where one seller already accepted, the other
+  /// sellers still issue their own invoices without moving the status again.
+  ///
+  /// Idempotent per supplier: if this supplier already has an invoice, it is
+  /// returned unchanged (invoice number preserved) and nothing is written.
+  ///
+  /// Throws [StateError] when the order is already `cancelled` or `delivered`.
+  /// Returns the new or pre-existing invoice.
+  Future<OrderInvoice> acceptOrderAndIssueInvoice({
+    required String orderId,
+    required String supplierId,
+    required String supplierName,
+    String supplierPhone = '',
+    String supplierAddress = '',
+    String supplierEmail = '',
+  }) async {
+    final doc = _orders.doc(orderId);
+    return _db.runTransaction((txn) async {
+      final snapshot = await txn.get(doc);
+      if (!snapshot.exists) {
+        throw StateError('Order not found');
+      }
+      final now = DateTime.now();
+      final order = Order.fromJson(snapshot.data()!);
+
+      // This supplier already accepted — their invoice is the record, so
+      // return it as-is rather than reissuing a new number.
+      final existing = order.invoiceFor(supplierId);
+      if (existing != null) return existing;
+
+      if (order.status.isTerminal) {
+        throw StateError(
+            'A ${order.status.label.toLowerCase()} order cannot be accepted.');
+      }
+
+      // Defaults issuedAt/invoiceNumber so the factory stamps both.
+      final invoice = OrderInvoice.issue(
+        order: order,
+        supplierId: supplierId,
+        supplierName: supplierName,
+        supplierPhone: supplierPhone,
+        supplierAddress: supplierAddress,
+        supplierEmail: supplierEmail,
+      );
+
+      // Only a pending order advances: the first accepting supplier confirms
+      // it, while later suppliers on an already-confirmed/shipped order add
+      // paperwork without touching the status (or re-running ensureAdvance).
+      final accepts = order.status == OrderStatus.pending;
+      final invoices = {...order.invoices, supplierId: invoice};
+      final updated = accepts
+          ? order.copyWith(
+              status: OrderStatus.confirmed,
+              statusHistory:
+                  {...order.statusHistory, OrderStatus.confirmed.name: now},
+              invoices: invoices,
+            )
+          : order.copyWith(invoices: invoices);
+      txn.set(doc, updated.toJson());
+      return invoice;
+    });
+  }
+
   /// Cancels an order and restores stock for every item, atomically.
   ///
   /// Idempotent for an already-cancelled order; any other terminal state

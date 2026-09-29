@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../config/app_config.dart';
-import '../../../../../services/gemini_service.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
+import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import '../../data/datasources/chat_datasource.dart';
+import '../providers/design_providers.dart';
 
 class AiRecommendationScreen extends ConsumerStatefulWidget {
   const AiRecommendationScreen({super.key});
@@ -22,15 +25,6 @@ class _AiRecommendationScreenState
   final _scrollCtrl = ScrollController();
   String? _selectedStyle;
   String? _selectedRoom;
-  late final GeminiChatService? _gemini;
-
-  @override
-  void initState() {
-    super.initState();
-    _gemini = AppConfig.geminiApiKey.isNotEmpty
-        ? GeminiChatService(apiKey: AppConfig.geminiApiKey)
-        : null;
-  }
 
   @override
   void dispose() {
@@ -85,27 +79,26 @@ class _AiRecommendationScreenState
     final text = _msgCtrl.text.trim();
     if (text.isEmpty) return;
 
+    // Transcript oldest → newest for the proxy. Built before the loading
+    // placeholder is appended so the '...' sentinel never ships, and capped
+    // so a long chat stays a small request.
+    var transcript = <ChatTurn>[
+      for (final m in _msgs)
+        ChatTurn(role: m.sender == 'You' ? 'user' : 'model', text: m.text),
+      ChatTurn(role: 'user', text: text),
+    ];
+    if (transcript.length > 20) {
+      transcript = transcript.sublist(transcript.length - 20);
+    }
+
     setState(() {
       _msgs.add(_ChatMsg(sender: 'You', text: text));
       _msgs.add(_ChatMsg(sender: 'AI', text: '...'));
     });
     _msgCtrl.clear();
 
-    final gemini = _gemini;
-    if (gemini != null && gemini.isConfigured) {
-      gemini.sendMessage(text).then((reply) {
-        setState(() {
-          _msgs.removeLast();
-          _msgs.add(_ChatMsg(sender: 'AI', text: reply));
-        });
-      }).catchError((e) {
-        setState(() {
-          _msgs.removeLast();
-          _msgs.add(_ChatMsg(
-              sender: 'AI', text: 'Sorry, something went wrong: $e'));
-        });
-      });
-    } else {
+    if (AppConfig.chatApiUrl.trim().isEmpty) {
+      // No proxy in this build — reply locally so the chat is never a dead end.
       Future.delayed(const Duration(milliseconds: 600), () {
         setState(() {
           _msgs.removeLast();
@@ -115,6 +108,30 @@ class _AiRecommendationScreenState
                   'Here is a $_selectedStyle recommendation for your $_selectedRoom: Try a neutral color palette with accent furniture pieces. Would you like specific product suggestions?'));
         });
       });
+    } else {
+      ref
+          .read(chatDatasourceProvider)
+          .send(
+            messages: transcript,
+            style: _selectedStyle,
+            room: _selectedRoom,
+            products: _productContext(),
+          )
+          .then((reply) {
+            setState(() {
+              _msgs.removeLast();
+              _msgs.add(_ChatMsg(sender: 'AI', text: reply));
+            });
+          }).catchError((e) {
+            setState(() {
+              _msgs.removeLast();
+              _msgs.add(_ChatMsg(
+                  sender: 'AI',
+                  text: userMessage(e,
+                      fallback:
+                          'Sorry, something went wrong. Please try again.')));
+            });
+          });
     }
 
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -123,8 +140,24 @@ class _AiRecommendationScreenState
     });
   }
 
+  /// A handful of live listings so the assistant can recommend real items
+  /// instead of made-up ones.
+  List<ChatProduct> _productContext() {
+    final products =
+        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
+    return products
+        .where((p) => p.isActive)
+        .take(12)
+        .map((p) =>
+            ChatProduct(name: p.name, price: p.price, category: p.category))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Subscribe here rather than in _sendMessage (Riverpod forbids watch
+    // in callbacks) so the catalogue is loaded and current by first send.
+    ref.watch(marketplaceProductsProvider);
     return GradientScaffold(
       child: Column(
         children: [

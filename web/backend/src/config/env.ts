@@ -69,4 +69,19 @@ export const env = {
    * Docker image (web/Dockerfile) sets ADMIN_STATIC_DIR explicitly.
    */
   adminStaticDir: process.env.ADMIN_STATIC_DIR ?? '',
+
+  // ── AI design assistant (`/api/ai/chat`) ────────────────────────────────
+  //
+  // The Gemini key is SERVER-SIDE ONLY. It must never reach the Flutter app:
+  // anything compiled into a mobile binary can be extracted from the APK, so
+  // a key shipped in the client is not a secret, it is a leaked secret.
+
+  /** Google AI Studio key (https://aistudio.google.com → API keys). */
+  geminiApiKey: process.env.GEMINI_API_KEY ?? '',
+  /**
+   * Model id. Defaults to the cheapest tier — the assistant is short
+   * product/design chat, not reasoning work. Overridable without a redeploy
+   * when Google restricts a model to older keys.
+   */
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite',
 };

@@ -96,7 +96,7 @@ class AuthRepositoryImpl implements IAuthRepository {
       );
     } on fb.FirebaseAuthException catch (e) {
       await BootTrace.log('login: FirebaseAuthException ${e.code}');
-      throw _mapFirebaseError(e);
+      throw _mapFirebaseError(e, op: _AuthOp.signIn);
     }
   }
 
@@ -180,7 +180,7 @@ class AuthRepositoryImpl implements IAuthRepository {
 
       return user;
     } on fb.FirebaseAuthException catch (e) {
-      throw _mapFirebaseError(e);
+      throw _mapFirebaseError(e, op: _AuthOp.register);
     }
   }
 
@@ -218,7 +218,7 @@ class AuthRepositoryImpl implements IAuthRepository {
     try {
       await _authDatasource.sendPasswordResetEmail(email);
     } on fb.FirebaseAuthException catch (e) {
-      throw _mapFirebaseError(e);
+      throw _mapFirebaseError(e, op: _AuthOp.passwordReset);
     }
   }
 
@@ -296,59 +296,107 @@ class AuthRepositoryImpl implements IAuthRepository {
     );
   }
 
-  /// Maps FirebaseAuth error codes to user-friendly messages.
-  AuthException _mapFirebaseError(fb.FirebaseAuthException e) {
-    switch (e.code) {
-      case 'wrong-password':
+  /// Which sign-in form produced the failure — the same Firebase code means
+  /// different things per screen ("Email or password is incorrect." at login,
+  /// "No account found with this email." at password reset).
+  AuthException _mapFirebaseError(
+    fb.FirebaseAuthException e, {
+    required _AuthOp op,
+  }) {
+    // Codes that only ever mean "this connection is broken".
+    if (e.code == 'network-request-failed' || e.code == 'network-error') {
+      return const AuthException(
+        'No internet connection. Check your network and try again.',
+        code: 'network-error',
+      );
+    }
+    if (e.code == 'too-many-requests') {
+      return const AuthException(
+        'Too many attempts. Wait a moment and try again.',
+        code: 'too-many-requests',
+      );
+    }
+    if (e.code == 'invalid-email') {
+      return const AuthException(
+        'That email address does not look right.',
+        code: 'invalid-email',
+      );
+    }
+    if (e.code == 'user-disabled') {
+      return const AuthException(
+        'This account has been disabled. Contact support.',
+        code: 'user-disabled',
+      );
+    }
+    if (e.code == 'user-token-expired' || e.code == 'requires-recent-login') {
+      return const AuthException(
+        'Your session expired. Please sign in again.',
+        code: 'session-expired',
+      );
+    }
+
+    switch (op) {
+      case _AuthOp.signIn:
+        // Firebase folds wrong-password / user-not-found into
+        // invalid-credential (anti-enumeration), so one message covers all
+        // three. Never echo `e.message` here — that is the long
+        // "incorrect, malformed or has expired" sentence users were shown.
+        if (e.code == 'invalid-credential' ||
+            e.code == 'wrong-password' ||
+            e.code == 'user-not-found' ||
+            e.code == 'INVALID_LOGIN_CREDENTIALS') {
+          return const AuthException(
+            'Email or password is incorrect.',
+            code: 'invalid-credential',
+          );
+        }
         return const AuthException(
-          'Incorrect password',
-          code: 'wrong-password',
+          'Could not sign in. Please try again.',
+          code: 'sign-in-failed',
         );
-      case 'user-not-found':
+
+      case _AuthOp.register:
+        switch (e.code) {
+          case 'email-already-in-use':
+            return const AuthException(
+              'An account with this email already exists. Try signing in.',
+              code: 'email-already-in-use',
+            );
+          case 'weak-password':
+            return const AuthException(
+              'That password is too weak. Use at least 8 characters.',
+              code: 'weak-password',
+            );
+          case 'operation-not-allowed':
+            return const AuthException(
+              'Email sign-up is unavailable right now. Contact support.',
+              code: 'operation-not-allowed',
+            );
+          default:
+            return const AuthException(
+              'Could not create the account. Please try again.',
+              code: 'register-failed',
+            );
+        }
+
+      case _AuthOp.passwordReset:
+        // A reset link cannot be sent to an address that has no account, and
+        // here saying so is helpful rather than a privacy leak.
+        if (e.code == 'user-not-found' ||
+            e.code == 'invalid-credential' ||
+            e.code == 'INVALID_LOGIN_CREDENTIALS') {
+          return const AuthException(
+            'No account found with this email.',
+            code: 'user-not-found',
+          );
+        }
         return const AuthException(
-          'No account found with this email',
-          code: 'user-not-found',
-        );
-      case 'user-disabled':
-        return const AuthException(
-          'This account has been disabled',
-          code: 'user-disabled',
-        );
-      case 'email-already-in-use':
-        return const AuthException(
-          'An account with this email already exists',
-          code: 'email-already-in-use',
-        );
-      case 'invalid-email':
-        return const AuthException(
-          'Please enter a valid email address',
-          code: 'invalid-email',
-        );
-      case 'operation-not-allowed':
-        return const AuthException(
-          'Email/password sign-in is not enabled',
-          code: 'operation-not-allowed',
-        );
-      case 'weak-password':
-        return const AuthException(
-          'Password is too weak. Use at least 8 characters',
-          code: 'weak-password',
-        );
-      case 'too-many-requests':
-        return const AuthException(
-          'Too many attempts. Please try again later.',
-          code: 'too-many-requests',
-        );
-      case 'network-request-failed':
-        return const AuthException(
-          'Network error. Please check your connection.',
-          code: 'network-error',
-        );
-      default:
-        return AuthException(
-          e.message ?? 'An unexpected error occurred',
-          code: e.code,
+          'Could not send the reset link. Please try again.',
+          code: 'reset-failed',
         );
     }
   }
 }
+
+/// See [AuthRepositoryImpl._mapFirebaseError].
+enum _AuthOp { signIn, register, passwordReset }

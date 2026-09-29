@@ -86,6 +86,8 @@ override in `frontend/.env.local` if the API runs elsewhere.
 | `BREVO_API_KEY` | backend | Brevo v3 API key (transactional send). Missing → send returns 503 |
 | `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME` | backend | Verified Brevo sender (default name `Intellar`) |
 | `PUBLIC_BASE_URL` | backend | Fallback email-link origin (e.g. `https://interior-design-recommendation.onrender.com`). Normally overridden per-request from `Host` + `X-Forwarded-Proto` |
+| `GEMINI_API_KEY` | backend | Google AI Studio key for `/api/ai/chat` (the design assistant). **Server-side only** — never put it in the Flutter app or a `--dart-define`; APK contents are extractable. Missing → chat returns `503 NOT_CONFIGURED`. |
+| `GEMINI_MODEL` | backend | Model id for the assistant (default `gemini-2.5-flash-lite`, the cheapest tier). If a new key cannot reach the 2.5 family, set `gemini-3.1-flash-lite`. |
 | `ADMIN_STATIC_DIR` | backend | Where the built SPA lives. Default: `web/frontend/dist`; the unified Docker image sets it to `/app/frontend-dist` |
 | `VITE_API_BASE_URL` | frontend | Backend base URL (default `http://localhost:4000/api`; the unified image bakes `/admin/api`) — **build-time** (`VITE_` vars are inlined by Vite at `npm run build`) |
 
@@ -139,6 +141,8 @@ services next to the real host.
 | `FIREBASE_PROJECT_ID` | `interior-design-256c5` | Already set |
 | `VERIFY_TOKEN_SECRET` | unchanged | Email tokens (HMAC) |
 | `BREVO_API_KEY` · `BREVO_SENDER_EMAIL` · `BREVO_SENDER_NAME` | unchanged | Brevo send |
+| `GEMINI_API_KEY` | Google AI Studio key | **New** — design assistant (`/api/ai/chat`). Server-side only. |
+| `GEMINI_MODEL` | optional, default `gemini-2.5-flash-lite` | **New** — set `gemini-3.1-flash-lite` if the key cannot reach the 2.5 family |
 | `PUBLIC_BASE_URL` | `https://interior-design-recommendation.onrender.com` | Fallback email-link base (normally derived from the request Host) |
 | `FRONTEND_ORIGIN` | optional on the unified host | Only matters for split-origin local dev (`http://localhost:5173`). Same-origin `/admin` → `/admin/api` calls need no CORS at all. |
 
@@ -235,6 +239,7 @@ Auth = `Authorization: Bearer <id-token>` (Firebase ID token).
 | Method | Path | Auth | Body / query | Success response |
 |---|---|---|---|---|
 | GET | `/health` | public | — | `{ status, service, firebaseConfigured }` |
+| POST | `/ai/chat` | **signed-in** | `{ messages: [{role:'user'\|'model', text}], style?, room?, products?: [{name, price?, category?}] }` (≤20 products) | `{ reply }` — the design assistant. Proxied to Gemini; the API key never leaves the server. |
 | POST | `/auth/login` | public | `{ email, password }` | `{ uid, email, idToken, expiresIn, isAdmin, profile }` |
 | GET | `/auth/me` | admin | — | `{ uid, email, name, isAdmin, adminViaClaim, profile }` |
 | GET | `/stats` | admin | — | `{ customers, suppliers, authOnlyAccounts, products, orders, pendingSuppliers, rejectedSuppliers, unverifiedSuppliers, pendingVerifications, recentUsers[≤5] }` |
@@ -253,6 +258,8 @@ Error shape (any failure): `{ error: { code, message, details? } }` with codes
 `CONFIRM_MISMATCH` (400), `SELF_DELETE` (400), `NOT_SUPPLIER` (400),
 `USER_NOT_FOUND` (404), `APPLICATION_NOT_FOUND` (404),
 `DOCUMENT_NOT_FOUND` (404), `STORAGE_OBJECT_MISSING` (404),
+`NOT_CONFIGURED` (503, AI chat), `UPSTREAM_ERROR` (502, AI chat),
+`UPSTREAM_TIMEOUT` (504, AI chat),
 `INVALID_DOCUMENT_PATH` (400), `STORAGE_READ_ERROR` (500),
 `PARTIAL_DELETE` (500), `FIREBASE_NOT_CONFIGURED` (503),
 `INTERNAL_ERROR` (500), …

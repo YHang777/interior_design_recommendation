@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/room_design.dart';
 import '../../../ar/data/furniture_model_library.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
@@ -44,10 +45,16 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   int _selectedIdx = -1;
   bool _isEditingDimensions = false;
 
-  // Room walls (user-drawn polygon in room-cm coordinates)
+  // Room walls (user-drawn polygon in room-cm coordinates).
+  // Mutated in place; [_wallsRev] is bumped so only the wall layer repaints
+  // while a corner is being dragged (a full setState per pointer-move was one
+  // of the planner's drag-jank sources).
   final List<Offset> _walls = [];
+  final ValueNotifier<int> _wallsRev = ValueNotifier(0);
   bool _wallMode = false;
   int _draggingWallIdx = -1;
+
+  void _touchWalls() => _wallsRev.value++;
 
   // Scanning state
   DateTime? _lastProcessedAt;
@@ -116,24 +123,63 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       // Start directly on the room plan editor — scanning is optional.
       _stage = _Stage.plan;
     }
-    _setupCam();
+    // The camera is opened lazily when a scan starts and released again when
+    // the plan editor is showing. Holding CameraController open the whole
+    // time keeps the camera HAL hot and steals CPU/thermal budget from the
+    // drag path — a real source of planner jank on mid-range phones.
   }
 
   Future<void> _setupCam() async {
+    await _releaseCam();
+    CameraController? cam;
     try {
       _cameras = await availableCameras();
-      if (_cameras!.isNotEmpty) {
-        _cam = CameraController(
-          _cameras!.firstWhere(
-              (c) => c.lensDirection == CameraLensDirection.back,
-              orElse: () => _cameras!.first),
-          ResolutionPreset.medium,
-          enableAudio: false,
-        );
-        await _cam!.initialize();
-        if (mounted) setState(() {});
+      if (_cameras!.isEmpty) return;
+      cam = CameraController(
+        _cameras!.firstWhere(
+            (c) => c.lensDirection == CameraLensDirection.back,
+            orElse: () => _cameras!.first),
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+      await cam.initialize();
+      if (!mounted) {
+        await cam.dispose();
+        return;
       }
+      _cam = cam;
+      setState(() {});
+    } catch (_) {
+      // A controller that failed mid-initialize still holds native camera
+      // resources — dispose it here, since _releaseCam() only knows _cam.
+      try {
+        await cam?.dispose();
+      } catch (_) {}
+      await _releaseCam();
+    }
+  }
+
+  /// Releases the camera so the plan editor gets the device's full CPU/GPU.
+  Future<void> _releaseCam() async {
+    final cam = _cam;
+    _cam = null;
+    if (cam == null) return;
+    try {
+      await cam.stopImageStream();
     } catch (_) {}
+    try {
+      await cam.dispose();
+    } catch (_) {}
+  }
+
+  /// In-flight camera open, so a double-tap on Scan can't run two
+  /// `_setupCam`s and leak whichever controller loses the race.
+  Future<void>? _camOpening;
+
+  /// Opens the camera on demand (Scan button) instead of at screen init.
+  Future<void> _ensureCam() {
+    if (_cam != null && _cam!.value.isInitialized) return Future.value();
+    return _camOpening ??= _setupCam().whenComplete(() => _camOpening = null);
   }
 
   void _startScan() async {
@@ -240,13 +286,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   void _stopScan() {
     if (_stage != _Stage.scanning) return;
-    try {
-      _cam?.stopImageStream();
-    } catch (_) {}
     _timer?.cancel();
     // Auto-place detected items and return to plan editor directly.
     _autoPlaceFound();
     if (mounted) setState(() => _stage = _Stage.plan);
+    // Drop the camera now that the editor is up — see _setupCam.
+    unawaited(_releaseCam());
   }
 
   void _autoPlaceFound() {
@@ -349,11 +394,27 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   // without the 18 px kTouchSlop dead zone.
 
   bool _pointerMoved = false;
+  bool _pointerOnTile = false;
 
   void _onPointerDown(PointerDownEvent e, double s) {
     _pointerMoved = false;
+    _pointerOnTile = false;
 
     final p = Offset(e.localPosition.dx / s, e.localPosition.dy / s);
+
+    // A press that lands on a furniture tile belongs to the tile's own
+    // gesture (tap = select, long-press = remove). The canvas must not treat
+    // its release as an empty-canvas tap, or it clears the selection the tile
+    // just made/kept.
+    for (final f in _furniture) {
+      if (p.dx >= f.x &&
+          p.dx <= f.x + f.width &&
+          p.dy >= f.y &&
+          p.dy <= f.y + f.height) {
+        _pointerOnTile = true;
+        break;
+      }
+    }
 
     // Try to grab an existing wall corner.
     _draggingWallIdx = -1;
@@ -384,15 +445,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
         (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
       );
-      setState(() {
-        _walls[_draggingWallIdx] = p;
-      });
+      _walls[_draggingWallIdx] = p;
+      // Only the wall layer needs to repaint — not the whole planner.
+      _touchWalls();
     }
   }
 
   void _onPointerUp(PointerUpEvent e, double s) {
     // Tap = pointer-down → pointer-up with < 5 px movement.
-    if (!_pointerMoved && _draggingWallIdx < 0) {
+    if (!_pointerMoved && _draggingWallIdx < 0 && !_pointerOnTile) {
       final p = Offset(
         (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
         (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
@@ -402,12 +463,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         final tooClose = _walls.any((w) => (w - p).distance < 12);
         if (!tooClose) {
           setState(() => _walls.add(p));
+          _touchWalls();
         }
       } else {
+        // Empty canvas tap — clear the selection.
         setState(() => _selectedIdx = -1);
       }
     }
     _draggingWallIdx = -1;
+    _pointerOnTile = false;
   }
 
   void _clearWalls() {
@@ -415,6 +479,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _walls.clear();
       _draggingWallIdx = -1;
     });
+    _touchWalls();
   }
 
   // ─── Room size presets ────────────────────────────────────────────────
@@ -534,7 +599,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Save failed: $e'),
+            content: Text(userMessage(e,
+                fallback: 'Could not save your design. Please try again.')),
             backgroundColor: AppColors.error,
           ),
         );
@@ -557,6 +623,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     } catch (_) {}
     _labeler.close();
     _cam?.dispose();
+    _wallsRev.dispose();
     super.dispose();
   }
 
@@ -614,11 +681,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       IconButton(
                         icon: Icon(Icons.camera_alt, color: fgColor),
                         tooltip: 'Scan Room',
-                        onPressed: () {
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await _ensureCam();
+                          if (!mounted) return;
                           if (_cam != null && _cam!.value.isInitialized) {
                             _startScan();
                           } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            messenger.showSnackBar(
                               const SnackBar(
                                   content: Text('Camera not available')),
                             );
@@ -1078,8 +1148,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             child: Center(
               child: LayoutBuilder(
                 builder: (ctx, constraints) {
-                  final maxW = constraints.maxWidth;
-                  final maxH = constraints.maxHeight;
+                  // The canvas frame's border insets the child by 3px a side.
+                  // Room-cm coordinates must map onto that inner box exactly,
+                  // otherwise furniture at the room's right/bottom edge paints
+                  // outside the frame — so the border is added back onto the
+                  // SizedBox, not taken out of the scale.
+                  const border = 3.0;
+                  final maxW = constraints.maxWidth - border * 2;
+                  final maxH = constraints.maxHeight - border * 2;
                   final roomAspect = _roomW / _roomH;
                   double canvasW, canvasH;
                   if (maxW / maxH > roomAspect) {
@@ -1091,14 +1167,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                   }
                   final s = min(canvasW / _roomW, canvasH / _roomH);
                   return SizedBox(
-                    width: canvasW,
-                    height: canvasH,
+                    width: canvasW + border * 2,
+                    height: canvasH + border * 2,
                     child: Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFFFFFBF5),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                            color: AppColors.primary, width: 3),
+                            color: AppColors.primary, width: border),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.1),
@@ -1115,18 +1191,28 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                         child: Stack(
                           clipBehavior: Clip.hardEdge,
                           children: [
-                            // Subtle grid
-                            CustomPaint(
-                              painter:
-                                  _FloorPlanGridPainter(
-                                      s, _roomW, _roomH),
-                              size: Size.infinite,
+                            // Subtle grid — own layer so furniture/wall
+                            // movement never repaints it.
+                            RepaintBoundary(
+                              child: CustomPaint(
+                                painter:
+                                    _FloorPlanGridPainter(
+                                        s, _roomW, _roomH),
+                                size: Size.infinite,
+                              ),
                             ),
-                            // Room walls (user-drawn polygon)
-                            CustomPaint(
-                              painter: _RoomShapePainter(
-                                  s, _walls, _wallMode),
-                              size: Size.infinite,
+                            // Room walls (user-drawn polygon). Listens to
+                            // [_wallsRev] so dragging a corner repaints only
+                            // this layer instead of the whole planner.
+                            RepaintBoundary(
+                              child: ValueListenableBuilder<int>(
+                                valueListenable: _wallsRev,
+                                builder: (_, __, ___) => CustomPaint(
+                                  painter: _RoomShapePainter(s, _walls,
+                                      _wallMode, _wallsRev.value),
+                                  size: Size.infinite,
+                                ),
+                              ),
                             ),
                           // Dimension labels on walls
                           _dimLabel('${_roomW.toInt()} cm',
@@ -1169,162 +1255,41 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               ),
                             ),
                           ),
-                          // Furniture placements
-                          ..._furniture
-                              .asMap()
-                              .entries
-                              .map((entry) {
-                            final idx = entry.key;
-                            final f = entry.value;
-                            final isSelected =
-                                idx == _selectedIdx;
-                            final itemW =
-                                f.width * s;
-                            final itemH =
-                                f.height * s;
-                            return Positioned(
-                              left: f.x * s,
-                              top: f.y * s,
-                              child: GestureDetector(
-                                onTap: () => setState(() =>
-                                    _selectedIdx =
-                                        idx),
-                                onLongPress: () {
-                                  setState(() {
-                                    _furniture.removeAt(
-                                        idx);
-                                    if (_selectedIdx ==
-                                        idx) {
-                                      _selectedIdx =
-                                          -1;
-                                    }
-                                  });
-                                },
-                                onPanUpdate:
-                                    (details) {
-                                  final newX = (f.x +
-                                          details
-                                              .delta
-                                              .dx /
-                                              s)
-                                      .clamp(
-                                          0.0,
-                                          _roomW -
-                                              f.width)
-                                      .toDouble();
-                                  final newY = (f.y +
-                                          details
-                                              .delta
-                                              .dy /
-                                              s)
-                                      .clamp(
-                                          0.0,
-                                          _roomH -
-                                              f.height)
-                                      .toDouble();
-                                  final updated =
-                                      _furniture
-                                          .toList();
-                                  updated[idx] =
-                                      _clampToWalls(f
-                                          .copyWith(
-                                              x: newX,
-                                              y: newY));
-                                  setState(() =>
-                                      _furniture =
-                                          updated);
-                                },
-                                child: Container(
-                                  width: itemW,
-                                  height: itemH,
-                                  clipBehavior: Clip.hardEdge,
-                                  decoration:
-                                      BoxDecoration(
-                                    color: isSelected
-                                        ? AppColors
-                                            .accent
-                                            .withValues(
-                                                alpha:
-                                                    0.3)
-                                        : AppColors
-                                            .primary
-                                            .withValues(
-                                                alpha:
-                                                    0.15),
-                                    borderRadius:
-                                        BorderRadius
-                                            .circular(
-                                                3),
-                                    border: Border.all(
-                                      color: isSelected
-                                          ? AppColors
-                                              .accent
-                                          : AppColors
-                                              .primary
-                                              .withValues(alpha: 0.4),
-                                      width:
-                                          isSelected
-                                              ? 2.5
-                                              : 1.2,
-                                    ),
-                                  ),
-                                  child: itemW > 40 &&
-                                          itemH > 30
-                                      ? Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          mainAxisSize:
-                                              MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              _iconFor(f
-                                                  .iconName),
-                                              size: min(
-                                                  itemW *
-                                                      0.35,
-                                                  20),
-                                              color: isSelected
-                                                  ? AppColors.accent
-                                                  : AppColors.textSecondary,
-                                            ),
-                                            if (itemW >
-                                                55)
-                                              SizedBox(
-                                                width: itemW - 4,
-                                                child: Text(
-                                                  f.name,
-                                                  textAlign: TextAlign.center,
-                                                  maxLines: 1,
-                                                  softWrap: false,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: min(itemW * 0.1, 10).clamp(6, 10).toDouble(),
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isSelected
-                                                        ? AppColors.accent
-                                                        : AppColors.textPrimary,
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        )
-                                      : Center(
-                                          child: Icon(
-                                            _iconFor(f
-                                                .iconName),
-                                            size: min(
-                                                itemW *
-                                                    0.5,
-                                                14),
-                                            color: isSelected
-                                                ? AppColors.accent
-                                                : AppColors.textSecondary,
-                                          ),
-                                        ),
-                                ),
-                              ),
-                            );
-                          }),
+                          // Furniture placements. Each tile owns its drag
+                          // state, so a pan rebuilds only that tile — not the
+                          // whole planner (that full-tree rebuild was the main
+                          // source of drag jank). Wall clamping runs once on
+                          // release rather than on every pointer-move.
+                          for (var i = 0; i < _furniture.length; i++)
+                            _FurnitureTile(
+                              key: ValueKey(_furniture[i].id),
+                              item: _furniture[i],
+                              selected: i == _selectedIdx,
+                              scale: s,
+                              roomW: _roomW,
+                              roomH: _roomH,
+                              onTap: () =>
+                                  setState(() => _selectedIdx = i),
+                              onLongPress: () {
+                                setState(() {
+                                  _furniture.removeAt(i);
+                                  if (_selectedIdx == i) {
+                                    _selectedIdx = -1;
+                                  } else if (_selectedIdx > i) {
+                                    _selectedIdx--;
+                                  }
+                                });
+                              },
+                              onCommit: (moved) {
+                                setState(() {
+                                  final idx = _furniture
+                                      .indexWhere((e) => e.id == moved.id);
+                                  if (idx < 0) return;
+                                  // One wall-clamp per drop, not per frame.
+                                  _furniture[idx] = _clampToWalls(moved);
+                                });
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -1681,11 +1646,175 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   // ─── Icon lookup ───
-  IconData _iconFor(String iconName) {
-    for (final c in _catalog) {
-      if (c.iconName == iconName) return c.icon;
-    }
-    return Icons.folder;
+}
+
+// Icon lookup — shared by the plan editor and [_FurnitureTile].
+IconData _iconFor(String iconName) {
+  for (final c in _RoomScannerScreenState._catalog) {
+    if (c.iconName == iconName) return c.icon;
+  }
+  return Icons.folder;
+}
+
+// ─── Draggable furniture tile ───
+// Owns its live drag position in local state so a pan rebuilds only this
+// tile (plus its own repaint layer), never the whole planner. The parent is
+// notified once, on pan end, with the committed placement.
+class _FurnitureTile extends StatefulWidget {
+  const _FurnitureTile({
+    super.key,
+    required this.item,
+    required this.selected,
+    required this.scale,
+    required this.roomW,
+    required this.roomH,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onCommit,
+  });
+
+  final FurniturePlacement item;
+  final bool selected;
+  final double scale;
+  final double roomW;
+  final double roomH;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  /// Called once when a drag ends, with the tile's new placement already
+  /// clamped to the room rectangle. The parent applies wall clamping.
+  final ValueChanged<FurniturePlacement> onCommit;
+
+  @override
+  State<_FurnitureTile> createState() => _FurnitureTileState();
+}
+
+class _FurnitureTileState extends State<_FurnitureTile> {
+  /// Live room-cm position while dragging; null means "use [widget.item]".
+  Offset? _live;
+
+  Offset get _pos => _live ?? Offset(widget.item.x, widget.item.y);
+
+  double get _maxX => widget.roomW - widget.item.width;
+  double get _maxY => widget.roomH - widget.item.height;
+
+  void _onPanStart(DragStartDetails _) {
+    setState(() => _live = Offset(widget.item.x, widget.item.y));
+  }
+
+  void _onPanUpdate(DragUpdateDetails d) {
+    final s = widget.scale;
+    final p = _pos;
+    setState(() {
+      _live = Offset(
+        (p.dx + d.delta.dx / s).clamp(0.0, _maxX).toDouble(),
+        (p.dy + d.delta.dy / s).clamp(0.0, _maxY).toDouble(),
+      );
+    });
+  }
+
+  void _onPanEnd(DragEndDetails _) {
+    final p = _pos;
+    setState(() => _live = null);
+    widget.onCommit(widget.item.copyWith(x: p.dx, y: p.dy));
+  }
+
+  /// A cancelled gesture (notification shade, incoming call, palm rejection)
+  /// never fires [DragEndDetails] — without this the tile would freeze at the
+  /// drag position while the model still held the pre-drag one, so Save
+  /// would persist a different place than the user sees.
+  void _onPanCancel() {
+    final p = _pos;
+    setState(() => _live = null);
+    widget.onCommit(widget.item.copyWith(x: p.dx, y: p.dy));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final s = widget.scale;
+    final p = _pos;
+    final itemW = item.width * s;
+    final itemH = item.height * s;
+    final isSelected = widget.selected;
+    final icon = _iconFor(item.iconName);
+
+    return Positioned(
+      left: p.dx * s,
+      top: p.dy * s,
+      // Own layer: dragging this tile leaves the grid, walls and other
+      // tiles untouched.
+      child: RepaintBoundary(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          onPanStart: _onPanStart,
+          onPanUpdate: _onPanUpdate,
+          onPanEnd: _onPanEnd,
+          onPanCancel: _onPanCancel,
+          child: Container(
+            width: itemW,
+            height: itemH,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppColors.accent.withValues(alpha: 0.3)
+                  : AppColors.primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(
+                color: isSelected
+                    ? AppColors.accent
+                    : AppColors.primary.withValues(alpha: 0.4),
+                width: isSelected ? 2.5 : 1.2,
+              ),
+            ),
+            child: itemW > 40 && itemH > 30
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: min(itemW * 0.35, 20),
+                        color: isSelected
+                            ? AppColors.accent
+                            : AppColors.textSecondary,
+                      ),
+                      if (itemW > 55)
+                        SizedBox(
+                          width: itemW - 4,
+                          child: Text(
+                            item.name,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                              fontSize:
+                                  min(itemW * 0.1, 10).clamp(6, 10).toDouble(),
+                              fontWeight: FontWeight.w600,
+                              color: isSelected
+                                  ? AppColors.accent
+                                  : AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                    ],
+                  )
+                : Center(
+                    child: Icon(
+                      icon,
+                      size: min(itemW * 0.5, 14),
+                      color: isSelected
+                          ? AppColors.accent
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1705,11 +1834,15 @@ class _Cat {
 
 // ─── Room shape (walls) painter ───
 class _RoomShapePainter extends CustomPainter {
-  _RoomShapePainter(this.scale, this.walls, this.wallMode);
+  _RoomShapePainter(this.scale, this.walls, this.wallMode, this.revision);
 
   final double scale;
   final List<Offset> walls; // room-cm coordinates
   final bool wallMode;
+
+  /// Bumped whenever [walls] is mutated in place. Comparing the list itself
+  /// won't work because the painter holds the same mutable reference.
+  final int revision;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1764,7 +1897,10 @@ class _RoomShapePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RoomShapePainter old) => true;
+  bool shouldRepaint(covariant _RoomShapePainter old) =>
+      old.scale != scale ||
+      old.wallMode != wallMode ||
+      old.revision != revision;
 }
 
 // ─── Floor plan grid painter ───

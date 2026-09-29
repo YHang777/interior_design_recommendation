@@ -185,8 +185,8 @@ class ModelGlbResolver {
           'tap Retry — re-downloading is free.');
     } catch (e) {
       debugPrint('[model-3d] download of ${ar3d.url} failed: $e');
-      throw No3dAvailableException(
-          'downloading the 3D model failed ($e). Check the connection and '
+      throw const No3dAvailableException(
+          'Downloading the 3D model failed. Check your connection and '
           'tap Retry — re-downloading is free.');
     }
 
@@ -204,8 +204,8 @@ class ModelGlbResolver {
           'product form.');
     } catch (e) {
       debugPrint('[model-3d] prepare of ${ar3d.url} failed: $e');
-      throw No3dAvailableException(
-          'the 3D model could not be prepared at the product’s size ($e). '
+      throw const No3dAvailableException(
+          'The 3D model could not be prepared at the product’s size. '
           'Tap Regenerate 3D to create a fresh model.');
     }
 

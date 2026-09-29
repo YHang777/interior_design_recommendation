@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../../models/product.dart';
 import '../../../../services/model_generation/generation_decider.dart';
 import '../../../../services/model_generation/model_generation_trigger.dart';
@@ -80,9 +81,10 @@ class _ProductManagementScreenState
       setState(() => _activeOverride.remove(p.id));
       showAppSnackbar(
         context,
-        next ? 'Could not activate "${p.name}"' : 'Could not pause "${p.name}"',
+        userMessage(e,
+            fallback:
+                '${next ? 'Could not activate' : 'Could not pause'} "${p.name}". Please try again.'),
         isError: true,
-        detail: e.toString(),
         duration: const Duration(seconds: 4),
       );
     } finally {
@@ -176,9 +178,12 @@ class _ProductManagementScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not update stock for "${p.name}"',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback:
+                    'Could not update stock for "${p.name}". Please try again.'),
             isError: true,
-            detail: e.toString(),
             duration: const Duration(seconds: 4));
       }
     } finally {
@@ -207,9 +212,12 @@ class _ProductManagementScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not delete "${p.name}"',
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback:
+                    'Could not delete "${p.name}". Please try again.'),
             isError: true,
-            detail: e.toString(),
             duration: const Duration(seconds: 4));
       }
     } finally {

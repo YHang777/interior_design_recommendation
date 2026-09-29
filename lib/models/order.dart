@@ -1,3 +1,5 @@
+import 'dart:math';
+
 /// Order statuses following e-commerce lifecycle.
 enum OrderStatus {
   pending,
@@ -128,6 +130,196 @@ class OrderItem {
       };
 }
 
+/// One supplier's invoice for one order — the shipping document and receipt
+/// created the moment they accept the order.
+///
+/// Deliberately self-contained: the from/to blocks, the line items and the
+/// money are all frozen at issue time, so the document still reads correctly
+/// if the supplier later edits their profile, and the PDF builder never has
+/// to reach back into the [Order]. Scoped to a SINGLE supplier — on a
+/// multi-seller order every supplier gets their own invoice, covering only
+/// their items and their share of the shipping fee.
+///
+/// Order-level discount and tax are NOT split across suppliers (the order
+/// records them once, with no per-supplier attribution). They are carried as
+/// [orderDiscount]/[orderTax] purely so the document can state that other
+/// adjustments exist; they never enter [total].
+class OrderInvoice {
+  /// `INV-YYYYMMDD-NNNN`, matching the `ORD-…` order-number style.
+  final String invoiceNumber;
+  final String orderId;
+  final String orderNumber;
+
+  final String supplierId;
+  final String supplierName;
+  final String supplierPhone;
+  final String supplierAddress;
+  final String supplierEmail;
+  final DateTime issuedAt;
+
+  /// This supplier's line items only.
+  final List<OrderItem> items;
+
+  /// Sum of [items]' line totals.
+  final int subtotal;
+
+  /// This supplier's share of the order's shipping fee.
+  final int shippingFee;
+
+  /// [subtotal] + [shippingFee] — the charge for this shipment.
+  final int total;
+
+  final String customerName;
+  final String customerEmail;
+  final String customerPhone;
+  final String shippingAddress;
+  final String paymentMethod;
+  final DateTime orderCreatedAt;
+
+  /// Order-level discount/tax, for reference only. Never in [total].
+  final int orderDiscount;
+  final int orderTax;
+
+  const OrderInvoice({
+    required this.invoiceNumber,
+    required this.orderId,
+    required this.orderNumber,
+    required this.supplierId,
+    required this.supplierName,
+    required this.supplierPhone,
+    required this.supplierAddress,
+    required this.supplierEmail,
+    required this.issuedAt,
+    required this.items,
+    required this.subtotal,
+    required this.shippingFee,
+    required this.total,
+    required this.customerName,
+    required this.customerEmail,
+    required this.customerPhone,
+    required this.shippingAddress,
+    required this.paymentMethod,
+    required this.orderCreatedAt,
+    this.orderDiscount = 0,
+    this.orderTax = 0,
+  });
+
+  int get lineCount => items.length;
+
+  int get unitCount => items.fold(0, (sum, i) => sum + i.quantity);
+
+  /// Builds the document from an [Order] plus the accepting supplier's
+  /// profile. Money is derived from [order]'s own per-supplier helpers so an
+  /// invoice can never disagree with the order it bills.
+  factory OrderInvoice.issue({
+    required Order order,
+    required String supplierId,
+    required String supplierName,
+    String supplierPhone = '',
+    String supplierAddress = '',
+    String supplierEmail = '',
+    DateTime? issuedAt,
+    String? invoiceNumber,
+  }) {
+    final at = issuedAt ?? DateTime.now();
+    final myItems =
+        order.items.where((i) => i.supplierId == supplierId).toList();
+    final mySubtotal = myItems.fold<int>(0, (sum, i) => sum + i.lineTotal);
+    final myShipping = order.shippingShareFor(supplierId);
+    return OrderInvoice(
+      invoiceNumber: invoiceNumber ??
+          generateInvoiceNumber(at, supplierId: supplierId),
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      supplierId: supplierId,
+      supplierName: supplierName,
+      supplierPhone: supplierPhone,
+      supplierAddress: supplierAddress,
+      supplierEmail: supplierEmail,
+      issuedAt: at,
+      items: myItems,
+      subtotal: mySubtotal,
+      shippingFee: myShipping,
+      total: mySubtotal + myShipping,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone,
+      shippingAddress: order.shippingAddress,
+      paymentMethod: order.paymentMethod,
+      orderCreatedAt: order.createdAt,
+      orderDiscount: order.discount,
+      orderTax: order.tax,
+    );
+  }
+
+  /// `INV-YYYYMMDD-NNNN`. The date is the issue date; the suffix is a random
+  /// 4-digit tail (same shape as `ORD-…`), so numbers are human-readable and
+  /// collision-safe without a counter.
+  static String generateInvoiceNumber(DateTime issuedAt, {String? supplierId, Random? random}) {
+    final r = random ?? _invoiceRandom;
+    final y = issuedAt.year.toString().padLeft(4, '0');
+    final m = issuedAt.month.toString().padLeft(2, '0');
+    final d = issuedAt.day.toString().padLeft(2, '0');
+    return 'INV-$y$m$d-${r.nextInt(9000) + 1000}';
+  }
+
+  factory OrderInvoice.fromJson(Map<String, dynamic> json) {
+    final items = (json['items'] as List<dynamic>?)
+            ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    return OrderInvoice(
+      invoiceNumber: json['invoiceNumber']?.toString() ?? '',
+      orderId: json['orderId']?.toString() ?? '',
+      orderNumber: json['orderNumber']?.toString() ?? '',
+      supplierId: json['supplierId']?.toString() ?? '',
+      supplierName: json['supplierName']?.toString() ?? '',
+      supplierPhone: json['supplierPhone']?.toString() ?? '',
+      supplierAddress: json['supplierAddress']?.toString() ?? '',
+      supplierEmail: json['supplierEmail']?.toString() ?? '',
+      issuedAt: _parseOrderDate(json['issuedAt']) ?? DateTime.now(),
+      items: items,
+      subtotal: (json['subtotal'] as num?)?.toInt() ?? 0,
+      shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 0,
+      total: (json['total'] as num?)?.toInt() ?? 0,
+      customerName: json['customerName']?.toString() ?? '',
+      customerEmail: json['customerEmail']?.toString() ?? '',
+      customerPhone: json['customerPhone']?.toString() ?? '',
+      shippingAddress: json['shippingAddress']?.toString() ?? '',
+      paymentMethod: json['paymentMethod']?.toString() ?? '',
+      orderCreatedAt: _parseOrderDate(json['orderCreatedAt']) ?? DateTime.now(),
+      orderDiscount: (json['orderDiscount'] as num?)?.toInt() ?? 0,
+      orderTax: (json['orderTax'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'invoiceNumber': invoiceNumber,
+        'orderId': orderId,
+        'orderNumber': orderNumber,
+        'supplierId': supplierId,
+        'supplierName': supplierName,
+        'supplierPhone': supplierPhone,
+        'supplierAddress': supplierAddress,
+        'supplierEmail': supplierEmail,
+        'issuedAt': issuedAt.toUtc().toIso8601String(),
+        'items': items.map((i) => i.toJson()).toList(),
+        'subtotal': subtotal,
+        'shippingFee': shippingFee,
+        'total': total,
+        'customerName': customerName,
+        'customerEmail': customerEmail,
+        'customerPhone': customerPhone,
+        'shippingAddress': shippingAddress,
+        'paymentMethod': paymentMethod,
+        'orderCreatedAt': orderCreatedAt.toUtc().toIso8601String(),
+        'orderDiscount': orderDiscount,
+        'orderTax': orderTax,
+      };
+}
+
+final Random _invoiceRandom = Random();
+
 /// A complete order placed by a buyer, fulfilled by supplier(s).
 class Order {
   final String id;
@@ -170,6 +362,11 @@ class Order {
   /// Enables per-step dates in the buyer/supplier status timelines.
   final Map<String, DateTime> statusHistory;
 
+  /// Invoices issued against this order, keyed by supplier uid. Written in
+  /// the same transaction that accepts the order, so an accepted order never
+  /// exists without its paperwork. Empty until a supplier accepts.
+  final Map<String, OrderInvoice> invoices;
+
   final RefundStatus? refundStatus;
   final String? refundReason;
   final int? refundAmount;
@@ -195,6 +392,7 @@ class Order {
     this.supplierIds = const [],
     this.shippingBySupplier = const {},
     this.statusHistory = const {},
+    this.invoices = const {},
     this.refundStatus,
     this.refundReason,
     this.refundAmount,
@@ -236,6 +434,9 @@ class Order {
     return 0;
   }
 
+  /// The invoice [supplierId] issued when they accepted this order, if any.
+  OrderInvoice? invoiceFor(String supplierId) => invoices[supplierId];
+
   Order copyWith({
     String? id,
     String? orderNumber,
@@ -257,6 +458,7 @@ class Order {
     Map<String, int>? shippingBySupplier,
     DateTime? createdAt,
     Map<String, DateTime>? statusHistory,
+    Map<String, OrderInvoice>? invoices,
     RefundStatus? refundStatus,
     String? refundReason,
     int? refundAmount,
@@ -283,6 +485,7 @@ class Order {
       shippingBySupplier: shippingBySupplier ?? this.shippingBySupplier,
       createdAt: createdAt ?? this.createdAt,
       statusHistory: statusHistory ?? this.statusHistory,
+      invoices: invoices ?? this.invoices,
       refundStatus: clearRefund ? null : (refundStatus ?? this.refundStatus),
       refundReason: clearRefund ? null : (refundReason ?? this.refundReason),
       refundAmount: clearRefund ? null : (refundAmount ?? this.refundAmount),
@@ -321,6 +524,7 @@ class Order {
           ? _parseOrderDate(json['createdAt']) ?? DateTime.now()
           : DateTime.now(),
       statusHistory: _parseStatusHistory(json['statusHistory']),
+      invoices: _parseInvoices(json['invoices']),
       refundStatus: RefundStatus.fromString(json['refundStatus']?.toString()),
       refundReason: json['refundReason']?.toString(),
       refundAmount: (json['refundAmount'] as num?)?.toInt(),
@@ -349,10 +553,23 @@ class Order {
         'createdAt': createdAt.toUtc().toIso8601String(),
         'statusHistory': statusHistory.map(
             (status, when) => MapEntry(status, when.toUtc().toIso8601String())),
+        'invoices': invoices.map((id, inv) => MapEntry(id, inv.toJson())),
         if (refundStatus != null) 'refundStatus': refundStatus!.name,
         if (refundReason != null) 'refundReason': refundReason,
         if (refundAmount != null) 'refundAmount': refundAmount,
       };
+}
+
+/// Parses `{supplierUid: OrderInvoice}`. Malformed entries are dropped —
+/// a missing invoice simply means that supplier has not accepted yet.
+Map<String, OrderInvoice> _parseInvoices(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return const {};
+  final out = <String, OrderInvoice>{};
+  raw.forEach((supplierId, value) {
+    if (supplierId.isEmpty || value is! Map<String, dynamic>) return;
+    out[supplierId] = OrderInvoice.fromJson(value);
+  });
+  return out;
 }
 
 /// Parses the stored status→timestamp map (values may be ISO strings or

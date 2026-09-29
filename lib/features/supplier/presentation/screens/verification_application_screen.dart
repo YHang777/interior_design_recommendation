@@ -7,8 +7,8 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../../services/verification/verification_application_model.dart';
-import '../../../../services/verification/verification_application_service.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/float_button.dart';
@@ -95,8 +95,11 @@ class _VerificationApplicationScreenState
       picked = await _picker.pickImage(source: source, imageQuality: 90);
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not open the image picker.',
-            isError: true, detail: '$e');
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not open your photos. Please try again.'),
+            isError: true);
       }
       return null;
     }
@@ -174,15 +177,14 @@ class _VerificationApplicationScreenState
       });
       showAppSnackbar(context, 'Verification application submitted',
           color: AppColors.success, duration: const Duration(seconds: 3));
-    } on VerificationException catch (e) {
-      if (mounted) {
-        showAppSnackbar(context, 'Could not submit your application',
-            isError: true, detail: e.message);
-      }
     } catch (e) {
       if (mounted) {
-        showAppSnackbar(context, 'Could not submit your application',
-            isError: true, detail: '$e');
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback:
+                    'Could not submit your application. Please try again.'),
+            isError: true);
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

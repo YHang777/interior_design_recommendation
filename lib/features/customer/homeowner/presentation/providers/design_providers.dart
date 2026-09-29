@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../models/room_design.dart';
+import '../../data/datasources/chat_datasource.dart';
 import '../../data/datasources/supabase_room_design_datasource.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 
@@ -10,6 +11,12 @@ import '../../../../auth/presentation/providers/auth_providers.dart';
 final roomDesignDatasourceProvider =
     Provider<SupabaseRoomDesignDatasource>((ref) {
   return SupabaseRoomDesignDatasource();
+});
+
+/// Design-chat proxy client — the app talks to our backend, never to
+/// Gemini directly (the key lives only server-side).
+final chatDatasourceProvider = Provider<ChatDatasource>((ref) {
+  return ChatDatasource();
 });
 
 // ─── Saved Designs (polling from Supabase) ────────────────────────────────────

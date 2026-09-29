@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -78,7 +79,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Update failed: $e'),
+            content: Text(userMessage(e,
+                fallback: 'Could not save your profile. Please try again.')),
             backgroundColor: AppColors.error,
           ),
         );
@@ -358,7 +360,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                       ).showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                            'Could not send reset email: $e',
+                                            userMessage(e,
+                                                fallback:
+                                                    'Could not send the reset email. Please try again.'),
                                           ),
                                           backgroundColor: AppColors.error,
                                         ),

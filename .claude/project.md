@@ -126,7 +126,7 @@ lib/
 ├── models/                    # product, cart_item, order, review, room_design,
 │                              #   product_category, app_config_data
 ├── services/
-│   ├── gemini_service.dart
+│   ├── invoice/invoice_pdf.dart      # OrderInvoice → PDF (pdf + printing)
 │   ├── marketplace_repository.dart   # Firestore CRUD + seed/migration
 │   ├── recent_searches_store.dart
 │   ├── verification/                # verification_application_model/service (supplier IC apply)
@@ -184,7 +184,7 @@ keep token format in sync with `web/backend/src/lib/verification-token.ts`.
 | Navigation | **GoRouter** 14.8 — two `StatefulShellRoute.indexedStack` shells + role redirects |
 | Backend / DB | Firebase Auth + **Cloud Firestore** (marketplace source of truth) + Supabase PostgREST (room designs) |
 | Media | Cloudinary (product photos, unsigned preset), Supabase Storage (GLB models) |
-| AI | Google Gemini (`google_generative_ai`, model `gemini-2.0-flash`) for recommendations |
+| AI | Google Gemini **via the Node proxy** (`POST /api/ai/chat` on `web/backend`) — `GEMINI_API_KEY` is server-side only, never in the app; default model `gemini-2.5-flash-lite` |
 | 3D generation | Tripo AI (async poll) with procedural GLB generator from seller dimensions first |
 | AR | `ar_flutter_plugin_2` (ARCore/SceneView) — true-size placement, floor/wall finish overlays |
 | Camera / ML | `camera` + `google_mlkit_image_labeling` (room scanner) |
@@ -201,7 +201,7 @@ keep token format in sync with `web/backend/src/lib/verification-token.ts`.
 |---|---|---|
 | Account / Profile | ✅ | Firebase Auth; login/register/forgot-password; email verification live (Brevo). 2FA face recognition was planned — **not implemented**. |
 | AR Visualization | ✅ | True-size furniture from seller dims (procedural GLB) → Tripo fallback → bundled library; floor/wall finish overlays with swatches. Needs a physical device for runtime testing. |
-| AI Recommendation Engine | ✅ | Gemini chat-style recommender with inline style/room selection. |
+| AI Recommendation Engine | ✅ | Design assistant (product + room ideas) with style/room selection. Talks to the server-side Gemini proxy — the API key never ships in the app. |
 | Marketplace (eco filter) | ✅ | Firestore real-time: catalog, cart, checkout, orders, reviews, wishlist. Membership tiers count DELIVERED orders only. Eco/energy filter exists in the product model/UI. |
 | Budget Planner | ✅ | Budget plans + estimates (MYR). |
 | Role Dashboards | ✅ | Homeowner dashboard + supplier dashboard/analytics. |

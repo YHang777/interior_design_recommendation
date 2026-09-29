@@ -1,3 +1,4 @@
+import '../../../../core/utils/user_errors.dart';
 import '../../data/models/app_user.dart';
 
 /// Abstract contract for authentication operations.
@@ -57,11 +58,15 @@ abstract class IAuthRepository {
 }
 
 /// Custom exception for auth errors with user-friendly messages.
-class AuthException implements Exception {
+class AuthException implements Exception, UserFacingException {
+  /// Short, plain-language text — safe to show as is.
   final String message;
   final String? code;
 
   const AuthException(this.message, {this.code});
+
+  @override
+  String get userMessage => message;
 
   @override
   String toString() => 'AuthException: $message';

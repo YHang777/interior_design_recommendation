@@ -828,8 +828,9 @@ class Tripo3DGenerator {
     if (e is MissingDimensionsException) return needsDimensionsMessage;
     if (e is GlbRescaleException || e is GlbParseException) {
       return 'The generated model could not be prepared at the product’s '
-          'size — tap Regenerate 3D for fresh geometry. (${e.toString()})';
+          'size — tap Regenerate 3D for fresh geometry.';
     }
-    return e.toString().replaceFirst('Exception: ', '');
+    // Never surface a raw exception dump; the stack is already in the logs.
+    return '3D generation hit an unexpected problem — tap Regenerate 3D.';
   }
 }

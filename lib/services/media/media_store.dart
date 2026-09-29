@@ -6,6 +6,10 @@ import 'supabase_media_store.dart';
 
 /// Raised when a media upload fails in a way the caller should surface to
 /// the user (unconfigured store, rejected upload, network failure, …).
+///
+/// Deliberately does NOT implement [UserFacingException]: the call site knows
+/// the context ("Could not publish the product") and its `userMessage`
+/// fallback is the better sentence. `message` is the technical form for logs.
 class MediaStoreException implements Exception {
   const MediaStoreException(this.message);
 

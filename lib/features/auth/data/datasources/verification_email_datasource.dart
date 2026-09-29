@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
 import '../../../../config/app_config.dart';
@@ -44,26 +45,24 @@ class VerificationEmailDatasource {
           .timeout(_timeout);
     } on TimeoutException {
       throw const AuthException(
-        'The verification server took too long to respond. Please try again.',
+        'The verification server took too long. Please try again.',
         code: 'verification-email-send-failed',
       );
     } on http.ClientException catch (e) {
-      throw AuthException(
-        'Could not reach the verification server (${e.message}).',
+      debugPrint('[verify] send failed: $e');
+      throw const AuthException(
+        'Could not reach the verification server. Check your connection.',
         code: 'verification-email-send-failed',
       );
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      var message = 'Could not send the verification email.';
-      try {
-        final decoded = jsonDecode(resp.body);
-        if (decoded is Map<String, dynamic> && decoded['error'] is String) {
-          message = decoded['error'] as String;
-        }
-      } catch (_) {
-        // Non-JSON error body — keep the generic message.
-      }
-      throw AuthException(message, code: 'verification-email-send-failed');
+      // The middleware's body is a server diagnostic, not a sentence for the
+      // person waiting on the email — log it and show our own short line.
+      debugPrint('[verify] send rejected HTTP ${resp.statusCode}: ${resp.body}');
+      throw const AuthException(
+        'Could not send the verification email. Please try again.',
+        code: 'verification-email-send-failed',
+      );
     }
   }
 }

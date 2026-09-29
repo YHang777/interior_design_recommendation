@@ -4,8 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/utils/user_errors.dart';
 import '../../../../shared/widgets/float_button.dart';
-import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
 
@@ -63,10 +63,11 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
         backgroundColor: AppColors.accent,
         behavior: SnackBarBehavior.floating,
       ));
-    } on AuthException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.message),
+        content: Text(userMessage(e,
+            fallback: 'Could not resend the email. Please try again.')),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ));
