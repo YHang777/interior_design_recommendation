@@ -31,6 +31,9 @@ class RouteNames {
   static const homeownerDesignEditor = 'homeowner-design-editor';
   static const arViewer = 'ar-viewer';
 
+  // Shared (buyer + supplier)
+  static const orderInvoice = 'order-invoice';
+
   // Supplier
   static const supplierShell = 'supplier-shell';
   static const supplierDashboard = 'supplier-dashboard';

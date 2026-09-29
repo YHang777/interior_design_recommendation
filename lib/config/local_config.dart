@@ -3,8 +3,10 @@
 /// Edit these values to set keys/URLs without passing `--dart-define`.
 /// Keep in mind: avoid committing real secrets to a public repo.
 class LocalConfig {
-  // No Gemini settings here on purpose: AI chat goes through the backend
-  // proxy (`AppConfig.chatApiUrl`), which holds GEMINI_API_KEY server-side.
+  // No Gemini or Tripo settings here on purpose: both go through backend
+  // proxies (`AppConfig.chatApiUrl` / `AppConfig.tripoApiUrl`), which hold
+  // GEMINI_API_KEY and TRIPO_API_KEY server-side. A key compiled into an APK
+  // can be pulled out of the binary — it is a leaked key, not a hidden one.
 
   /// Marketplace API base URL. Set to your backend list endpoint.
   /// Uses the local Dart server by default (run `cd server && dart run bin/server.dart`).
@@ -16,20 +18,10 @@ class LocalConfig {
   /// the local Dart server (8080 is Apache; the Android emulator rewrites
   /// localhost to 10.0.2.2). Set this to the Render URL (https://…
   /// onrender.com) once deployed.
-  static const String verificationApiUrl = 'https://interior-design-recommendation.onrender.com';
-
-  /// Tripo 3D API key (get one at https://platform.tripo3d.ai).
   ///
-  /// When set, products with real dimensions and a network image get an
-  /// AI-generated 3D model from Tripo at publish time (textured image-to-
-  /// model). Tripo is pay-as-you-go (~US$0.30 per textured model after any
-  /// free signup credits) — leave `null` to stay on the free built-in
-  /// procedural generator. Set to `null` to use environment or default.
-  static const String? tripoApiKey = 'tsk_-o-DBmZ285628E4tHWIXDHyBk8sNj2-gOWJZHqGDdTY';
-
-  /// Tripo model version. Leave `null` to use the AppConfig default
-  /// (`v3.1-20260211`, the current v3 release).
-  static const String? tripoModelVersion = null; // e.g., "v3.1-20260211"
+  /// This is also the base for the AI chat and 3D-generation proxies — one
+  /// backend, one URL.
+  static const String verificationApiUrl = 'https://interior-design-recommendation.onrender.com';
 
   /// Cloudinary cloud name (dashboard top-left, e.g. "dxyz123").
   ///

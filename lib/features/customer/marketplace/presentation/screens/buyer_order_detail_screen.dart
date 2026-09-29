@@ -323,6 +323,17 @@ class _OrderBody extends ConsumerWidget {
             dividerVerticalPadding: 6,
           ),
         ),
+        // ── Invoices: the buyer's receipt — one per seller on a shared
+        // order. Rendered only once a seller has actually issued paperwork,
+        // so there is never a button that leads nowhere.
+        if (order.invoices.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _sectionCard(
+            context,
+            order.invoices.length == 1 ? 'Invoice' : 'Invoices',
+            child: _invoiceEntry(context, order),
+          ),
+        ],
         const SizedBox(height: 14),
         _sectionCard(
           context,
@@ -422,6 +433,53 @@ Product? _liveProductFor(OrderItem item, Map<String, Product> liveProducts) {
   final product = liveProducts[item.productId];
   if (product == null) return null;
   return product.resolvedSupplierId == item.supplierId ? product : null;
+}
+
+/// Opens one seller's invoice — the buyer's receipt for that shipment.
+void _openInvoice(BuildContext context, OrderInvoice invoice) {
+  context.pushNamed(
+    RouteNames.orderInvoice,
+    pathParameters: {
+      'orderId': invoice.orderId,
+      'supplierId': invoice.supplierId,
+    },
+  );
+}
+
+/// Invoice entry point: one button when a single seller issued paperwork, a
+/// tappable per-seller list when the order is shared.
+Widget _invoiceEntry(BuildContext context, Order order) {
+  final invoices = order.invoices.values.toList();
+  if (invoices.length == 1) {
+    final invoice = invoices.single;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: () => _openInvoice(context, invoice),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.accent,
+          side: BorderSide(color: AppColors.accent.withValues(alpha: 0.4)),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: const Text('View invoice',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+      ),
+    );
+  }
+  return Column(
+    children: [
+      for (var i = 0; i < invoices.length; i++) ...[
+        if (i > 0) const Divider(height: 14, thickness: 0.6),
+        _InvoiceRow(
+          invoice: invoices[i],
+          onTap: () => _openInvoice(context, invoices[i]),
+        ),
+      ],
+    ],
+  );
 }
 
 /// Opens the write-review bottom sheet for one line item, then refreshes the
@@ -1101,6 +1159,60 @@ class _ReviewSheetState extends ConsumerState<_ReviewSheet> {
 }
 
 // ── Small building blocks ───────────────────────────────────────────────────
+
+/// One seller's invoice line on a shared order — seller name + invoice
+/// number, tapping opens that supplier's invoice.
+class _InvoiceRow extends StatelessWidget {
+  const _InvoiceRow({required this.invoice, required this.onTap});
+
+  final OrderInvoice invoice;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final seller = invoice.supplierName.trim().isEmpty
+        ? 'Seller'
+        : invoice.supplierName.trim();
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            const Icon(Icons.receipt_long_outlined,
+                size: 18, color: AppColors.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    seller,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    invoice.invoiceNumber,
+                    style: const TextStyle(
+                        fontSize: 11.5, color: AppColors.textHint),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _MetaRow extends StatelessWidget {
   const _MetaRow(this.icon, this.label, {this.sub});

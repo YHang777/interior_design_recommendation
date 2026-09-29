@@ -18,7 +18,7 @@
 ///    submit — a human is deciding to spend;
 ///  - an explicit regenerate on a non-eligible product keeps the current
 ///    ready model instead of clobbering it;
-///  - every refusal names the EXACT missing precondition(s) (API key, photo,
+///  - every refusal names the EXACT missing precondition(s) (service, photo,
 ///    dimensions) so the operator knows what to fix.
 library;
 
@@ -88,12 +88,12 @@ const String needsNetworkImageMessage =
     '3D generation needs a clear, public product photo (uploaded as a URL). '
     'Re-upload the image and try again.';
 
-/// Message used when no Tripo API key is configured — the operator must set
-/// it; there is no other model source to fall back to.
-const String needsTripoKeyMessage =
-    '3D generation is not configured: set TRIPO_API_KEY (or '
-    'LocalConfig.tripoApiKey) and restart the app. Tripo is the only 3D '
-    'model source, so no model can be created without it.';
+/// Message used when there is no 3D-generation service to call — either this
+/// build has no backend URL, or the backend answered "not set up". The Tripo
+/// key itself is a server-side env var (TRIPO_API_KEY on Render); a seller
+/// cannot set it and is not asked to.
+const String tripoUnavailableMessage =
+    '3D generation is not set up yet. Try again later.';
 
 /// Message used when the seller declared no dimension at all — AR needs the
 /// product's real size and never guesses one.
@@ -102,7 +102,7 @@ const String needsDimensionsMessage =
     'in the product form. AR will not place a model at a guessed size.';
 
 /// Names exactly which precondition(s) are absent, e.g.
-/// `'TRIPO_API_KEY (LocalConfig.tripoApiKey), Width/Height/Depth (meters)'`.
+/// `'the 3D generation service, Width/Height/Depth (meters)'`.
 /// Empty string when nothing is missing.
 String missingGenerationReasons({
   required bool tripoConfigured,
@@ -110,7 +110,7 @@ String missingGenerationReasons({
   required bool hasDimensions,
 }) {
   final missing = <String>[];
-  if (!tripoConfigured) missing.add('TRIPO_API_KEY (LocalConfig.tripoApiKey)');
+  if (!tripoConfigured) missing.add('the 3D generation service');
   if (!hasNetworkImage) {
     missing.add('a clear public product photo (image URL)');
   }
@@ -133,7 +133,7 @@ String missingPreconditionsMessage({
   if (!hasDimensions && tripoConfigured && hasNetworkImage) {
     return needsDimensionsMessage;
   }
-  if (!tripoConfigured) return '$needsTripoKeyMessage Missing: $missing.';
+  if (!tripoConfigured) return '$tripoUnavailableMessage Missing: $missing.';
   if (!hasNetworkImage) return '$needsNetworkImageMessage Missing: $missing.';
   return '3D generation cannot run — missing: $missing.';
 }
@@ -150,7 +150,8 @@ String missingPreconditionsMessage({
 ///   rescaler sizes from whichever axes exist; none → refuse).
 /// - [hasNetworkImage]: `image` starts with http(s) — Tripo fetches it
 ///   server-side.
-/// - [tripoConfigured]: an API key is configured.
+/// - [tripoConfigured]: this build has a 3D-generation backend to call (the
+///   Tripo key itself lives in that backend's env, not here).
 /// - [force]: an EXPLICIT seller action (Retry chip, "Regenerate 3D" menu,
 ///   re-save with the AI switch on). Bypasses the automatic-attempt cap.
 GenerationDecision decideGeneration({

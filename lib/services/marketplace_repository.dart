@@ -364,7 +364,10 @@ class MarketplaceRepository {
         // Record when this step was reached so timelines can date each stage.
         statusHistory: {...current.statusHistory, status.name: now},
       );
-      txn.set(doc, updated.toJson());
+      // Status changes never touch paperwork: the rules only let a customer
+      // update an order while `invoices` is byte-identical, so the stored map
+      // is written back verbatim (see preserveStoredInvoices).
+      txn.set(doc, preserveStoredInvoices(updated.toJson(), snapshot.data()!));
       return updated;
     });
   }
@@ -477,7 +480,9 @@ class MarketplaceRepository {
         status: OrderStatus.cancelled,
         statusHistory: {...order.statusHistory, OrderStatus.cancelled.name: now},
       );
-      txn.set(orderRef, updated.toJson());
+      // Cancellation is the customer's own action and must never look like an
+      // invoice edit to the rules — see preserveStoredInvoices.
+      txn.set(orderRef, preserveStoredInvoices(updated.toJson(), orderSnap.data()!));
       return updated;
     });
   }

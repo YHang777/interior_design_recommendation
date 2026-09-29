@@ -102,7 +102,8 @@ One service `interior-design-recommendation` on the free tier, image built by
 lib/
 ├── main.dart                  # Firebase init → first-auth seed/migration → ProviderScope → app
 ├── app.dart                   # MaterialApp.router
-├── config/                    # app_config.dart, local_config.dart (API keys — see Secrets)
+├── config/                    # app_config.dart, local_config.dart (API base
+│                              #   URLs only — NO third-party keys live in the app)
 ├── core/
 │   ├── constants/             # app_colors, app_strings
 │   ├── router/                # app_router.dart (GoRouter, role redirects), route_names.dart
@@ -185,7 +186,7 @@ keep token format in sync with `web/backend/src/lib/verification-token.ts`.
 | Backend / DB | Firebase Auth + **Cloud Firestore** (marketplace source of truth) + Supabase PostgREST (room designs) |
 | Media | Cloudinary (product photos, unsigned preset), Supabase Storage (GLB models) |
 | AI | Google Gemini **via the Node proxy** (`POST /api/ai/chat` on `web/backend`) — `GEMINI_API_KEY` is server-side only, never in the app; default model `gemini-2.5-flash-lite` |
-| 3D generation | Tripo AI (async poll) with procedural GLB generator from seller dimensions first |
+| 3D generation | Tripo AI **via the Node proxy** (`/api/tripo/*` on `web/backend`) — `TRIPO_API_KEY` server-side only, never in the app; async poll, with a procedural GLB generator from seller dimensions first |
 | AR | `ar_flutter_plugin_2` (ARCore/SceneView) — true-size placement, floor/wall finish overlays |
 | Camera / ML | `camera` + `google_mlkit_image_labeling` (room scanner) |
 | Web admin | React 18 + Vite 6 + TypeScript, Express 4 + firebase-admin 13 + zod, Node 22 |
@@ -296,7 +297,12 @@ code style. Flutter UI work needs widget tests for layout fixes (`test/`).
 
 - Service-account JSON and API keys are **secrets**: never commit, never paste
   into chat. Sources: `web/.env` / `web/backend/.env` (gitignored), Render
-  Environment tab, `lib/config/local_config.dart` for the app's client keys.
+  Environment tab.
+- **No third-party key may ever live in the Flutter app.** `GEMINI_API_KEY` and
+  `TRIPO_API_KEY` are read only by `web/backend` (via its env) and the app
+  calls the proxies (`/api/ai/chat`, `/api/tripo/*`) with a Firebase ID token.
+  A key compiled into an APK can be pulled out of the binary — that is a leaked
+  key, not a hidden one. `lib/config/local_config.dart` holds **no** secrets.
 - `web/.gitignore` covers `service-account*.json`, `secrets/`, `.env`; root
   `.gitignore` covers `.env`, `server/secrets/`.
 - Passwords are never stored or logged. Admin API refuses non-admin UIDs.

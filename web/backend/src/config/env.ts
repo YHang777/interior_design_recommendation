@@ -84,4 +84,23 @@ export const env = {
    * when Google restricts a model to older keys.
    */
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite',
+
+  // ── 3D generation (`/api/tripo/*`) ──────────────────────────────────────
+  //
+  // Same rule as the Gemini key: SERVER-SIDE ONLY. The Tripo key used to live
+  // in `lib/config/local_config.dart`, which meant every APK shipped a copy of
+  // it. It now lives here and the app talks to this proxy instead.
+
+  /** Tripo API key (https://platform.tripo3d.ai → API keys). */
+  tripoApiKey: process.env.TRIPO_API_KEY ?? '',
+  /**
+   * Tripo OpenAPI base. Overridable so a version bump or a mock can be tried
+   * without a code change.
+   */
+  tripoBaseUrl: process.env.TRIPO_BASE_URL ?? 'https://openapi.tripo3d.ai/v3',
+  /**
+   * Tripo model version sent as the image-to-model `model` field. Owned by the
+   * server so a version bump is one env var, not an app release.
+   */
+  tripoModelVersion: process.env.TRIPO_MODEL_VERSION ?? 'v3.1-20260211',
 };

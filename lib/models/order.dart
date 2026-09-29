@@ -572,6 +572,33 @@ Map<String, OrderInvoice> _parseInvoices(dynamic raw) {
   return out;
 }
 
+/// Puts the STORED `invoices` map back into [payload] byte-for-byte, or drops
+/// the key entirely when the stored document never had one.
+///
+/// `firestore.rules` lets a customer update an order only while the `invoices`
+/// value is untouched — `diff().affectedKeys()` must not name it. A
+/// read-modify-write that re-serialises the parsed model can trip that check
+/// on a write that never meant to touch paperwork, two ways:
+///
+///  * [Order.toJson] always emits an `invoices` key, so a legacy order that
+///    predates the feature would look like an ADD (`{}` appearing);
+///  * any field that does not survive a parse → serialise round-trip —
+///    currently only the dates, and only if a stored value is missing and
+///    defaults to `DateTime.now()` — would look like an edit.
+///
+/// Either would lock a buyer out of cancelling their own order. Invoice writes
+/// (`acceptOrderAndIssueInvoice`) deliberately do NOT use this: they are the
+/// supplier's paperwork write and must change the map.
+Map<String, dynamic> preserveStoredInvoices(
+  Map<String, dynamic> payload,
+  Map<String, dynamic> stored,
+) {
+  if (stored.containsKey('invoices')) {
+    return {...payload, 'invoices': stored['invoices']};
+  }
+  return {...payload}..remove('invoices');
+}
+
 /// Parses the stored status→timestamp map (values may be ISO strings or
 /// Firestore Timestamps). Unparseable entries are dropped, never fabricated.
 Map<String, DateTime> _parseStatusHistory(dynamic raw) {

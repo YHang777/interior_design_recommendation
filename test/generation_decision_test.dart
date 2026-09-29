@@ -9,7 +9,7 @@
 //  - a persisted task id always means poll-first (never a second paid task);
 //  - brand-new Tripo submissions are capped at autoAttemptsCap for AUTOMATIC
 //    kicks while explicit seller actions (force) always may submit;
-//  - every refusal names the EXACT missing precondition (API key, photo,
+//  - every refusal names the EXACT missing precondition (service, photo,
 //    dimensions) — never a vague "no model available";
 //  - stampProcedural is never produced (the action only survives as a
 //    legacy enum value for the supplier screen's exhaustive switch).
@@ -90,7 +90,8 @@ void main() {
       expect(d.action, GenerationAction.submitNewTripo);
     });
 
-    test('ready + force + no API key -> KEEP the model, name the key', () {
+    test('ready + force + no 3D service -> KEEP the model, name the service',
+        () {
       final d = decide(
         status: 'ready',
         hasDimensions: true,
@@ -100,7 +101,7 @@ void main() {
       );
       expect(d.action, GenerationAction.none);
       expect(d.message, contains('Keeping the current AI model'));
-      expect(d.message, contains('TRIPO_API_KEY'));
+      expect(d.message, contains('the 3D generation service'));
     });
 
     test('ready + force + no network image -> KEEP, name the photo', () {
@@ -231,7 +232,7 @@ void main() {
   });
 
   group('refusals name the exact missing precondition', () {
-    test('force + no API key -> key message', () {
+    test('force + no 3D service -> unavailable message', () {
       final d = decide(
         status: 'failed',
         force: true,
@@ -242,8 +243,8 @@ void main() {
       expect(d.action, GenerationAction.markFailed);
       // The message is the constant plus a "Missing: …" tail naming the
       // precondition(s) precisely.
-      expect(d.message, startsWith(needsTripoKeyMessage));
-      expect(d.message, contains('Missing: TRIPO_API_KEY'));
+      expect(d.message, startsWith(tripoUnavailableMessage));
+      expect(d.message, contains('Missing: the 3D generation service'));
     });
 
     test('force + no seller dimensions -> dimensions message', () {
@@ -275,7 +276,7 @@ void main() {
     test('force + several missing -> message lists every one', () {
       final d = decide(status: 'failed', force: true);
       expect(d.action, GenerationAction.markFailed);
-      expect(d.message, contains('TRIPO_API_KEY'));
+      expect(d.message, contains('the 3D generation service'));
       expect(d.message, contains('Width/Height/Depth'));
       expect(d.message, contains('photo'));
     });
@@ -305,7 +306,7 @@ void main() {
       );
       expect(d.action, GenerationAction.markFailed);
       expect(d.message, isNotEmpty);
-      expect(d.message, contains('TRIPO_API_KEY'));
+      expect(d.message, contains('the 3D generation service'));
     });
   });
 
@@ -328,7 +329,7 @@ void main() {
       expect(d.message, needsDimensionsMessage);
     });
 
-    test('none + dims + no key -> markNoModel naming the key', () {
+    test('none + dims + no 3D service -> markNoModel naming the service', () {
       final d = decide(
         status: 'none',
         attempts: 0,
@@ -337,7 +338,7 @@ void main() {
         tripoConfigured: false,
       );
       expect(d.action, GenerationAction.markNoModel);
-      expect(d.message, contains('TRIPO_API_KEY'));
+      expect(d.message, contains('the 3D generation service'));
     });
   });
 

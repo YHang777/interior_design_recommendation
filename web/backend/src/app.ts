@@ -7,6 +7,8 @@ import { createVerifyEmailRouter } from './routes/verify-email.routes';
 import { defaultVerifyEmailDeps } from './services/verification-email.service';
 import { createAiChatRouter } from './routes/ai-chat.routes';
 import { defaultAiChatDeps } from './services/ai-chat.service';
+import { createTripoRouter } from './routes/tripo.routes';
+import { defaultTripoDeps } from './services/tripo.service';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { env } from './config/env';
 
@@ -23,6 +25,8 @@ export function resolveAdminStaticDir(): string {
  *                     mobile app calls; port of the Dart server's routes)
  *   /api/ai/*         design assistant for the mobile app (authenticated
  *                     proxy onto Gemini — the API key stays server-side)
+ *   /api/tripo/*      3D model generation for the mobile app (authenticated
+ *                     proxy onto Tripo — same key rule)
  *   /admin            the React admin console (static SPA)
  *   /admin/api/*      admin API (auth, users, stats, IC review)
  *   /api/*            same admin API — kept as an alias for local dev and
@@ -34,7 +38,7 @@ export function resolveAdminStaticDir(): string {
  *   CORS (locked to FRONTEND_ORIGIN; only matters for split-origin dev)
  *     → JSON body parsing
  *       → /verify-email routes
- *         → /api/ai routes (authenticate → validate → Gemini)
+ *         → /api/ai and /api/tripo routes (authenticate → validate → upstream)
  *           → /api + /admin/api routes (each composed of authenticate →
  *             requireAdmin → validate → handler → services/ persistence)
  *             → SPA static + fallback → 404 → central error handler
@@ -69,6 +73,11 @@ export function createApp(): express.Express {
   // alias so the path is claimed explicitly, and authenticated: it is a
   // proxy onto a paid model, so it is never left open.
   app.use('/api/ai', createAiChatRouter(defaultAiChatDeps()));
+
+  // 3D model generation for the mobile app — same reasoning as /api/ai:
+  // Tripo is pay-as-you-go, so the relay is authenticated and the key stays
+  // here. Also ahead of the admin /api alias for the same path-claim reason.
+  app.use('/api/tripo', createTripoRouter(defaultTripoDeps()));
 
   // Admin API — mounted at the unified path AND the plain /api alias.
   app.use('/api', apiRouter);

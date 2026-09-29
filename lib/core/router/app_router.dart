@@ -36,6 +36,7 @@ import '../../features/customer/scanner/presentation/screens/room_scanner_screen
 import '../../features/customer/ar/data/furniture_model_library.dart';
 import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
+import '../../shared/screens/order_invoice_screen.dart';
 
 import 'route_names.dart';
 
@@ -90,8 +91,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == '/marketplace' ||
               state.matchedLocation.startsWith('/marketplace/product/') ||
               state.matchedLocation == '/ar-viewer';
+      // The invoice screen is shared (buyer receipt + seller paperwork), so
+      // suppliers must reach /orders/... without being bounced to the
+      // dashboard they normally get sent to outside /supplier.
+      final isSharedInvoice =
+          state.matchedLocation.startsWith('/orders/');
       if (isLoggedIn && user.isSupplier &&
           !isStorefrontBrowse &&
+          !isSharedInvoice &&
           !state.matchedLocation.startsWith('/supplier') &&
           !isOnAuthRoute) {
         return '/supplier/dashboard';
@@ -221,6 +228,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: RouteNames.supplierVerification,
         pageBuilder: (_, __) =>
             _buildPage(const VerificationApplicationScreen()),
+      ),
+
+      // ── Invoice (shared: buyer receipt + seller paperwork, full-screen) ──
+      GoRoute(
+        path: '/orders/:orderId/invoice/:supplierId',
+        name: RouteNames.orderInvoice,
+        pageBuilder: (_, state) => _buildPage(
+          OrderInvoiceScreen(
+            orderId: state.pathParameters['orderId']!,
+            supplierId: state.pathParameters['supplierId']!,
+          ),
+        ),
       ),
 
       // ── Homeowner shell ──

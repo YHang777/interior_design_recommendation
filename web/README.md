@@ -8,6 +8,8 @@ from ONE Render URL:
 | `/admin` | Admin console SPA (React + Vite + TypeScript) |
 | `/admin/api/*` (alias `/api/*`) | Admin API — monitor customers/suppliers, approve/reject suppliers, review IC applications, password help, safe account deletion |
 | `/verify-email/send` · `/verify-email/confirm` | Registration email verification (Brevo link → confirm page marks Firebase `emailVerified`) — port of the old Dart `server/` routes, same paths and byte-compatible tokens |
+| `/api/ai/chat` | Design assistant for the Flutter app (short product/room chat) — signed-in, proxied to Gemini. **The key stays here.** |
+| `/api/tripo/generation/image-to-model` · `/api/tripo/tasks/:taskId` | 3D model generation for sellers — signed-in, proxied to Tripo (status + body forwarded verbatim). **The key stays here.** |
 
 **Architecture rule: the frontend never talks to Firebase or Supabase.** It
 talks only to the admin API, which is the sole component that mutates Firebase
@@ -88,6 +90,9 @@ override in `frontend/.env.local` if the API runs elsewhere.
 | `PUBLIC_BASE_URL` | backend | Fallback email-link origin (e.g. `https://interior-design-recommendation.onrender.com`). Normally overridden per-request from `Host` + `X-Forwarded-Proto` |
 | `GEMINI_API_KEY` | backend | Google AI Studio key for `/api/ai/chat` (the design assistant). **Server-side only** — never put it in the Flutter app or a `--dart-define`; APK contents are extractable. Missing → chat returns `503 NOT_CONFIGURED`. |
 | `GEMINI_MODEL` | backend | Model id for the assistant (default `gemini-2.5-flash-lite`, the cheapest tier). If a new key cannot reach the 2.5 family, set `gemini-3.1-flash-lite`. |
+| `TRIPO_API_KEY` | backend | Tripo AI key for `/api/tripo/*` (seller 3D generation). **Server-side only** — same rule as the Gemini key: it used to live in `lib/config/local_config.dart` and shipped inside every APK. Missing → both routes return `503 NOT_CONFIGURED`. |
+| `TRIPO_MODEL_VERSION` | backend | Tripo model billed for image-to-model (default `v3.1-20260211`). Server-owned so a version bump is an env change, not an app release. |
+| `TRIPO_BASE_URL` | backend | Tripo OpenAPI origin (default `https://openapi.tripo3d.ai/v3`) — override only for a Tripo proxy/mirror. |
 | `ADMIN_STATIC_DIR` | backend | Where the built SPA lives. Default: `web/frontend/dist`; the unified Docker image sets it to `/app/frontend-dist` |
 | `VITE_API_BASE_URL` | frontend | Backend base URL (default `http://localhost:4000/api`; the unified image bakes `/admin/api`) — **build-time** (`VITE_` vars are inlined by Vite at `npm run build`) |
 
@@ -143,6 +148,8 @@ services next to the real host.
 | `BREVO_API_KEY` · `BREVO_SENDER_EMAIL` · `BREVO_SENDER_NAME` | unchanged | Brevo send |
 | `GEMINI_API_KEY` | Google AI Studio key | **New** — design assistant (`/api/ai/chat`). Server-side only. |
 | `GEMINI_MODEL` | optional, default `gemini-2.5-flash-lite` | **New** — set `gemini-3.1-flash-lite` if the key cannot reach the 2.5 family |
+| `TRIPO_API_KEY` | Tripo AI key (`tsk_…`) | **New** — seller 3D generation (`/api/tripo/*`). Server-side only. |
+| `TRIPO_MODEL_VERSION` | optional, default `v3.1-20260211` | **New** — the Tripo model billed for image-to-model |
 | `PUBLIC_BASE_URL` | `https://interior-design-recommendation.onrender.com` | Fallback email-link base (normally derived from the request Host) |
 | `FRONTEND_ORIGIN` | optional on the unified host | Only matters for split-origin local dev (`http://localhost:5173`). Same-origin `/admin` → `/admin/api` calls need no CORS at all. |
 
@@ -171,6 +178,7 @@ Failure decoder:
 | health `firebaseConfigured:false` | no service account | secret-file mount + `SERVICE_ACCOUNT_PATH`, or `FIREBASE_SERVICE_ACCOUNT_JSON` |
 | health `verificationEmailConfigured:false` | `VERIFY_TOKEN_SECRET` / `BREVO_API_KEY` missing | fill both |
 | `503 LOGIN_NOT_CONFIGURED` | `FIREBASE_WEB_API_KEY` missing | set it |
+| seller's "Generate 3D" returns "3D generation is not set up yet" | `TRIPO_API_KEY` missing on the server | set it in Render → Environment (the app cannot see it — by design) |
 | `403 NOT_ADMIN` | UID not allowlisted, no claim | add to `ADMIN_UIDS` (save restarts) |
 | first load slow (30–60 s) | free-tier cold start | expected; same as before |
 
@@ -240,6 +248,8 @@ Auth = `Authorization: Bearer <id-token>` (Firebase ID token).
 |---|---|---|---|---|
 | GET | `/health` | public | — | `{ status, service, firebaseConfigured }` |
 | POST | `/ai/chat` | **signed-in** | `{ messages: [{role:'user'\|'model', text}], style?, room?, products?: [{name, price?, category?}] }` (≤20 products) | `{ reply }` — the design assistant. Proxied to Gemini; the API key never leaves the server. |
+| POST | `/tripo/generation/image-to-model` | **signed-in** | `{ input: <image URL>, texture?, pbr?, auto_size?, face_limit? }` (≤500000) | Tripo's own `{code, data}` body, **status and Content-Type forwarded verbatim** — the app's transient/terminal retry policy keys off them. The server injects `model` and the `Authorization: Bearer <TRIPO_API_KEY>` header; the key never leaves the server. |
+| GET | `/tripo/tasks/:taskId` | **signed-in** | `:taskId` must be `[A-Za-z0-9_-]{1,128}` (path-traversal guarded) | Tripo's task status body, forwarded verbatim (same pass-through rule). Re-polling is free; re-submitting is billed — the app keeps `ar3d.taskId` across failures so a paid task is never lost. |
 | POST | `/auth/login` | public | `{ email, password }` | `{ uid, email, idToken, expiresIn, isAdmin, profile }` |
 | GET | `/auth/me` | admin | — | `{ uid, email, name, isAdmin, adminViaClaim, profile }` |
 | GET | `/stats` | admin | — | `{ customers, suppliers, authOnlyAccounts, products, orders, pendingSuppliers, rejectedSuppliers, unverifiedSuppliers, pendingVerifications, recentUsers[≤5] }` |
@@ -258,11 +268,20 @@ Error shape (any failure): `{ error: { code, message, details? } }` with codes
 `CONFIRM_MISMATCH` (400), `SELF_DELETE` (400), `NOT_SUPPLIER` (400),
 `USER_NOT_FOUND` (404), `APPLICATION_NOT_FOUND` (404),
 `DOCUMENT_NOT_FOUND` (404), `STORAGE_OBJECT_MISSING` (404),
-`NOT_CONFIGURED` (503, AI chat), `UPSTREAM_ERROR` (502, AI chat),
-`UPSTREAM_TIMEOUT` (504, AI chat),
+`NOT_CONFIGURED` (503, AI chat + 3D generation), `UPSTREAM_ERROR` (502,
+AI chat + 3D generation), `UPSTREAM_TIMEOUT` (504, AI chat + 3D generation),
 `INVALID_DOCUMENT_PATH` (400), `STORAGE_READ_ERROR` (500),
 `PARTIAL_DELETE` (500), `FIREBASE_NOT_CONFIGURED` (503),
 `INTERNAL_ERROR` (500), …
+
+**`/api/tripo/*` is the exception that proves the shape.** Success and
+*upstream* failures are forwarded with Tripo's status and `{code, data}` body
+untouched, because the app's retry policy (transient → keep `ar3d.taskId` and
+retry; terminal → stop) reads those directly. Only *proxy-level* failures are
+shaped as the `{error:{code,message}}` envelope above — `NOT_CONFIGURED`
+(503, no key), `UNAUTHENTICATED` (401), `VALIDATION_ERROR` (400),
+`UPSTREAM_TIMEOUT` (504), `UPSTREAM_ERROR` (502). The app recognises the
+envelope and shows its short sentence instead of guessing from a status code.
 
 `AdminUserRow` fields (from `/users`): `uid, email, name, role,
 verificationStatus, phone, businessName, businessPhone, createdAt,
@@ -392,8 +411,9 @@ app's `users` collection had to change for it.
 ```
 backend/src/
   index.ts              entry — starts Express (the unified web host)
-  app.ts                CORS → JSON parsing → /verify-email + /api + /admin
-                        (SPA static/fallback) → 404 → error handler
+  app.ts                CORS → JSON parsing → /verify-email + /api/ai +
+                        /api/tripo + /api + /admin (SPA static/fallback)
+                        → 404 → error handler
   config/env.ts         env parsing (dotenv)
   config/firebase.ts    lazy firebase-admin init (service account / ADC)
   middleware/
@@ -409,6 +429,11 @@ backend/src/
   routes/
     verify-email.routes.ts  /verify-email/send + /confirm (app signup flow;
                         deps-injected so tests can fake mailer/Firebase)
+    ai-chat.routes.ts   /api/ai/chat — the design assistant proxy
+                        (authenticate → validate → Gemini)
+    tripo.routes.ts     /api/tripo/generation/image-to-model +
+                        /api/tripo/tasks/:taskId — 3D generation proxy
+                        (authenticate → validate → Tripo, pass-through)
     auth.routes.ts      /auth/login (public proxy), /auth/me
     users.routes.ts     list/detail/verification/password-reset/delete
     stats.routes.ts     /stats
@@ -416,6 +441,9 @@ backend/src/
                         authenticate + requireAdmin on every route)
   services/             step 4: handlers delegate here → persistence
     verification-email.service.ts  env + firebase wiring for /verify-email
+    ai-chat.service.ts  Gemini call for the design assistant
+    tripo.service.ts    Tripo call for 3D generation — the ONLY place
+                        TRIPO_API_KEY is read, and it is never returned
     identity.service.ts sign-in proxy, reset link, temp password, auth delete
     users.service.ts    user list/detail/stats with product & order counts
     verification.service.ts  supplier approval + product snapshot sync

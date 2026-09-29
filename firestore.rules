@@ -92,9 +92,37 @@ service cloud.firestore {
            request.auth.uid == resource.data.customerId ||
            request.auth.uid in resource.data.supplierIds);
       allow create: if signedIn() &&
-          request.auth.uid == request.resource.data.customerId;
+          request.auth.uid == request.resource.data.customerId &&
+          // An order is created unpaid and un-invoiced. `invoices` is written
+          // later, by the supplier, when they accept. Letting it through here
+          // would let a buyer order with a receipt already attached.
+          (!('invoices' in request.resource.data) ||
+           request.resource.data.invoices.size() == 0);
       allow update: if signedIn() &&
           (request.auth.uid == resource.data.customerId ||
+           request.auth.uid in resource.data.supplierIds) &&
+          // Invoices are the supplier's paperwork, issued at accept time. The
+          // customer is deliberately excluded: without this a buyer could
+          // rewrite the receipt on their own order. Only a supplier on this
+          // order may touch the map at all.
+          //
+          // This reads `diff().affectedKeys()`, which is VALUE-based — a write
+          // that re-sends an identical `invoices` map does not count as a
+          // change. That is what lets the repository keep using full-document
+          // `set()` on status changes, provided it writes the stored map back
+          // verbatim (`preserveStoredInvoices` in lib/models/order.dart).
+          // Without that helper, a parse→serialise drift would make a buyer's
+          // own Cancel look like an invoice edit and fail with
+          // permission-denied.
+          //
+          // NOTE: this checks WHO may write the map, not WHAT they may write.
+          // Closing it to "append only your own entry" needs per-key map
+          // diffs, which the rules language cannot express. A supplier on the
+          // order can therefore still rewrite a co-supplier's invoice value;
+          // see acceptOrderAndIssueInvoice for the in-app idempotency that
+          // keeps one invoice per supplier.
+          (!request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['invoices']) ||
            request.auth.uid in resource.data.supplierIds);
     }
 

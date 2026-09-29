@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/router/route_names.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/user_errors.dart';
 import '../../../../models/order.dart';
@@ -89,6 +91,84 @@ class _SupplierOrderDetailScreenState
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  /// Accept (pending) or create (a co-seller with no paperwork yet on a
+  /// confirmed/shipped order). Both call the repository's idempotent
+  /// `acceptOrderAndIssueInvoice`: it issues this supplier's invoice, advances
+  /// pending→confirmed only while the order is still pending, and returns the
+  /// existing invoice untouched when one is already there — so Create never
+  /// moves the status. On success the invoice screen opens straight away.
+  Future<void> _issueInvoice(Order order, {required bool accepting}) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: accepting ? 'Accept this order?' : 'Create invoice?',
+      message: accepting
+          ? 'Confirming locks in the order, tells the buyer you are '
+              'fulfilling it, and creates your invoice for these items in '
+              'one step.'
+          : 'This creates your invoice for the items you supply on this '
+              'order. The order status will not change.',
+      confirmLabel: accepting ? 'Accept & create invoice' : 'Create invoice',
+    );
+    if (!confirmed || !mounted) return;
+
+    final supplier = ref.read(currentSupplierProvider);
+    if (supplier == null) {
+      // No profile to bill from — same user-facing wording as the failure
+      // path below, never the underlying error.
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            accepting
+                ? 'Could not accept this order. Please try again.'
+                : 'Could not create the invoice. Please try again.',
+            isError: true,
+            duration: const Duration(seconds: 4));
+      }
+      return;
+    }
+
+    setState(() => _working = true);
+    final repo = ref.read(marketplaceRepositoryProvider);
+    try {
+      final invoice = await repo.acceptOrderAndIssueInvoice(
+        orderId: order.id,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        supplierPhone: supplier.phone,
+        supplierAddress: supplier.address,
+        supplierEmail: supplier.email,
+      );
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            accepting ? 'Order accepted — invoice created' : 'Invoice created',
+            color: AppColors.success,
+            duration: const Duration(seconds: 3));
+        _openInvoice(order.id, invoice.supplierId);
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: accepting
+                    ? 'Could not accept this order. Please try again.'
+                    : 'Could not create the invoice. Please try again.'),
+            isError: true,
+            duration: const Duration(seconds: 4));
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  void _openInvoice(String orderId, String supplierId) {
+    context.pushNamed(
+      RouteNames.orderInvoice,
+      pathParameters: {'orderId': orderId, 'supplierId': supplierId},
+    );
   }
 
   Future<void> _cancel(Order order) async {
@@ -440,8 +520,45 @@ class _SupplierOrderDetailScreenState
   }
 
   Widget _actionBar(Order order) {
-    final next = order.status.next;
     final actions = <Widget>[];
+    final myId = ref.read(currentUserProvider)?.uid ?? '';
+
+    // ── Button matrix ──────────────────────────────────────────────────
+    // pending:    [Accept & create invoice]   [Cancel order]
+    // confirmed:  [View invoice]   [Mark as shipped]   [Cancel]
+    // shipped:    [View invoice]   [Mark as delivered]
+    // Terminal states never reach here (build hides the bar).
+    if (order.status == OrderStatus.pending) {
+      // Accept IS the forward step: one call confirms the order and issues
+      // this supplier's invoice in the same transaction.
+      actions.add(_actionButton(
+        label: 'Accept & create invoice',
+        filled: true,
+        onTap: _working ? null : () => _issueInvoice(order, accepting: true),
+      ));
+    } else {
+      // Multi-seller fallback: the first seller to accept confirms the order
+      // for everyone, so a later seller may still have no paperwork — offer
+      // Create (idempotent, never moves the status) instead of a dead View.
+      final hasInvoice = order.invoiceFor(myId) != null;
+      actions.add(_actionButton(
+        label: hasInvoice ? 'View invoice' : 'Create invoice',
+        filled: false,
+        onTap: _working
+            ? null
+            : () => hasInvoice
+                ? _openInvoice(order.id, myId)
+                : _issueInvoice(order, accepting: false),
+      ));
+      final next = order.status.next;
+      if (next != null) {
+        actions.add(_actionButton(
+          label: 'Mark as ${next.label.toLowerCase()}',
+          filled: true,
+          onTap: _working ? null : () => _advance(order, next),
+        ));
+      }
+    }
     // Cancellation is offered until the order SHIPS (pending/confirmed) —
     // the repository rejects it after that (and for terminal states). On a
     // shared multi-seller order it cancels the entire document; `_cancel`
@@ -449,18 +566,10 @@ class _SupplierOrderDetailScreenState
     if (order.status == OrderStatus.pending ||
         order.status == OrderStatus.confirmed) {
       actions.add(_actionButton(
-        label: 'Cancel order',
+        label: order.status == OrderStatus.pending ? 'Cancel order' : 'Cancel',
         filled: false,
+        danger: true,
         onTap: _working ? null : () => _cancel(order),
-      ));
-    }
-    if (next != null) {
-      actions.add(_actionButton(
-        label: order.status == OrderStatus.pending
-            ? 'Confirm order'
-            : 'Mark as ${next.label.toLowerCase()}',
-        filled: true,
-        onTap: _working ? null : () => _advance(order, next),
       ));
     }
 
@@ -497,6 +606,7 @@ class _SupplierOrderDetailScreenState
     required String label,
     required bool filled,
     required VoidCallback? onTap,
+    bool danger = false,
   }) {
     return SizedBox(
       height: 52,
@@ -519,9 +629,11 @@ class _SupplierOrderDetailScreenState
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.transparent,
                   disabledForegroundColor: AppColors.textHint,
-                  // Tight 52px wrapper — keep the label's line box inside.
+                  // Tight 52px wrapper — vertical padding stays small because
+                  // three-button bars wrap labels like "Mark as shipped" onto
+                  // a second line.
                   padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                      const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -534,6 +646,7 @@ class _SupplierOrderDetailScreenState
                             strokeWidth: 2, color: Colors.white),
                       )
                     : Text(label,
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
                             fontWeight: FontWeight.w600, fontSize: 14)),
               ),
@@ -541,22 +654,32 @@ class _SupplierOrderDetailScreenState
           : OutlinedButton(
               onPressed: onTap,
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.error,
-                side: BorderSide(color: AppColors.error.withValues(alpha: .5)),
+                // Neutral outline for invoice shortcuts; danger red stays
+                // reserved for Cancel (which passes `danger: true`).
+                foregroundColor:
+                    danger ? AppColors.error : AppColors.textPrimary,
+                side: BorderSide(
+                    color: danger
+                        ? AppColors.error.withValues(alpha: .5)
+                        : AppColors.border),
                 padding:
-                    const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                    const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
               child: onTap == null
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.error),
+                          strokeWidth: 2,
+                          color: danger
+                              ? AppColors.error
+                              : AppColors.textSecondary),
                     )
                   : Text(label,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 13)),
             ),

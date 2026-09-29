@@ -2,27 +2,10 @@ import 'local_config.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 class AppConfig {
-  // NOTE: no Gemini (or any model) key lives in this app — AI chat goes
-  // through the backend proxy at [chatApiUrl], which holds GEMINI_API_KEY.
-
-  // Tripo 3D API key (https://platform.tripo3d.ai) — empty = procedural-only.
-  // Pay-as-you-go: ~US$0.30 per textured image-to-model output (free signup
-  // credits may apply). Override locally in LocalConfig or with
-  // --dart-define=TRIPO_API_KEY=...
-  static const String tripoApiKey = LocalConfig.tripoApiKey ??
-      String.fromEnvironment(
-        'TRIPO_API_KEY',
-        defaultValue: '',
-      );
-
-  // Tripo model version passed as the image-to-model "model" field. Defaults
-  // to the current v3 release; override locally in LocalConfig or with
-  // --dart-define=TRIPO_MODEL_VERSION=...
-  static const String tripoModelVersion = LocalConfig.tripoModelVersion ??
-      String.fromEnvironment(
-        'TRIPO_MODEL_VERSION',
-        defaultValue: 'v3.1-20260211',
-      );
+  // NOTE: no third-party key lives in this app. AI chat goes through
+  // [chatApiUrl] (GEMINI_API_KEY) and 3D generation through [tripoApiUrl]
+  // (TRIPO_API_KEY) — both env vars on the backend. Anything compiled into an
+  // APK can be extracted from it, so a key shipped here is a leaked key.
 
   // Cloudinary (product photos — GLB models go to Supabase; see below).
   // Firebase Storage now requires the Blaze plan, so the app uploads through
@@ -89,6 +72,21 @@ class AppConfig {
   // an env var on that backend, never in this app. Mirrors the
   // Android-emulator localhost rewrite above.
   static String get chatApiUrl {
+    final fromLocal = LocalConfig.verificationApiUrl;
+    final fromEnv = const String.fromEnvironment('VERIFICATION_API_URL', defaultValue: '');
+    String url = fromLocal.isNotEmpty ? fromLocal : fromEnv;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      if (url.startsWith('http://localhost')) {
+        url = url.replaceFirst('http://localhost', 'http://10.0.2.2');
+      }
+    }
+    return url;
+  }
+
+  // 3D-generation proxy (POST /api/tripo/generation/image-to-model,
+  // GET /api/tripo/tasks/{id}) — again the same server, for the same reason:
+  // TRIPO_API_KEY is a paid credential and stays in the backend's env.
+  static String get tripoApiUrl {
     final fromLocal = LocalConfig.verificationApiUrl;
     final fromEnv = const String.fromEnvironment('VERIFICATION_API_URL', defaultValue: '');
     String url = fromLocal.isNotEmpty ? fromLocal : fromEnv;

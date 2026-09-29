@@ -4,6 +4,7 @@ import 'dart:io' show HttpException, SocketException;
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 
@@ -13,7 +14,10 @@ import '../../features/customer/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
 import '../media/media_store.dart';
 import 'generation_decider.dart'
-    show needsDimensionsMessage, needsNetworkImageMessage, needsTripoKeyMessage;
+    show
+        needsDimensionsMessage,
+        needsNetworkImageMessage,
+        tripoUnavailableMessage;
 import 'tripo_poll_state.dart';
 
 /// Raised when the Tripo API rejects a call in a way retrying will NOT fix
@@ -92,33 +96,44 @@ class FirestoreAr3dStore implements ProductAr3dStore {
   }
 }
 
-/// Asynchronous AI 3D generation for a single product via the Tripo 3D API
-/// (image-to-model): submit → poll → download the resulting GLB → rescale it
-/// to the SELLER's declared dimensions (the AR plugin only scales uniformly
-/// at placement, so true size is baked into the geometry) → publish the
-/// rescaled GLB through [MediaStore] → flip `product.ar3d` to `ready`.
+/// Asynchronous AI 3D generation for a single product via the app's Tripo
+/// proxy (`{tripoApiUrl}/api/tripo/*`): submit → poll → download the resulting
+/// GLB → rescale it to the SELLER's declared dimensions (the AR plugin only
+/// scales uniformly at placement, so true size is baked into the geometry) →
+/// publish the rescaled GLB through [MediaStore] → flip `product.ar3d` to
+/// `ready`.
 ///
 /// Tripo is the ONLY product-model source — there is no procedural
 /// generator and no bundled-catalog fallback anywhere in this pipeline.
 /// Every failure below therefore surfaces a specific, actionable message
-/// (missing key, out of credits, missing dimensions, network, timeout)
+/// (service not set up, out of credits, missing dimensions, network, timeout)
 /// instead of quietly substituting another model.
 ///
-/// Endpoints (doc-verified 2026-09 against
-/// https://developers.tripo3d.ai — quick-start / task-query pages):
-///  - submit:   POST https://openapi.tripo3d.ai/v3/generation/image-to-model
+/// THE KEY IS NOT IN THIS APP. The Tripo credential is an env var on the
+/// backend (`web/backend`, TRIPO_API_KEY) and this class authenticates with
+/// the signed-in user's Firebase ID token instead. That is the whole point:
+/// anything compiled into an APK can be pulled out of the binary, so a client
+/// holding a paid key is holding a leaked key. The backend owns the model
+/// version too — a Tripo version bump is one env var on Render, not an app
+/// release.
+///
+/// Endpoints (the backend forwards these to
+/// https://openapi.tripo3d.ai/v3 and hands the reply back untouched):
+///  - submit:   POST {base}/api/tripo/generation/image-to-model
 ///              body: {"input": imageUrl, "texture": true, "pbr": true,
-///              "face_limit": 100000, "auto_size": true,
-///              "model": modelVersion} → reply {"code": 0,
+///              "face_limit": 100000, "auto_size": true} → reply {"code": 0,
 ///              "data": {"task_id": "task_…"}}; imageUrl must be a PUBLIC
-///              image URL (Tripo fetches it server-side), modelVersion is
-///              AppConfig.tripoModelVersion.
-///  - query:    GET https://openapi.tripo3d.ai/v3/tasks/{task_id}
-///              (NB: the query endpoint is a GET on `/v3/tasks/{id}` — not
-///              `POST /generation/tasks/{id}`) → `data.status` is
+///              image URL (Tripo fetches it server-side).
+///  - query:    GET {base}/api/tripo/tasks/{task_id} → `data.status` is
 ///              queued | running | success | failed | cancelled (…); on
 ///              success `data.output.model_url` (+ `rendered_image_url`);
 ///              on failure `data.error_message` / `error_code`.
+///
+/// The pass-through matters: Tripo's HTTP status and `{code, data}` envelope
+/// reach this class unchanged, so the retry policy below still reads the real
+/// upstream outcome (429/5xx = retryable, 401/402/4xx = not). Proxy-level
+/// failures (no server key, expired sign-in) arrive as a short
+/// `{"error":{"message"}}` sentence instead and are surfaced as-is.
 ///
 /// CRASH-AND-RESUME SAFETY (this class never double-bills a seller):
 ///  - every product-doc write carries the FULL ar3d key set (status/source/
@@ -136,13 +151,13 @@ class FirestoreAr3dStore implements ProductAr3dStore {
 ///    The poll state machine (tripo_poll_state.dart) leaves the task id in
 ///    place for: 4 consecutive transient poll failures, the 5-minute
 ///    deadline (the server-side task may still finish), download failures
-///    of a finished task, auth/credits errors mid-poll (fix the key, Retry
+///    of a finished task, auth/credits errors mid-poll (sign in again, Retry
 ///    re-polls the SAME already-paid task) — every one of those failures
 ///    writes `failed` WITH the task id so an explicit Retry re-polls instead
 ///    of re-billing. Only a server-side terminal task failure (failed /
 ///    cancelled) or unusable output (bad geometry) clears the id, because
 ///    nothing is left to poll and a fresh submission is the only way ahead.
-///  - preconditions (key / photo / dimensions) never silently no-op: they
+///  - preconditions (service / photo / dimensions) never silently no-op: they
 ///    write `failed` with the exact missing precondition so the operator
 ///    knows what to fix.
 ///
@@ -152,11 +167,10 @@ class FirestoreAr3dStore implements ProductAr3dStore {
 /// `product_models/<productId>` (see MediaStore).
 ///
 /// Costs: Tripo is pay-as-you-go (~US$0.30 per textured model; free signup
-/// credits may apply). Configure the key in LocalConfig
-/// (`LocalConfig.tripoApiKey` / `--dart-define=TRIPO_API_KEY`) — see
-/// https://platform.tripo3d.ai. When unconfigured, [isConfigured] is false
-/// and every kick-off records `failed` with [needsTripoKeyMessage] — there is
-/// no other model source, so the operator must be told exactly what to set.
+/// credits may apply). The key is set as TRIPO_API_KEY in the backend's env /
+/// Render → Environment — see https://platform.tripo3d.ai. When the server
+/// has no key it answers 503 and the seller records `failed` with
+/// [tripoUnavailableMessage]; there is no other model source.
 class Tripo3DGenerator {
   Tripo3DGenerator(
     ProductAr3dStore store, {
@@ -165,16 +179,15 @@ class Tripo3DGenerator {
     DateTime Function()? clock,
     Duration? pollInterval,
     Duration? maxWait,
-    String? apiKey,
+    Future<String?> Function()? idTokenProvider,
   })  : _store = store,
         _media = mediaStore ?? MediaStore.instance,
         _http = httpClient ?? http.Client(),
         _clock = clock ?? DateTime.now,
         _pollInterval = pollInterval ?? _defaultPollInterval,
         _maxWait = maxWait ?? _defaultMaxWait,
-        _apiKey = apiKey ?? AppConfig.tripoApiKey;
+        _idTokenProvider = idTokenProvider ?? _firebaseIdToken;
 
-  static const String _apiBase = 'https://openapi.tripo3d.ai/v3';
   static const Duration _requestTimeout = Duration(seconds: 30);
   static const Duration _downloadTimeout = Duration(seconds: 120);
   static const Duration _defaultPollInterval = Duration(seconds: 5);
@@ -190,12 +203,30 @@ class Tripo3DGenerator {
   final DateTime Function() _clock;
   final Duration _pollInterval;
   final Duration _maxWait;
-  final String _apiKey;
+  final Future<String?> Function() _idTokenProvider;
 
-  /// Whether an API key is configured (LocalConfig → TRIPO_API_KEY dart-
-  /// define). Without one no model can be generated — Tripo is the only
-  /// source — and kick-offs record the exact setup message instead.
-  static bool get isConfigured => AppConfig.tripoApiKey.trim().isNotEmpty;
+  /// Backend base for the Tripo proxy routes, or empty when this build has no
+  /// backend URL. The suffixes the call sites use (`/generation/image-to-model`,
+  /// `/tasks/{id}`) match Tripo's own path shapes on purpose — the proxy is a
+  /// thin forwarder.
+  static String get _apiBase {
+    final base = AppConfig.tripoApiUrl.trim();
+    if (base.isEmpty) return '';
+    return '${base.replaceAll(RegExp(r'/+$'), '')}/api/tripo';
+  }
+
+  static Future<String?> _firebaseIdToken() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    return user.getIdToken();
+  }
+
+  /// Whether this build has a 3D-generation backend to call. The Tripo key
+  /// itself is no longer this app's business — it is an env var on that
+  /// backend — so "configured" only means "there is somewhere to send the
+  /// request". A server without TRIPO_API_KEY answers 503 and the seller sees
+  /// [tripoUnavailableMessage].
+  static bool get isConfigured => AppConfig.tripoApiUrl.trim().isNotEmpty;
 
   /// Product ids with a generation already in flight in this process —
   /// guards the form/kick-off paths from double-submitting (each submission
@@ -232,9 +263,9 @@ class Tripo3DGenerator {
     var taskId = ar3d?.taskId ?? '';
     try {
       // ── Preconditions: fail loudly with the exact missing input. ────────
-      if (_apiKey.trim().isEmpty) {
+      if (!isConfigured) {
         await _tryWriteFailedKeepTask(id, attempts, submittedAt, taskId,
-            needsTripoKeyMessage);
+            tripoUnavailableMessage);
         return;
       }
       if (!product.hasNetworkImage) {
@@ -265,7 +296,8 @@ class Tripo3DGenerator {
             submittedAt: submittedAt,
           ));
 
-      // 2) Submit the image-to-model task.
+      // 2) Submit the image-to-model task. The backend owns the Tripo model
+      //    version — it is billed, so it is not this client's to pick.
       final submitData = await _postJson(
         '$_apiBase/generation/image-to-model',
         body: {
@@ -274,7 +306,6 @@ class Tripo3DGenerator {
           'pbr': true,
           'face_limit': 100000,
           'auto_size': true,
-          'model': AppConfig.tripoModelVersion,
         },
       );
       taskId = (submitData['task_id'] as String?)?.trim() ?? '';
@@ -706,32 +737,49 @@ class Tripo3DGenerator {
   static const String _capMessage = 'Tripo is unreachable — the task is '
       'still queued server-side. Retry later to check on it (no new charge).';
 
-  // ── Tripo HTTP helpers ────────────────────────────────────────────────────
+  // ── Proxy HTTP helpers ───────────────────────────────────────────────────
 
-  /// Human-readable message for a non-2xx Tripo reply — every operator
-  /// actionable failure names the exact knob to turn (key, credits, rate).
-  /// Visible for tests: the failure-state suite asserts these strings.
+  /// Human-readable message for a non-2xx reply, phrased for the seller
+  /// tapping Retry: short and plain, no HTTP codes and no JSON dumps (those
+  /// go to the log in [_send], never on screen).
+  ///
+  /// Checked first is the PROXY's own error envelope (`{"error":{…}}`): when
+  /// the request never reached Tripo — sign-in expired, server has no key —
+  /// the backend already wrote the sentence, and it is the only layer that
+  /// knows which it was.
   static String describeHttpFailure(int status, String body) {
-    final excerpt =
-        body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    final proxied = _proxySentence(body);
+    if (proxied != null) return proxied;
     if (status == 401 || status == 403) {
-      return 'Tripo rejected the API key (HTTP $status). Check '
-          'TRIPO_API_KEY (LocalConfig.tripoApiKey) — the key is missing, '
-          'wrong or revoked. $excerpt';
+      return '3D generation is not authorized right now. Try again later.';
     }
     if (status == 402) {
-      return 'Tripo is out of credits (HTTP 402) — top up at '
-          'https://platform.tripo3d.ai and tap Retry. $excerpt';
+      return '3D generation is out of credit. Top up the Tripo account and '
+          'tap Retry.';
     }
     if (status == 429) {
-      return 'Tripo rate-limited the request (HTTP 429) — wait a moment and '
-          'tap Retry. $excerpt';
+      return 'Tripo is busy right now. Wait a moment and tap Retry.';
     }
     if (status >= 500) {
-      return 'Tripo is unavailable (HTTP $status) — tap Retry later. '
-          '$excerpt';
+      return '3D generation is unavailable right now. Try again later.';
     }
-    return 'Tripo HTTP $status: $excerpt';
+    return '3D generation request failed. Try again.';
+  }
+
+  /// The sentence the backend proxy writes for its OWN failures, or null when
+  /// the body is Tripo's (or not JSON at all).
+  static String? _proxySentence(String body) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map<String, dynamic>) return null;
+    final error = decoded['error'];
+    if (error is! Map<String, dynamic>) return null;
+    final message = error['message']?.toString().trim();
+    return (message == null || message.isEmpty) ? null : message;
   }
 
   /// Which class of failure an HTTP status is: 5xx / 429 / 408 are worth
@@ -740,24 +788,44 @@ class Tripo3DGenerator {
   static bool isTransientHttpStatus(int status) =>
       status >= 500 || status == 429 || status == 408;
 
+  /// Firebase ID token for the proxy — the paid Tripo key never leaves the
+  /// backend, so this is the only credential this class carries.
+  Future<String> _authToken() async {
+    final String? token;
+    try {
+      token = await _idTokenProvider();
+    } catch (e) {
+      debugPrint('[model-3d] could not read the sign-in token: $e');
+      throw const TripoTransientApiException(
+          'Could not confirm your sign-in. Try again.');
+    }
+    if (token == null || token.trim().isEmpty) {
+      // Fail fast: an unauthenticated call would only earn a 401 from the
+      // proxy. The caller keeps any persisted task id either way.
+      throw const TripoApiException('Please sign in to generate 3D models.');
+    }
+    return token;
+  }
+
   Future<Map<String, dynamic>> _send(
       Future<http.Response> Function() request) async {
     http.Response resp;
     try {
       resp = await request().timeout(_requestTimeout);
     } on TimeoutException {
-      throw const TripoTransientApiException('Tripo request timed out');
+      throw const TripoTransientApiException('3D generation timed out');
     } on http.ClientException catch (e) {
-      throw TripoTransientApiException('Tripo network error: ${e.message}');
+      throw TripoTransientApiException('3D generation network error: ${e.message}');
     } on SocketException catch (e) {
       // dart:io failures (no route to host, connection reset) must be
       // TRANSIENT — they previously escaped as generic errors and destroyed
       // the persisted task id.
-      throw TripoTransientApiException('Tripo network error: ${e.message}');
+      throw TripoTransientApiException('3D generation network error: ${e.message}');
     } on HttpException catch (e) {
-      throw TripoTransientApiException('Tripo network error: ${e.message}');
+      throw TripoTransientApiException('3D generation network error: ${e.message}');
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      _logDiagnostic(resp.statusCode, resp.body);
       final message = describeHttpFailure(resp.statusCode, resp.body);
       if (isTransientHttpStatus(resp.statusCode)) {
         throw TripoTransientApiException(message);
@@ -769,57 +837,71 @@ class Tripo3DGenerator {
       decoded = jsonDecode(resp.body);
     } on FormatException catch (e) {
       throw TripoTransientApiException(
-          'Tripo returned malformed JSON: ${e.message}');
+          '3D generation returned malformed JSON: ${e.message}');
     }
     if (decoded is! Map<String, dynamic>) {
       throw const TripoTransientApiException(
-          'Tripo returned a non-JSON-object body');
+          '3D generation returned a non-JSON-object body');
     }
     final code = decoded['code'];
     if (code is num && code != 0) {
       final data = decoded['data'];
-      var message = data is Map<String, dynamic>
+      final raw = data is Map<String, dynamic>
           ? (data['message'] ?? data['error_message'])?.toString()
           : decoded['message']?.toString();
-      message ??= 'Tripo error code $code';
-      final lower = message.toLowerCase();
+      final detail = raw ?? 'error code $code';
+      final lower = detail.toLowerCase();
       if (lower.contains('credit') || lower.contains('insufficient')) {
-        message = 'Tripo is out of credits — top up at '
-            'https://platform.tripo3d.ai and tap Retry. ($message)';
-      } else if (lower.contains('unauthorized') ||
+        _logDiagnostic(code, detail);
+        throw const TripoApiException(
+            '3D generation is out of credit. Top up the Tripo account and '
+            'tap Retry.');
+      }
+      if (lower.contains('unauthorized') ||
           lower.contains('forbidden') ||
           lower.contains('api key') ||
           lower.contains('apikey')) {
-        message = 'Tripo rejected the API key — check TRIPO_API_KEY '
-            '(LocalConfig.tripoApiKey). ($message)';
+        _logDiagnostic(code, detail);
+        throw const TripoApiException(
+            '3D generation is not authorized right now. Try again later.');
       }
-      throw TripoApiException(message);
+      _logDiagnostic(code, detail);
+      throw const TripoApiException('3D generation failed. Try again.');
     }
     final data = decoded['data'];
     if (data is! Map<String, dynamic>) {
-      throw const TripoApiException('Tripo response has no "data" object');
+      throw const TripoApiException(
+          '3D generation returned no result. Try again.');
     }
     return data;
+  }
+
+  /// Diagnostics belong in the log, never on the seller's product chip.
+  static void _logDiagnostic(Object code, String body) {
+    final excerpt = body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    debugPrint('[model-3d] upstream $code: $excerpt');
   }
 
   Future<Map<String, dynamic>> _postJson(
     String url, {
     required Map<String, dynamic> body,
-  }) {
+  }) async {
+    final token = await _authToken();
     return _send(() => _http.post(
           Uri.parse(url),
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer $_apiKey',
+            'Authorization': 'Bearer $token',
           },
           body: jsonEncode(body),
         ));
   }
 
-  Future<Map<String, dynamic>> _getJson(String url) {
+  Future<Map<String, dynamic>> _getJson(String url) async {
+    final token = await _authToken();
     return _send(() => _http.get(
           Uri.parse(url),
-          headers: {'Authorization': 'Bearer $_apiKey'},
+          headers: {'Authorization': 'Bearer $token'},
         ));
   }
 
