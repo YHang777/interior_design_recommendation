@@ -1,4 +1,5 @@
 import '../../../../core/utils/user_errors.dart';
+import '../../data/datasources/account_deletion_datasource.dart';
 import '../../data/models/app_user.dart';
 
 /// Abstract contract for authentication operations.
@@ -55,6 +56,22 @@ abstract class IAuthRepository {
 
   /// Check if the current user's email is verified.
   Future<bool> isEmailVerified();
+
+  /// Starts account deletion: the backend emails a confirmation link
+  /// (valid 24h) and returns `pending_email`. The user stays signed in —
+  /// the 7-day grace window starts only when the link is opened.
+  ///
+  /// Throws [UserFacingException]-compatible errors on failure
+  /// (e.g. confirm-email mismatch, request already active).
+  Future<DeletionStatus> requestAccountDeletion(String confirmEmail);
+
+  /// Cancels an active deletion request (pending or grace) and restores
+  /// the account. Throws when there is nothing to cancel.
+  Future<DeletionStatus> cancelAccountDeletion();
+
+  /// The signed-in user's current deletion status; `status: 'none'` when
+  /// there is no active request.
+  Future<DeletionStatus> fetchDeletionStatus();
 }
 
 /// Custom exception for auth errors with user-friendly messages.

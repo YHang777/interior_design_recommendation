@@ -1,6 +1,6 @@
 // Widget harness for the BudgetPlannerScreen — proves the end-to-end flow
 // (live estimates → typing saves → prefill guards → interactivity → real
-// clipboard export) and encodes the failure modes the screen used to
+// PDF export) and encodes the failure modes the screen used to
 // swallow silently:
 //
 //   * a failed budgetPlanProvider stream showed no error state at all,
@@ -340,55 +340,47 @@ void main() {
     expect(fake.saves.last.ecoFriendly, isTrue);
   });
 
-  testWidgets('Copy Report puts the real summary on the clipboard and '
-      'says so truthfully', (tester) async {
-    final fake = _FakeBudgetRepository();
-    addTearDown(fake.dispose);
-
+  testWidgets('the export action bar hands a real PDF to the OS share '
+      'sheet — no clipboard copy', (tester) async {
+    // Mock the printing plugin's platform channel: without a handler the
+    // invoke parks forever in the test environment, and the mock is what
+    // lets us inspect the bytes the share call actually receives.
     final log = <MethodCall>[];
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    const printingChannel = MethodChannel('net.nfet.printing');
+    messenger.setMockMethodCallHandler(printingChannel, (call) async {
       log.add(call);
-      return null;
+      return 1;
     });
     addTearDown(() =>
-        messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+        messenger.setMockMethodCallHandler(printingChannel, null));
 
     await _pumpPlanner(tester, overrides: [
-      budgetRepositoryProvider.overrideWithValue(fake),
+      budgetPlanProvider
+          .overrideWith((ref) => Stream<BudgetPlan?>.value(null)),
       marketplaceProductsProvider
           .overrideWith((ref) => Stream.value(_seedCatalogue)),
     ]);
 
-    await tester.enterText(find.byType(TextFormField), '5000');
-    await tester.pump();
+    expect(find.text('Share Report'), findsOneWidget);
+    expect(find.text('Print Report'), findsOneWidget);
+    expect(find.text('Copy Report'), findsNothing);
 
-    // Tap the label itself: ElevatedButton.icon builds a private
-    // _ElevatedButtonWithIcon subclass, which find.byType(ElevatedButton)
-    // (exact runtimeType match) would miss.
-    await tester.tap(find.text('Copy Report'));
+    await tester.tap(find.text('Share Report'));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    final setData = log.where((c) => c.method == 'Clipboard.setData');
-    expect(setData, hasLength(1));
-    final args = setData.single.arguments! as Map;
-    final report = args['text'] as String;
+    // Exactly one share call, carrying a genuine PDF document.
+    final shares = log.where((c) => c.method == 'sharePdf');
+    expect(shares, hasLength(1));
+    final args = shares.single.arguments! as Map;
+    expect(args['name'], matches(RegExp(r'^budget-report-.+\.pdf$')));
+    final doc = args['doc'] as List<int>;
+    expect(String.fromCharCodes(doc.take(5)), '%PDF-');
 
-    expect(report, contains('Kitchen'));
-    expect(report, contains('Budget: RM 5,000'));
-    expect(report, contains('Wall Paint: RM 90'));
-    expect(report, contains('Furniture: RM 1,050'));
-    expect(report, contains('Total estimate: RM 1,540'));
-    expect(report, contains('Remaining: RM 3,460'));
-    expect(report, isNot(contains('mocked')));
-
-    expect(
-      find.text('Budget report copied to clipboard'),
-      findsOneWidget,
-    );
+    expect(find.text('Report PDF ready to share'), findsOneWidget);
   });
 
   // ── Failure states the screen used to swallow ──────────────────────────────

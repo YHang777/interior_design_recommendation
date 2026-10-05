@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
-import '../../../../core/router/route_names.dart';
+import '../../../../core/router/push_once.dart';
 import '../../../../core/utils/user_errors.dart';
 import '../../../../models/product.dart';
 import '../../../../services/verification/verification_application_model.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/delete_account_dialogs.dart';
+import '../../../../shared/widgets/deletion_pending_banner.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/page_heading.dart';
 import '../../../../shared/widgets/status_badge.dart';
@@ -110,6 +111,26 @@ class _SupplierProfileScreenState
     setState(() => _editing = false);
   }
 
+  /// Runs the two-step delete flow, then — only if the request was actually
+  /// sent — clears local recent searches, refreshes the pending banner and
+  /// tells the person to check their inbox. Failures surface as snackbars
+  /// inside the flow itself.
+  Future<void> _deleteAccount(String email) async {
+    final ok = await showDeleteAccountFlow(
+      context,
+      confirmEmail: email,
+      onSubmit: (confirmEmail) async {
+        await ref
+            .read(authStateProvider.notifier)
+            .requestAccountDeletion(confirmEmail);
+      },
+    );
+    if (!ok || !mounted) return;
+    ref.read(recentSearchesProvider.notifier).clearAll();
+    ref.invalidate(deletionStatusProvider);
+    showAppSnackbar(context, 'Check your inbox — your deletion request was sent.');
+  }
+
   Future<void> _changePassword() async {
     final user = ref.read(currentUserProvider);
     final email = user?.email ?? '';
@@ -172,8 +193,7 @@ class _SupplierProfileScreenState
 
   // ── Verification ───────────────────────────────────────────────────────
 
-  void _goVerification() =>
-      context.pushNamed(RouteNames.supplierVerification);
+  void _goVerification() => pushOnce(context, '/supplier/verification');
 
   /// Badge action for the current verification status — the one place the
   /// "what can I do now" choice lives, so it always matches the state
@@ -277,6 +297,7 @@ class _SupplierProfileScreenState
                       16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
                   children: [
                     const PageHeading(title: 'Profile'),
+                    const DeletionPendingBanner(),
                     const SizedBox(height: 16),
                     // ── Avatar with gradient ring ──
                     Center(
@@ -455,6 +476,16 @@ class _SupplierProfileScreenState
                   // ── Account ──
                   if (!_editing) ...[
                     _SectionCard(
+                      title: 'Tools',
+                      accentColor: AppColors.secondaryAccent,
+                      children: [
+                        _LinkRow(Icons.assessment, 'Sales Report',
+                            () => pushOnce(context, '/supplier/sales-report')),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    _SectionCard(
                       title: 'Account',
                       accentColor: AppColors.textHint,
                       children: [
@@ -484,19 +515,7 @@ class _SupplierProfileScreenState
 
                     // ── Delete account ──
                     TextButton(
-                      onPressed: () async {
-                        final confirmed = await showConfirmDialog(
-                          context,
-                          title: 'Delete Account?',
-                          message:
-                              'This action cannot be undone. All your data will be permanently removed.',
-                          confirmLabel: 'Delete',
-                          destructive: true,
-                        );
-                        if (confirmed) {
-                          ref.read(authStateProvider.notifier).logout();
-                        }
-                      },
+                      onPressed: () => _deleteAccount(user.email),
                       child: Text('Delete Account',
                           style: GoogleFonts.poppins(
                               color: AppColors.error, fontSize: 13)),

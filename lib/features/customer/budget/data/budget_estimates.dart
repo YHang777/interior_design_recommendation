@@ -2,8 +2,8 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../models/product.dart';
 
 /// Pure estimation logic for the budget planner: line-item estimates
-/// derived from the LIVE marketplace catalogue, plus the text report the
-/// planner copies to the clipboard.
+/// derived from the LIVE marketplace catalogue, plus the plain-text twin
+/// of the planner's PDF export.
 ///
 /// No hardcoded prices anywhere — a category with no matching listings
 /// yields `price == null` and is rendered as "— / no price data yet".
@@ -94,8 +94,8 @@ List<EstimateLine> buildEstimateLines(
 int estimateTotal(List<EstimateLine> lines) =>
     lines.fold<int>(0, (sum, l) => sum + (l.price ?? 0));
 
-/// Plain-text report for the planner's "Copy Report" button — a real,
-/// shareable summary of what the screen shows, not a mocked PDF.
+/// Plain-text twin of the planner's PDF export — a real, shareable
+/// summary of what the screen shows, not a mocked file.
 String buildBudgetReport({
   required String room,
   required int budgetRm,

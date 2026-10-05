@@ -1517,13 +1517,18 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                           color: AppColors.textSecondary),
                       const SizedBox(width: 6),
                       Flexible(
-                        child: Text(
-                            'Room: ${_roomW.toInt()} × ${_roomH.toInt()} cm'
-                            '${_walls.length >= 3 ? '  •  ${_walls.length}-wall shape' : ''}',
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: AppColors.textSecondary)),
+                        // Shrink instead of ellipsizing: the room
+                        // dimensions are the whole point of this chip.
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                              'Room: ${_roomW.toInt()} × ${_roomH.toInt()} cm'
+                              '${_walls.length >= 3 ? '  •  ${_walls.length}-wall shape' : ''}',
+                              maxLines: 1,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary)),
+                        ),
                       ),
                       const SizedBox(width: 4),
                       const Icon(Icons.edit,

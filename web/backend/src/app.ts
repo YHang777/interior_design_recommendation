@@ -5,6 +5,11 @@ import cors from 'cors';
 import { apiRouter } from './routes/index';
 import { createVerifyEmailRouter } from './routes/verify-email.routes';
 import { defaultVerifyEmailDeps } from './services/verification-email.service';
+import {
+  createAccountDeletionRouter,
+  createDeletionConfirmRouter,
+  defaultAccountDeletionDeps,
+} from './routes/account-deletion.routes';
 import { createAiChatRouter } from './routes/ai-chat.routes';
 import { defaultAiChatDeps } from './services/ai-chat.service';
 import { createTripoRouter } from './routes/tripo.routes';
@@ -23,6 +28,9 @@ export function resolveAdminStaticDir(): string {
  *
  *   /verify-email/*   email verification API + confirm page (the flow the
  *                     mobile app calls; port of the Dart server's routes)
+ *   /account/delete/* self-service deletion confirm page (public — the
+ *                     email token IS the authentication)
+ *   /api/account/*    self-service account deletion API (authenticated)
  *   /api/ai/*         design assistant for the mobile app (authenticated
  *                     proxy onto Gemini — the API key stays server-side)
  *   /api/tripo/*      3D model generation for the mobile app (authenticated
@@ -68,6 +76,15 @@ export function createApp(): express.Express {
 
   // Email verification for the mobile app (registration flow).
   app.use('/verify-email', createVerifyEmailRouter(defaultVerifyEmailDeps()));
+
+  // Self-service account deletion — the public email-confirm page plus the
+  // authenticated API. Mounted ahead of the admin /api alias so the path is
+  // claimed explicitly (same reasoning as /api/ai and /api/tripo). NO timers
+  // live here: the deletion sweep starts from index.ts so route tests never
+  // hang on an open interval.
+  const deletionDeps = defaultAccountDeletionDeps();
+  app.use('/account/delete', createDeletionConfirmRouter(deletionDeps));
+  app.use('/api/account', createAccountDeletionRouter(deletionDeps));
 
   // Design assistant for the mobile app. Mounted ahead of the admin /api
   // alias so the path is claimed explicitly, and authenticated: it is a

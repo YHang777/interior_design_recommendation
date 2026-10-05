@@ -30,6 +30,7 @@ class RouteNames {
   static const homeownerWishlist = 'homeowner-wishlist';
   static const homeownerDesignEditor = 'homeowner-design-editor';
   static const arViewer = 'ar-viewer';
+  static const designReport = 'design-report';
 
   // Shared (buyer + supplier)
   static const orderInvoice = 'order-invoice';
@@ -45,4 +46,5 @@ class RouteNames {
   static const supplierAnalytics = 'supplier-analytics';
   static const supplierProfile = 'supplier-profile';
   static const supplierVerification = 'supplier-verification';
+  static const supplierSalesReport = 'supplier-sales-report';
 }

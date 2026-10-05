@@ -10,6 +10,7 @@ import '../../features/auth/presentation/screens/verify_email_screen.dart';
 import '../../features/customer/budget/presentation/screens/budget_planner_screen.dart';
 import '../../features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
 import '../../features/customer/homeowner/presentation/screens/dashboard_screen.dart';
+import '../../features/customer/homeowner/presentation/screens/design_report_screen.dart';
 import '../../features/customer/homeowner/presentation/screens/homeowner_shell.dart';
 import '../../features/customer/homeowner/presentation/screens/profile_screen.dart';
 import '../../features/customer/homeowner/presentation/screens/saved_designs_screen.dart';
@@ -18,6 +19,7 @@ import '../../features/supplier/presentation/screens/analytics_screen.dart';
 import '../../features/supplier/presentation/screens/order_management_screen.dart';
 import '../../features/supplier/presentation/screens/product_form_screen.dart';
 import '../../features/supplier/presentation/screens/product_management_screen.dart';
+import '../../features/supplier/presentation/screens/sales_report_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_dashboard_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_profile_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_shell.dart';
@@ -52,7 +54,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   // would flash the login page on app restart or after login).
   final authRefresh = ref.watch(authRefreshProvider);
 
-  return GoRouter(
+  return GuardedGoRouter(
     initialLocation: '/login',
     // Re-evaluate the redirect whenever the auth state changes.
     refreshListenable: authRefresh,
@@ -230,6 +232,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             _buildPage(const VerificationApplicationScreen()),
       ),
 
+      // ── Supplier sales report (full-screen) ──
+      GoRoute(
+        path: '/supplier/sales-report',
+        name: RouteNames.supplierSalesReport,
+        pageBuilder: (_, __) => _buildPage(const SalesReportScreen()),
+      ),
+
       // ── Invoice (shared: buyer receipt + seller paperwork, full-screen) ──
       GoRoute(
         path: '/orders/:orderId/invoice/:supplierId',
@@ -240,6 +249,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             supplierId: state.pathParameters['supplierId']!,
           ),
         ),
+      ),
+
+      // ── Customer design report (full-screen) ──
+      GoRoute(
+        path: '/design/report',
+        name: RouteNames.designReport,
+        pageBuilder: (_, __) => _buildPage(const DesignReportScreen()),
       ),
 
       // ── Homeowner shell ──
@@ -359,6 +375,65 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// [GoRouter] that makes the duplicate-page-key red screen impossible.
+///
+/// go_router keys each shell page by `route.hashCode`, not by path, so
+/// pushing a location that matches *through* a shell (e.g. `/design`)
+/// while a full-screen route (`/design/report`, cart, checkout, …) sits
+/// on top of the stack appends a SECOND copy of that shell: two pages,
+/// one `LocalKey`, and Flutter's Navigator fails
+/// `!keyReservation.contains(key)` (navigator.dart:4096).
+///
+/// The report screen's "Create a design" hit this when it used
+/// `pushNamed(homeownerScan)`, and the dashboard's `/ai`,
+/// `/marketplace` and `/saved` shortcuts are the same shape today —
+/// they are only safe while no full-screen route covers the shell.
+/// Rather than trusting every call site, [push] reroutes exactly that
+/// combination to [go]: switching tabs replaces the stack, which is
+/// what the shell does anyway, and Back lands on the tab's previous
+/// screen instead of a red screen. Every other push flows through
+/// unchanged.
+class GuardedGoRouter extends GoRouter {
+  GuardedGoRouter({
+    required List<RouteBase> routes,
+    GoRouterRedirect? redirect,
+    super.refreshListenable,
+    super.initialLocation,
+  }) : super.routingConfig(
+          routingConfig: ValueNotifier<RoutingConfig>(
+            RoutingConfig(
+              routes: routes,
+              redirect: redirect ?? (_, __) => null,
+            ),
+          ),
+        );
+
+  @override
+  Future<T?> push<T extends Object?>(String location, {Object? extra}) {
+    if (_wouldStackSecondShell(location, extra)) {
+      go(location, extra: extra);
+      return Future<T?>.value();
+    }
+    return super.push<T>(location, extra: extra);
+  }
+
+  /// True when pushing [location] onto the current stack would put a
+  /// second copy of a shell route in the root navigator.
+  bool _wouldStackSecondShell(String location, Object? extra) {
+    final RouteMatchList current = routerDelegate.currentConfiguration;
+    // Only a full-screen route pushed at the root (imperative match on
+    // top) creates the window — a shell-through push while the shell is
+    // last recurses into the shell's children and is safe.
+    if (current.matches.isEmpty ||
+        current.matches.last is! ImperativeRouteMatch) {
+      return false;
+    }
+    final RouteMatchList next =
+        configuration.findMatch(Uri.parse(location), extra: extra);
+    return next.matches.any((RouteMatchBase match) => match is ShellRouteMatch);
+  }
+}
 
 /// Smooth fade transition for all pages.
 CustomTransitionPage<T> _buildPage<T>(Widget child) {

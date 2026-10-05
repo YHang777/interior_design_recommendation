@@ -300,14 +300,20 @@ class ProductCard extends StatelessWidget {
                           ),
                           if (product.originalPrice != null) ...[
                             const SizedBox(width: 4),
+                            // Shrink rather than ellipsize: a cut price
+                            // ('RM 12,3…') reads as a different number.
                             Flexible(
-                              child: Text(
-                                Formatters.myr(product.originalPrice!),
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: compact ? 10 : 11,
-                                  decoration: TextDecoration.lineThrough,
-                                  color: AppColors.textHint,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  Formatters.myr(product.originalPrice!),
+                                  maxLines: 1,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: compact ? 10 : 11,
+                                    decoration: TextDecoration.lineThrough,
+                                    color: AppColors.textHint,
+                                  ),
                                 ),
                               ),
                             ),

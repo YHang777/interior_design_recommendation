@@ -377,14 +377,20 @@ class _WishlistRow extends StatelessWidget {
                         ),
                         if (product.originalPrice != null) ...[
                           const SizedBox(width: 5),
+                          // Shrink rather than ellipsize: a cut price
+                          // ('RM 12,3…') reads as a different number.
                           Flexible(
-                            child: Text(
-                              Formatters.myr(product.originalPrice!),
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                decoration: TextDecoration.lineThrough,
-                                color: AppColors.textHint,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                Formatters.myr(product.originalPrice!),
+                                maxLines: 1,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  decoration: TextDecoration.lineThrough,
+                                  color: AppColors.textHint,
+                                ),
                               ),
                             ),
                           ),

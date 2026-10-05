@@ -125,7 +125,11 @@ async function handleConfirm(
     token === undefined
       ? null
       : verifyVerificationToken(token, deps.tokenSecret);
-  if (payload === null) {
+  if (payload === null || payload.purpose !== 'email_verify') {
+    // A deletion-purpose token can never verify an email (and vice versa —
+    // the deletion confirm route rejects `email_verify` tokens). Rendered
+    // exactly like the invalid/expired case so nothing about the token's
+    // contents leaks.
     renderPage(res, {
       success: false,
       title: 'Verification failed',

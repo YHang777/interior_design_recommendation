@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/formatters.dart';
+import '../../../../../core/utils/user_errors.dart';
+import '../../../../../services/invoice/budget_report_pdf.dart';
+import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/stat_card.dart';
@@ -16,7 +18,7 @@ import '../../data/budget_plan.dart';
 import '../../data/budget_providers.dart';
 
 /// Budget Planner — set a renovation budget, see live catalogue-based
-/// estimates per category, and copy a real summary report.
+/// estimates per category, and export that summary as a shareable PDF.
 ///
 /// The budget and preferences are persisted to the signed-in user's own
 /// `users/{uid}` document (field `budgetPlan`) through
@@ -75,25 +77,71 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
     );
   }
 
-  /// Genuine export: copies a plain-text report of exactly what this
-  /// screen computes (no mocked "exported" snackbar).
-  Future<void> _copyReport() async {
-    final catalogue =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    final lines =
-        buildEstimateLines(catalogue, ecoFriendly: _ecoFriendly);
-    final report = buildBudgetReport(
-      room: _selectedRoom,
-      budgetRm: _budget,
-      lines: lines,
-      generatedAt: DateTime.now(),
-      ecoFriendly: _ecoFriendly,
-    );
-    await Clipboard.setData(ClipboardData(text: report));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Budget report copied to clipboard')),
-    );
+  /// A share/print call in flight — disables both buttons so one tap
+  /// cannot queue two OS dialogs.
+  bool _working = false;
+
+  /// Fresh estimate lines for the export — read at tap time so the PDF
+  /// always matches what is on screen right now.
+  List<EstimateLine> _exportLines() => buildEstimateLines(
+        ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
+        ecoFriendly: _ecoFriendly,
+      );
+
+  Future<void> _share() async {
+    setState(() => _working = true);
+    try {
+      await BudgetReportPdf.share(
+        room: _selectedRoom,
+        budgetRm: _budget,
+        lines: _exportLines(),
+        generatedAt: DateTime.now(),
+        ecoFriendly: _ecoFriendly,
+      );
+      if (mounted) {
+        showAppSnackbar(context, 'Report PDF ready to share',
+            duration: const Duration(seconds: 3));
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not create the PDF. Please try again.'),
+            isError: true,
+            duration: const Duration(seconds: 4));
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _print() async {
+    setState(() => _working = true);
+    try {
+      await BudgetReportPdf.print(
+        room: _selectedRoom,
+        budgetRm: _budget,
+        lines: _exportLines(),
+        generatedAt: DateTime.now(),
+        ecoFriendly: _ecoFriendly,
+      );
+      if (mounted) {
+        showAppSnackbar(context, 'Print dialog opened',
+            duration: const Duration(seconds: 3));
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not create the PDF. Please try again.'),
+            isError: true,
+            duration: const Duration(seconds: 4));
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   @override
@@ -138,6 +186,7 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
     }
 
     return GradientScaffold(
+      showBack: true,
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
             20, 60, 20, MediaQuery.paddingOf(context).bottom + 32),
@@ -246,21 +295,27 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                 },
               ),
               const SizedBox(height: 14),
-              CheckboxListTile(
-                value: _ecoFriendly,
-                onChanged: (v) {
-                  setState(() {
-                    _ecoFriendly = v ?? false;
-                    _touched = true;
-                  });
-                  _persist();
-                },
-                title: const Text('Eco-Friendly Materials'),
-                subtitle: Text(_ecoFriendly
-                    ? 'Estimating from eco-friendly listings only'
-                    : 'Switch on to price only from eco-friendly listings'),
-                activeColor: AppColors.success,
-                contentPadding: EdgeInsets.zero,
+              // Its own Material so the ListTile's background and ink land
+              // on this layer instead of behind the card's DecoratedBox
+              // (framework assertion: "ink splashes may be invisible").
+              Material(
+                type: MaterialType.transparency,
+                child: CheckboxListTile(
+                  value: _ecoFriendly,
+                  onChanged: (v) {
+                    setState(() {
+                      _ecoFriendly = v ?? false;
+                      _touched = true;
+                    });
+                    _persist();
+                  },
+                  title: const Text('Eco-Friendly Materials'),
+                  subtitle: Text(_ecoFriendly
+                      ? 'Estimating from eco-friendly listings only'
+                      : 'Switch on to price only from eco-friendly listings'),
+                  activeColor: AppColors.success,
+                  contentPadding: EdgeInsets.zero,
+                ),
               ),
             ]),
             const SizedBox(height: 20),
@@ -324,11 +379,21 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                                 fontSize: 14,
                                 color: AppColors.textPrimary)),
                       ),
-                      Text(priceLabel(i),
-                          style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
+                      // Money side also flexes: both boxes share the row
+                      // evenly, so the total stays flush right and scales
+                      // down instead of overflowing on big numbers.
+                      Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(priceLabel(i),
+                              maxLines: 1,
+                              style: GoogleFonts.poppins(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -340,13 +405,20 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 16)),
                   ),
-                  Text(Formatters.myr(totalCost),
-                      style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: remaining < 0
-                              ? AppColors.error
-                              : AppColors.accent)),
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(Formatters.myr(totalCost),
+                          maxLines: 1,
+                          style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: remaining < 0
+                                  ? AppColors.error
+                                  : AppColors.accent)),
+                    ),
+                  ),
                 ],
               ),
               if (partial && catalogue != null) ...[
@@ -384,42 +456,138 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
             ]),
             const SizedBox(height: 20),
 
-            // ── Copy report ──
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.accent, AppColors.gradientGreen],
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: ElevatedButton.icon(
-                  onPressed: _copyReport,
-                  icon: const Icon(Icons.copy_all_outlined),
-                  label: const Text('Copy Report',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    foregroundColor: Colors.white,
-                    // Tight 52px wrapper — keep the label's line box
-                    // (e.g. the 'p' in "Report") inside the button.
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 10, horizontal: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            // ── Export: share / print the same summary as a PDF ──
+            _actionBar(),
             const SizedBox(height: 32),
           ],
         ),
       ),
+    );
+  }
+
+  // ── Action bar ─────────────────────────────────────────────────────────
+
+  Widget _actionBar() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 24),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Expanded(
+              child: _pdfButton(
+                label: 'Share Report',
+                icon: Icons.ios_share,
+                filled: true,
+                onTap: _working ? null : _share,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _pdfButton(
+                label: 'Print Report',
+                icon: Icons.print_outlined,
+                filled: false,
+                onTap: _working ? null : _print,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pdfButton({
+    required String label,
+    required IconData icon,
+    required bool filled,
+    required VoidCallback? onTap,
+  }) {
+    return SizedBox(
+      height: 52,
+      child: filled
+          ? Container(
+              decoration: BoxDecoration(
+                gradient: onTap != null
+                    ? const LinearGradient(
+                        colors: [AppColors.accent, AppColors.gradientGreen],
+                      )
+                    : null,
+                borderRadius: BorderRadius.circular(14),
+                color: onTap == null ? AppColors.border : null,
+              ),
+              child: ElevatedButton(
+                onPressed: onTap,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.transparent,
+                  disabledForegroundColor: AppColors.textHint,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 10, horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: onTap == null
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : _buttonLabel(icon, label, Colors.white),
+              ),
+            )
+          : OutlinedButton(
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.border),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 10, horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: onTap == null
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textSecondary),
+                    )
+                  : _buttonLabel(icon, label, AppColors.textPrimary),
+            ),
+    );
+  }
+
+  Widget _buttonLabel(IconData icon, String label, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14,
+              color: color),
+        ),
+      ],
     );
   }
 }

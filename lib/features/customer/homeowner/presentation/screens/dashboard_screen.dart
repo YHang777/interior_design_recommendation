@@ -333,7 +333,9 @@ class _ActivityRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(entry.title,
-                    maxLines: 1,
+                    // Two lines: 'Order ORD-20260902-4821 shipped' must keep
+                    // the full order id visible in this narrow column.
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
                         fontSize: 13,
@@ -409,18 +411,26 @@ class _StatCard extends StatelessWidget {
             child: Icon(icon, color: Colors.white, size: 18),
           ),
           const SizedBox(height: 10),
-          Text(value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary)),
-          Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                  fontSize: 11, color: AppColors.textSecondary)),
+          // Shrink to fit rather than ellipsize: 'RM 1,250,000' and
+          // 'Saved Designs' must stay fully readable in a ~100dp column.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+          ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                    fontSize: 11, color: AppColors.textSecondary)),
+          ),
         ],
       ),
     );
@@ -467,11 +477,22 @@ class _ActionCard extends StatelessWidget {
                 child: Icon(icon, color: Colors.white, size: 20),
               ),
               const SizedBox(width: 10),
-              Text(label,
-                  style: GoogleFonts.poppins(
+              Flexible(
+                // Bounded, so an unexpectedly long label scales down
+                // instead of overflowing the card.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: GoogleFonts.poppins(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

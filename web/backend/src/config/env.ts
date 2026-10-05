@@ -103,4 +103,16 @@ export const env = {
    * server so a version bump is one env var, not an app release.
    */
   tripoModelVersion: process.env.TRIPO_MODEL_VERSION ?? 'v3.1-20260211',
+
+  // ── Self-service account deletion (`/api/account/*`, purge sweep) ────────
+  //
+  // Supabase holds `room_designs` (and the product GLBs). The service-role
+  // key is SERVER-SIDE ONLY — same rule as the Gemini/Tripo keys: never
+  // ship it to Flutter. Both are optional: without them the purge skips
+  // Supabase data and records that in the audit log.
+
+  /** Supabase project URL (https://<ref>.supabase.co) — PostgREST base. */
+  supabaseUrl: process.env.SUPABASE_URL ?? '',
+  /** Supabase service-role key (server-side only; NEVER sent to clients). */
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
 };

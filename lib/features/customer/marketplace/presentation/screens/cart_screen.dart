@@ -505,13 +505,22 @@ class _CartItemCard extends ConsumerWidget {
                                     )
                                 : null,
                           ),
-                        const Spacer(),
-                        Text(
-                          Formatters.myr(product.price * row.effectiveQty),
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.accent,
+                        // One flex child only (no Spacer): it takes exactly
+                        // the remaining width, stays flush right, and the
+                        // money shrinks instead of overflowing the row.
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              Formatters.myr(product.price * row.effectiveQty),
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.accent,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -632,13 +641,21 @@ class _CheckoutBar extends StatelessWidget {
                       color: AppColors.textPrimary,
                     ),
                   ),
-                  const Spacer(),
-                  Text(
-                    Formatters.myr(subtotal),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.accent,
+                  // One flex child only (no Spacer): flush right, and the
+                  // total scales down rather than overflowing the row.
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        Formatters.myr(subtotal),
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.accent,
+                        ),
+                      ),
                     ),
                   ),
                 ],

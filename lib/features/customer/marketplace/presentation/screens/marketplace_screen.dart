@@ -530,144 +530,167 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
           '${filtered.length} item${filtered.length == 1 ? '' : 's'}',
           style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
-        const Spacer(),
-        // Eco quick toggle
-        GestureDetector(
-          onTap: () => ref.read(ecoOnlyProvider.notifier).state = !ecoOnly,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: ecoOnly
-                  ? AppColors.success.withValues(alpha: 0.12)
-                  : AppColors.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: ecoOnly ? AppColors.success : AppColors.border,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.textPrimary.withValues(alpha: 0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.eco,
-                    size: 14,
-                    color: ecoOnly ? AppColors.success : AppColors.textHint),
-                const SizedBox(width: 4),
-                Text('Eco',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: ecoOnly
-                            ? AppColors.success
-                            : AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
         const SizedBox(width: 8),
-        // Sort
-        Flexible(
-          child: GestureDetector(
-            onTap: _showSortSheet,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.textPrimary.withValues(alpha: 0.05),
-                    blurRadius: 6,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
+        // The chips keep their intrinsic width: this strip scrolls
+        // horizontally instead of ellipsizing a button label, and the
+        // Align keeps it pinned to the right edge of the row.
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.swap_vert,
-                      size: 14, color: AppColors.textSecondary),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      'Sort · ${sortOption.label}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.textSecondary),
+                  // Eco quick toggle
+                  GestureDetector(
+                    onTap: () =>
+                        ref.read(ecoOnlyProvider.notifier).state = !ecoOnly,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: ecoOnly
+                            ? AppColors.success.withValues(alpha: 0.12)
+                            : AppColors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: ecoOnly ? AppColors.success : AppColors.border,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.textPrimary.withValues(alpha: 0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.eco,
+                              size: 14,
+                              color: ecoOnly
+                                  ? AppColors.success
+                                  : AppColors.textHint),
+                          const SizedBox(width: 4),
+                          Text('Eco',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: ecoOnly
+                                      ? AppColors.success
+                                      : AppColors.textSecondary)),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Filters
-        GestureDetector(
-          onTap: _showFiltersSheet,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: sheetFilterCount > 0
-                  ? AppColors.accent.withValues(alpha: 0.1)
-                  : AppColors.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: sheetFilterCount > 0
-                    ? AppColors.accent
-                    : AppColors.border,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.textPrimary.withValues(alpha: 0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.tune,
-                    size: 14,
-                    color: sheetFilterCount > 0
-                        ? AppColors.accent
-                        : AppColors.textSecondary),
-                const SizedBox(width: 4),
-                Text('Filters',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                  const SizedBox(width: 8),
+                  // Sort — short label, so it can never ellipsize; the
+                  // active choice is shown by the chip row above and in
+                  // the sheet.
+                  GestureDetector(
+                    onTap: _showSortSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppColors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.textPrimary.withValues(alpha: 0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.swap_vert,
+                              size: 14,
+                              color: sortOption != SortOption.recommended
+                                  ? AppColors.accent
+                                  : AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Sort',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: sortOption != SortOption.recommended
+                                    ? AppColors.accent
+                                    : AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Filters
+                  GestureDetector(
+                    onTap: _showFiltersSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
                         color: sheetFilterCount > 0
-                            ? AppColors.accent
-                            : AppColors.textSecondary)),
-                if (sheetFilterCount > 0) ...[
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: AppColors.accent,
-                      borderRadius: BorderRadius.circular(8),
+                            ? AppColors.accent.withValues(alpha: 0.1)
+                            : AppColors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: sheetFilterCount > 0
+                              ? AppColors.accent
+                              : AppColors.border,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.textPrimary.withValues(alpha: 0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.tune,
+                              size: 14,
+                              color: sheetFilterCount > 0
+                                  ? AppColors.accent
+                                  : AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Text('Filters',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: sheetFilterCount > 0
+                                      ? AppColors.accent
+                                      : AppColors.textSecondary)),
+                          if (sheetFilterCount > 0) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text('$sheetFilterCount',
+                                  style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white)),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                    child: Text('$sheetFilterCount',
-                        style: const TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white)),
                   ),
                 ],
-              ],
+              ),
             ),
           ),
         ),

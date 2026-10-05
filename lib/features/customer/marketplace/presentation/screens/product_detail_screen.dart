@@ -550,11 +550,20 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 6),
-        Text(label,
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: color)),
+        // Shrink rather than overflow the info column; the label can
+        // carry money ('Shipping: RM X') so ellipsis is not acceptable.
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label,
+                maxLines: 1,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: color)),
+          ),
+        ),
       ],
     );
   }
@@ -568,12 +577,20 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       children: [
         Icon(Icons.local_shipping_outlined, size: 16, color: color),
         const SizedBox(width: 6),
-        Text(
-          charged
-              ? 'Shipping: ${Formatters.myr(product.shippingCharge)}'
-              : 'Free shipping',
-          style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w500, color: color),
+        // Shrink rather than overflow; this line carries money too.
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              charged
+                  ? 'Shipping: ${Formatters.myr(product.shippingCharge)}'
+                  : 'Free shipping',
+              maxLines: 1,
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w500, color: color),
+            ),
+          ),
         ),
       ],
     );

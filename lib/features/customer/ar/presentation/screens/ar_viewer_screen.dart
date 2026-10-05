@@ -1485,14 +1485,18 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                           size: 14, color: AppColors.accentLight),
                       const SizedBox(width: 6),
                       Flexible(
-                        child: Text(
-                          _placedChipText!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white),
+                        // Shrink instead of ellipsizing: '120 × 8…' would
+                        // hide part of the furniture's dimensions.
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _placedChipText!,
+                            maxLines: 1,
+                            style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 6),

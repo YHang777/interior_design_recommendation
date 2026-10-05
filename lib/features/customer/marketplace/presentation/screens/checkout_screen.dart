@@ -622,10 +622,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white),
                             )
-                          : Text(
-                              'Place order'
-                              '${breakdown == null ? '' : ' · ${Formatters.myr(breakdown.total)}'}',
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          : FittedBox(
+                              // One line, scaled to fit: a long total must
+                              // not wrap and overflow the 52px button.
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Place order'
+                                '${breakdown == null ? '' : ' · ${Formatters.myr(breakdown.total)}'}',
+                                maxLines: 1,
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
                             ),
                     ),
                   ),
@@ -757,12 +764,21 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Text(
-          title,
-          style: GoogleFonts.poppins(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
+        // Shrink to fit: a section heading must never ellipsize or
+        // overflow the card.
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              title,
+              maxLines: 1,
+              style: GoogleFonts.poppins(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
           ),
         ),
       ],

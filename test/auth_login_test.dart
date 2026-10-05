@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:interior_design_recommendation/features/auth/data/datasources/account_deletion_datasource.dart';
 import 'package:interior_design_recommendation/features/auth/data/models/app_user.dart';
 import 'package:interior_design_recommendation/features/auth/domain/repositories/auth_repository.dart';
 import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
@@ -232,6 +233,17 @@ class _FakeAuthRepository implements IAuthRepository {
     required String email,
     required String uid,
   }) async {}
+
+  @override
+  Future<DeletionStatus> requestAccountDeletion(String confirmEmail) =>
+      throw UnimplementedError();
+
+  @override
+  Future<DeletionStatus> cancelAccountDeletion() => throw UnimplementedError();
+
+  @override
+  Future<DeletionStatus> fetchDeletionStatus() async =>
+      const DeletionStatus(status: 'none');
 
   @override
   Future<AppUser> updateProfile({

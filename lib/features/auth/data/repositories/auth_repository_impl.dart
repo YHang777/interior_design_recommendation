@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/foundation.dart' show debugPrint;
 import '../../../../core/utils/boot_trace.dart';
 import '../../domain/repositories/auth_repository.dart';
+import '../datasources/account_deletion_datasource.dart';
 import '../datasources/firebase_auth_datasource.dart';
 import '../datasources/firestore_user_datasource.dart';
 import '../datasources/verification_email_datasource.dart';
@@ -13,14 +14,17 @@ class AuthRepositoryImpl implements IAuthRepository {
   final FirebaseAuthDatasource _authDatasource;
   final FirestoreUserDatasource _firestoreDatasource;
   final VerificationEmailDatasource _verificationDatasource;
+  final AccountDeletionDatasource _deletionDatasource;
 
   AuthRepositoryImpl({
     required FirebaseAuthDatasource authDatasource,
     required FirestoreUserDatasource firestoreDatasource,
     required VerificationEmailDatasource verificationDatasource,
+    AccountDeletionDatasource? deletionDatasource,
   })  : _authDatasource = authDatasource,
         _firestoreDatasource = firestoreDatasource,
-        _verificationDatasource = verificationDatasource;
+        _verificationDatasource = verificationDatasource,
+        _deletionDatasource = deletionDatasource ?? AccountDeletionDatasource();
 
   /// In-flight profile fetch, keyed by uid — see [_buildAppUser].
   String? _profileFetchUid;
@@ -237,6 +241,21 @@ class AuthRepositoryImpl implements IAuthRepository {
   Future<bool> isEmailVerified() async {
     await _authDatasource.reloadUser();
     return _authDatasource.isEmailVerified;
+  }
+
+  @override
+  Future<DeletionStatus> requestAccountDeletion(String confirmEmail) {
+    return _deletionDatasource.requestDeletion(confirmEmail: confirmEmail);
+  }
+
+  @override
+  Future<DeletionStatus> cancelAccountDeletion() {
+    return _deletionDatasource.cancelDeletion();
+  }
+
+  @override
+  Future<DeletionStatus> fetchDeletionStatus() {
+    return _deletionDatasource.fetchDeletionStatus();
   }
 
   /// Builds the [AppUser] for [fbUser], de-duplicating concurrent calls.

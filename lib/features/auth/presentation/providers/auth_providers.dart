@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/datasources/account_deletion_datasource.dart';
 import '../../data/datasources/firebase_auth_datasource.dart';
 import '../../data/datasources/firestore_user_datasource.dart';
 import '../../data/datasources/verification_email_datasource.dart';
@@ -20,6 +21,7 @@ final authRepositoryProvider = Provider<IAuthRepository>((ref) {
     authDatasource: FirebaseAuthDatasource(),
     firestoreDatasource: FirestoreUserDatasource(),
     verificationDatasource: VerificationEmailDatasource(),
+    deletionDatasource: AccountDeletionDatasource(),
   );
 });
 
@@ -162,6 +164,27 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AppUser?>> {
     return _repository.resendVerificationEmail(email: email, uid: uid);
   }
 
+  /// Starts account deletion. The user stays signed in — grace-period
+  /// accounts keep their session until the sweep purges them, and
+  /// [deletionStatusProvider] drives the pending/scheduled banner.
+  /// Errors propagate to the caller (dialog snackbar).
+  Future<DeletionStatus> requestAccountDeletion(String confirmEmail) {
+    return _repository.requestAccountDeletion(confirmEmail);
+  }
+
+  /// Cancels an active deletion request (pending or grace): the account is
+  /// restored. Callers should `ref.invalidate(deletionStatusProvider)`
+  /// afterwards. Errors propagate to the caller.
+  Future<DeletionStatus> cancelAccountDeletion() {
+    return _repository.cancelAccountDeletion();
+  }
+
+  /// Fresh deletion status for the signed-in user — for callers that need
+  /// it imperatively; the banner reads [deletionStatusProvider] instead.
+  Future<DeletionStatus> fetchDeletionStatus() {
+    return _repository.fetchDeletionStatus();
+  }
+
   @override
   void dispose() {
     _authSub?.cancel();
@@ -222,4 +245,19 @@ final currentUserRoleProvider = Provider<UserRole?>((ref) {
 final currentUserProvider = Provider<AppUser?>((ref) {
   final authState = ref.watch(authStateProvider);
   return authState.whenOrNull(data: (user) => user);
+});
+
+/// The signed-in user's account-deletion status.
+///
+/// Yields `DeletionStatus(status: 'none')` while signed out (and while the
+/// auth state is still resolving), so consumers can treat "no data" as
+/// "nothing pending". Fetch failures stay in the [AsyncValue] — the banner
+/// fails silent by reading `valueOrNull`.
+///
+/// Re-fetches automatically on sign-in/sign-out; invalidate explicitly
+/// after a request or cancel: `ref.invalidate(deletionStatusProvider)`.
+final deletionStatusProvider = FutureProvider<DeletionStatus>((ref) async {
+  final signedIn = ref.watch(isAuthenticatedProvider);
+  if (!signedIn) return const DeletionStatus(status: 'none');
+  return ref.watch(authRepositoryProvider).fetchDeletionStatus();
 });

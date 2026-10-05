@@ -6,7 +6,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  * hosted this flow).
  *
  * Format: `base64url(payloadJson) + '.' + base64url(hmacSha256(secret, payloadB64))`
- * where payloadJson is `{"uid": ..., "email": ..., "exp": <epochSeconds>}`.
+ * where payloadJson is `{"uid": ..., "email": ..., "exp": <epochSeconds>}`
+ * (optionally with `,"purpose": "email_verify"|"account_delete"` appended —
+ * see `createVerificationToken`).
  *
  * Byte-compatibility matters: links already sitting in users' inboxes were
  * minted by the Dart server. `base64url` here is UNPADDED (same as the Dart
@@ -20,10 +22,20 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  */
 export const DEFAULT_TOKEN_TTL_SECONDS = 24 * 60 * 60;
 
+/**
+ * What a token is allowed to do. Cross-use is impossible in both directions:
+ * `verify-email.routes.ts` refuses anything that is not `email_verify`, and
+ * the account-deletion confirm route refuses anything that is not
+ * `account_delete`. Tokens minted before purposes existed carry no field and
+ * verify as `email_verify` (they were only ever email-verification links).
+ */
+export type VerificationTokenPurpose = 'email_verify' | 'account_delete';
+
 export interface VerificationTokenPayload {
   uid: string;
   email: string;
   exp: number;
+  purpose: VerificationTokenPurpose;
 }
 
 /** Injectable clock (tests); defaults to `new Date()`. */
@@ -35,27 +47,35 @@ export function createVerificationToken({
   secret,
   clock,
   ttlSeconds = DEFAULT_TOKEN_TTL_SECONDS,
+  purpose,
 }: {
   uid: string;
   email: string;
   secret: string;
   clock?: Clock;
   ttlSeconds?: number;
+  purpose?: VerificationTokenPurpose;
 }): string {
   const now = clock ? clock() : new Date();
-  const payload = JSON.stringify({
-    uid,
-    email,
-    exp: Math.floor(now.getTime() / 1000) + ttlSeconds,
-  });
+  const exp = Math.floor(now.getTime() / 1000) + ttlSeconds;
+  // Byte-compatibility rule: with no `purpose` the payload is the EXACT
+  // legacy `{"uid":…,"email":…,"exp":…}` (key order included) so links
+  // minted by the Dart server and by this code are interchangeable. When a
+  // purpose IS set it is APPENDED after `exp` — `uid, email, exp` order is
+  // never disturbed: `{"uid":…,"email":…,"exp":…,"purpose":…}`.
+  const payload = JSON.stringify(
+    purpose === undefined ? { uid, email, exp } : { uid, email, exp, purpose }
+  );
   const payloadB64 = b64url(Buffer.from(payload, 'utf8'));
   const sigB64 = b64url(sign(payloadB64, secret));
   return `${payloadB64}.${sigB64}`;
 }
 
 /**
- * Decodes and validates `token`. Returns `{uid, email, exp}` or null when
- * the token is malformed, tampered with, or expired.
+ * Decodes and validates `token`. Returns the payload with `purpose`
+ * defaulted to `'email_verify'` (legacy tokens carry no field) or null when
+ * the token is malformed, tampered with, expired, or carries a `purpose`
+ * value this server does not know.
  */
 export function verifyVerificationToken(
   token: string,
@@ -85,13 +105,18 @@ export function verifyVerificationToken(
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return null;
   }
-  const { uid, email, exp } = payload as Record<string, unknown>;
+  const { uid, email, exp, purpose } = payload as Record<string, unknown>;
   if (typeof uid !== 'string' || uid.length === 0) return null;
   if (typeof email !== 'string' || email.length === 0) return null;
   if (typeof exp !== 'number' || !Number.isInteger(exp)) return null;
+  let tokenPurpose: VerificationTokenPurpose = 'email_verify';
+  if (purpose !== undefined) {
+    if (purpose !== 'email_verify' && purpose !== 'account_delete') return null;
+    tokenPurpose = purpose;
+  }
   const now = clock ? clock() : new Date();
   if (exp <= Math.floor(now.getTime() / 1000)) return null;
-  return { uid, email, exp };
+  return { uid, email, exp, purpose: tokenPurpose };
 }
 
 function sign(payloadB64: string, secret: string): Buffer {

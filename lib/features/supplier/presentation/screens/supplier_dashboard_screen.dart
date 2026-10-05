@@ -792,6 +792,7 @@ class _StatCard extends StatelessWidget {
           // ellipsizing inside a 1/3-width card.
           FittedBox(
             fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
             child: Text(value,
                 maxLines: 1,
                 style: GoogleFonts.poppins(
@@ -799,11 +800,16 @@ class _StatCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
           ),
-          Text(label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                  fontSize: 11, color: AppColors.textSecondary)),
+          // Same treatment as the value: the label must stay fully
+          // readable, not 'Reve…'.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                    fontSize: 11, color: AppColors.textSecondary)),
+          ),
         ],
       ),
     );
