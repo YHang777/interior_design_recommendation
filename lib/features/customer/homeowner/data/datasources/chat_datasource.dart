@@ -85,7 +85,10 @@ class ChatDatasource {
   }) async {
     final base = AppConfig.chatApiUrl.trim();
     if (base.isEmpty) {
-      throw const ChatException('AI chat is not configured in this build.');
+      // No proxy in this build — reply locally so the chat is never a
+      // dead end. Small delay so the typing indicator has a beat to show.
+      await Future.delayed(const Duration(milliseconds: 600));
+      return _localReply(style: style, room: room);
     }
     // Fail fast without a token: an unauthenticated call would only earn
     // a 401 from the proxy.
@@ -138,6 +141,24 @@ class ChatDatasource {
           'The design assistant could not reply. Try again.');
     }
     return reply.trim();
+  }
+
+  /// Canned reply for builds without a configured proxy. Short, plain
+  /// sentences (house rule), adapting to whatever context the chips gave.
+  static String _localReply({String? style, String? room}) {
+    if (style != null && room != null) {
+      return 'Here is a $style recommendation for your $room: Try a '
+          'neutral color palette with accent furniture pieces. Would you '
+          'like specific product suggestions?';
+    }
+    if (style != null || room != null) {
+      final what = style ?? room;
+      return 'Here are some $what ideas: A neutral base with one or two '
+          'accent pieces keeps the space flexible. Want suggestions for '
+          'specific furniture?';
+    }
+    return 'I can help with furniture picks, color palettes, and layout '
+        'ideas for any room. Tell me a style or a room to start with.';
   }
 
   String _messageForStatus(int status) {

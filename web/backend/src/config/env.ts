@@ -81,9 +81,10 @@ export const env = {
   /**
    * Model id. Defaults to the cheapest tier — the assistant is short
    * product/design chat, not reasoning work. Overridable without a redeploy
-   * when Google restricts a model to older keys.
+   * when Google retires a model (`gemini-2.5-flash-lite` now 404s for newer
+   * keys; `gemini-3.1-flash` without the -lite suffix never existed).
    */
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite',
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.1-flash-lite',
 
   // ── 3D generation (`/api/tripo/*`) ──────────────────────────────────────
   //

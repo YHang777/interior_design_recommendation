@@ -89,7 +89,7 @@ override in `frontend/.env.local` if the API runs elsewhere.
 | `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME` | backend | Verified Brevo sender (default name `Intellar`) |
 | `PUBLIC_BASE_URL` | backend | Fallback email-link origin (e.g. `https://interior-design-recommendation.onrender.com`). Normally overridden per-request from `Host` + `X-Forwarded-Proto` |
 | `GEMINI_API_KEY` | backend | Google AI Studio key for `/api/ai/chat` (the design assistant). **Server-side only** — never put it in the Flutter app or a `--dart-define`; APK contents are extractable. Missing → chat returns `503 NOT_CONFIGURED`. |
-| `GEMINI_MODEL` | backend | Model id for the assistant (default `gemini-2.5-flash-lite`, the cheapest tier). If a new key cannot reach the 2.5 family, set `gemini-3.1-flash-lite`. |
+| `GEMINI_MODEL` | backend | Model id for the assistant (default `gemini-3.1-flash-lite`, the cheapest tier). Google retired `gemini-2.5-flash-lite` for newer keys (404), so the default sits on the 3.1 lite tier. |
 | `TRIPO_API_KEY` | backend | Tripo AI key for `/api/tripo/*` (seller 3D generation). **Server-side only** — same rule as the Gemini key: it used to live in `lib/config/local_config.dart` and shipped inside every APK. Missing → both routes return `503 NOT_CONFIGURED`. |
 | `TRIPO_MODEL_VERSION` | backend | Tripo model billed for image-to-model (default `v3.1-20260211`). Server-owned so a version bump is an env change, not an app release. |
 | `TRIPO_BASE_URL` | backend | Tripo OpenAPI origin (default `https://openapi.tripo3d.ai/v3`) — override only for a Tripo proxy/mirror. |
@@ -147,7 +147,7 @@ services next to the real host.
 | `VERIFY_TOKEN_SECRET` | unchanged | Email tokens (HMAC) |
 | `BREVO_API_KEY` · `BREVO_SENDER_EMAIL` · `BREVO_SENDER_NAME` | unchanged | Brevo send |
 | `GEMINI_API_KEY` | Google AI Studio key | **New** — design assistant (`/api/ai/chat`). Server-side only. |
-| `GEMINI_MODEL` | optional, default `gemini-2.5-flash-lite` | **New** — set `gemini-3.1-flash-lite` if the key cannot reach the 2.5 family |
+| `GEMINI_MODEL` | optional, default `gemini-3.1-flash-lite` | Not set on this service — the code default applies (the old `gemini-2.5-flash-lite` default 404s for newer keys). |
 | `TRIPO_API_KEY` | Tripo AI key (`tsk_…`) | **New** — seller 3D generation (`/api/tripo/*`). Server-side only. |
 | `TRIPO_MODEL_VERSION` | optional, default `v3.1-20260211` | **New** — the Tripo model billed for image-to-model |
 | `PUBLIC_BASE_URL` | `https://interior-design-recommendation.onrender.com` | Fallback email-link base (normally derived from the request Host) |

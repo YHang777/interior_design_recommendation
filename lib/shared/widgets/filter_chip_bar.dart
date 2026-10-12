@@ -15,7 +15,9 @@ class FilterChipBar<T> extends StatelessWidget {
   });
 
   final List<T> options;
-  final T selected;
+
+  /// Currently selected option; null means nothing selected yet.
+  final T? selected;
   final ValueChanged<T> onSelected;
   final String Function(T)? labelBuilder;
   final Widget? prefixIcon;

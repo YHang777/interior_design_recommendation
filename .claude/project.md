@@ -185,7 +185,7 @@ keep token format in sync with `web/backend/src/lib/verification-token.ts`.
 | Navigation | **GoRouter** 14.8 — two `StatefulShellRoute.indexedStack` shells + role redirects |
 | Backend / DB | Firebase Auth + **Cloud Firestore** (marketplace source of truth) + Supabase PostgREST (room designs) |
 | Media | Cloudinary (product photos, unsigned preset), Supabase Storage (GLB models) |
-| AI | Google Gemini **via the Node proxy** (`POST /api/ai/chat` on `web/backend`) — `GEMINI_API_KEY` is server-side only, never in the app; default model `gemini-2.5-flash-lite` |
+| AI | Google Gemini **via the Node proxy** (`POST /api/ai/chat` on `web/backend`) — `GEMINI_API_KEY` is server-side only, never in the app; default model `gemini-3.1-flash-lite` (the 2.5 default was retired by Google) |
 | 3D generation | Tripo AI **via the Node proxy** (`/api/tripo/*` on `web/backend`) — `TRIPO_API_KEY` server-side only, never in the app; async poll, with a procedural GLB generator from seller dimensions first |
 | AR | `ar_flutter_plugin_2` (ARCore/SceneView) — true-size placement, floor/wall finish overlays |
 | Camera / ML | `camera` + `google_mlkit_image_labeling` (room scanner) |

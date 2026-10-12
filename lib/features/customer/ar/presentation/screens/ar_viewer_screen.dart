@@ -1425,6 +1425,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                         icon: const Icon(Icons.close, size: 16),
                         label: const Text('Close'),
                         style: ElevatedButton.styleFrom(
+                          // The theme makes ElevatedButton full-width
+                          // (minimumSize infinite) — inside a Row that
+                          // forces an infinite-width constraint.
+                          minimumSize: const Size(0, 48),
                           backgroundColor: AppColors.error,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(

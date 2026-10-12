@@ -1,6 +1,12 @@
 // Reproduces the reported device issue: opening the Room Planner from
 // Profile → Reports → "Create a design" (report route underneath) showed
-// yellow-striped text, while the normal push looked fine.
+// every text double-underlined in yellow.
+//
+// Root cause was NOT overflow: pushed full-screen, RoomScannerScreen had no
+// Material ancestor, so Text fell back to MaterialApp's marker style
+// (yellow, TextDecorationStyle.double — "consider putting your text in a
+// Material"). The tests below assert both halves: no build exception, and
+// no Text inherits the fallback decoration.
 //
 // In widget tests any RenderFlex overflow or build exception surfaces as a
 // test failure — which is exactly what the device's redacted logcat hid.
@@ -102,5 +108,79 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.byType(RoomScannerScreen), findsOneWidget);
+  });
+
+  testWidgets(
+      'pushed planner has a Material — no yellow fallback underlines',
+      (tester) async {
+    final router = GoRouter(
+      initialLocation: '/design/report',
+      routes: [
+        GoRoute(
+          path: '/design/report',
+          pageBuilder: (_, __) => _page(const DesignReportScreen()),
+        ),
+        GoRoute(
+          path: '/design-editor',
+          pageBuilder: (_, __) => _page(const RoomScannerScreen()),
+        ),
+      ],
+    );
+
+    await _pumpPhone(
+      tester,
+      ProviderScope(
+        overrides: _overrides(),
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('Create a design'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.byType(RoomScannerScreen), findsOneWidget);
+
+    // Structural check: pushed at the root there is no Scaffold in the
+    // ancestry, so the screen itself must supply the Material.
+    expect(
+      find.descendant(
+        of: find.byType(RoomScannerScreen),
+        matching: find.byType(Material),
+      ),
+      findsWidgets,
+      reason: 'RoomScannerScreen must provide its own Material when '
+          'pushed full-screen (/design-editor)',
+    );
+
+    // Behavioral check: no Text may see MaterialApp's missing-Material
+    // marker style (yellow, TextDecorationStyle.double, underlined).
+    final textElements = tester.elementList(
+      find.descendant(
+        of: find.byType(RoomScannerScreen),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(textElements, isNotEmpty, reason: 'planner should render text');
+    for (final el in textElements) {
+      final ambient = DefaultTextStyle.of(el);
+      final label = (el.widget as Text).data ?? '<rich text>';
+      expect(
+        ambient.style.decorationColor,
+        isNot(const Color(0xFFFFFF00)),
+        reason: 'Text "$label" inherits the yellow missing-Material '
+            'fallback style',
+      );
+      expect(
+        ambient.style.decoration,
+        isNot(TextDecoration.underline),
+        reason: 'Text "$label" is underlined by the missing-Material '
+            'fallback style',
+      );
+    }
   });
 }

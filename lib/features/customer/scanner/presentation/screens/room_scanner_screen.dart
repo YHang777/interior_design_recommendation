@@ -639,7 +639,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       // Dark camera stages keep white status icons; the light plan stage
       // matches the app-wide dark icons (main.dart flips them globally).
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      child: ColoredBox(
+      // When pushed full-screen (e.g. Reports → "Create a design") there is
+      // no Scaffold above us, so nothing provides a Material. Without one,
+      // every Text inherits MaterialApp's fallback style — a yellow double
+      // underline meant to flag missing Materials. This Material (replacing
+      // the old ColoredBox, same opaque color as its ink background) also
+      // gives the header IconButtons a proper ink surface. Under the
+      // HomeownerShell tab it is harmless: a nested Material just re-provides
+      // the same bodyMedium DefaultTextStyle the shell's Scaffold already did.
+      child: Material(
         color: bgColor,
         child: Column(
           children: [
