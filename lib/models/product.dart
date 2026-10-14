@@ -156,6 +156,95 @@ class Ar3dInfo {
       'taskId: "${taskId.isEmpty ? '' : taskId.substring(0, taskId.length < 8 ? taskId.length : 8)}")';
 }
 
+/// Server-owned verdict of what a product's photos ACTUALLY show — written
+/// only by the backend's photo analysis (`POST /api/ai/analyze-product`,
+/// `products/{id}.vision`), never by the app. A seller's name/description is
+/// a claim; this is what the chat assistant treats as truth.
+///
+/// [Product.toJson] deliberately does NOT emit it: the client must never
+/// write this key (firestore.rules blocks it, and `preserveStoredVision`
+/// re-attaches the stored map around full-document seller writes).
+class ProductVision {
+  /// 'ok' (parsed a verdict) | 'failed' (no usable photo / model hiccup).
+  /// A failure is informational — never an error, never a flag.
+  final String status;
+
+  /// ≤ 8 short noun phrases of what is visible.
+  final List<String> labels;
+
+  /// What the photo actually is (may contradict the seller's category).
+  final String visualCategory;
+
+  final String visualStyle;
+
+  /// One sentence (≤ 200 chars) describing the photo.
+  final String summary;
+
+  /// True only when the photo clearly shows a different product type than
+  /// the seller claims (per the model's narrow instruction).
+  final bool mismatchFlagged;
+
+  final String mismatchReason;
+
+  final DateTime? analyzedAt;
+
+  /// Model id — diagnostics only.
+  final String model;
+
+  const ProductVision({
+    this.status = 'failed',
+    this.labels = const [],
+    this.visualCategory = '',
+    this.visualStyle = '',
+    this.summary = '',
+    this.mismatchFlagged = false,
+    this.mismatchReason = '',
+    this.analyzedAt,
+    this.model = '',
+  });
+
+  bool get isOk => status == 'ok';
+
+  factory ProductVision.fromJson(Map<String, dynamic> json) {
+    final mismatch = json['mismatch'];
+    return ProductVision(
+      status: json['status']?.toString() ?? 'failed',
+      labels: (json['labels'] as List<dynamic>?)
+              ?.whereType<String>()
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList() ??
+          const [],
+      visualCategory: json['visualCategory']?.toString() ?? '',
+      visualStyle: json['visualStyle']?.toString() ?? '',
+      summary: json['summary']?.toString() ?? '',
+      // Never coerce truthy garbage into a flag — the same rule the
+      // server's lenient parser applies.
+      mismatchFlagged: mismatch is Map && mismatch['flagged'] == true,
+      mismatchReason:
+          mismatch is Map ? mismatch['reason']?.toString() ?? '' : '',
+      analyzedAt: _parseDate(json['analyzedAt']),
+      model: json['model']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'status': status,
+        'labels': labels,
+        'visualCategory': visualCategory,
+        'visualStyle': visualStyle,
+        'summary': summary,
+        'mismatch': {'flagged': mismatchFlagged, 'reason': mismatchReason},
+        if (analyzedAt != null) 'analyzedAt': analyzedAt!.toUtc().toIso8601String(),
+        'model': model,
+      };
+
+  @override
+  String toString() =>
+      'ProductVision(status: $status, category: $visualCategory, '
+      'mismatch: $mismatchFlagged)';
+}
+
 class Supplier {
   final String id;
   final String name;
@@ -240,6 +329,10 @@ class Product {
   /// Auto-generated 3D state (nullable = never requested / legacy record).
   final Ar3dInfo? ar3d;
 
+  /// Photo-analysis verdict (nullable = never analyzed / legacy record).
+  /// Server-owned: read for chat context, never emitted by [toJson].
+  final ProductVision? vision;
+
   // ── Shipping (Task B: seller-configured delivery charges) ──
   // Defaults are deliberately conservative: products written before these
   // fields existed load as FREE shipping (no charge, no notice), matching
@@ -284,6 +377,7 @@ class Product {
     this.createdAt,
     this.dimensions,
     this.ar3d,
+    this.vision,
     this.shippingEnabled = false,
     this.shippingFee = 0,
     this.shippingLongDistanceNotice = false,
@@ -341,12 +435,14 @@ class Product {
     DateTime? createdAt,
     ProductDimensions? dimensions,
     Ar3dInfo? ar3d,
+    ProductVision? vision,
     bool? shippingEnabled,
     int? shippingFee,
     bool? shippingLongDistanceNotice,
     bool clearOriginalPrice = false,
     bool clearDimensions = false,
     bool clearAr3d = false,
+    bool clearVision = false,
   }) {
     return Product(
       id: id ?? this.id,
@@ -370,6 +466,7 @@ class Product {
       dimensions:
           clearDimensions ? null : (dimensions ?? this.dimensions),
       ar3d: clearAr3d ? null : (ar3d ?? this.ar3d),
+      vision: clearVision ? null : (vision ?? this.vision),
       shippingEnabled: shippingEnabled ?? this.shippingEnabled,
       shippingFee: shippingFee ?? this.shippingFee,
       shippingLongDistanceNotice:
@@ -430,6 +527,9 @@ class Product {
       ar3d: json['ar3d'] is Map<String, dynamic>
           ? Ar3dInfo.fromJson(json['ar3d'] as Map<String, dynamic>)
           : null,
+      vision: json['vision'] is Map<String, dynamic>
+          ? ProductVision.fromJson(json['vision'] as Map<String, dynamic>)
+          : null,
       // Legacy docs predate these keys → free shipping, notice off.
       shippingEnabled: json['shippingEnabled'] == true,
       shippingFee: _parseShippingFee(json['shippingFee']),
@@ -461,6 +561,7 @@ class Product {
         if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
         if (dimensions != null) 'dimensions': dimensions!.toJson(),
         if (ar3d != null) 'ar3d': ar3d!.toJson(),
+        // `vision` is intentionally omitted: server-owned, see ProductVision.
       };
 }
 
@@ -488,6 +589,21 @@ int _parseShippingFee(dynamic value) {
   final parsed = int.tryParse(value?.toString() ?? '');
   if (parsed == null || parsed < 0) return 0;
   return parsed;
+}
+
+/// Re-attaches the server-owned `vision` map to a seller's full-document
+/// product write — the product-side twin of `preserveStoredInvoices`
+/// (lib/models/order.dart). `Product.toJson()` never emits `vision` (the
+/// client cannot write that key), so a plain `txn.set(doc, toJson())` would
+/// silently erase the photo verdict on every seller edit. Returns [json]
+/// unchanged when the stored doc carries no vision map (legacy product or
+/// never analyzed).
+Map<String, dynamic> preserveStoredVision(
+  Map<String, dynamic> json,
+  Map<String, dynamic>? stored,
+) {
+  if (stored == null || stored['vision'] == null) return json;
+  return {...json, 'vision': stored['vision']};
 }
 
 // ── Product-level shipping math (checkout + order attribution) ─────────────

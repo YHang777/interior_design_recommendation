@@ -130,6 +130,13 @@ export const IconEyeOff = (p: IconProps) => (
   </Svg>
 );
 
+export const IconCamera = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 8.5h2.6l1.7-2.5h7.4l1.7 2.5H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5Z" />
+    <circle cx="12" cy="13.5" r="3.2" />
+  </Svg>
+);
+
 export const IconLogout = (p: IconProps) => (
   <Svg {...p}>
     <path d="M9.5 21H5.5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

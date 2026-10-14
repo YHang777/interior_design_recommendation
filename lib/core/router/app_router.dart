@@ -387,12 +387,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 ///
 /// The report screen's "Create a design" hit this when it used
 /// `pushNamed(homeownerScan)`, and the dashboard's `/ai`,
-/// `/marketplace` and `/saved` shortcuts are the same shape today —
-/// they are only safe while no full-screen route covers the shell.
+/// `/marketplace` and `/saved` shortcuts were the same shape.
 /// Rather than trusting every call site, [push] reroutes exactly that
 /// combination to [go]: switching tabs replaces the stack, which is
 /// what the shell does anyway, and Back lands on the tab's previous
-/// screen instead of a red screen. Every other push flows through
+/// screen instead of a red screen. A push that targets a *different
+/// branch* of the shell currently on top is rerouted to [go] for the
+/// same reason — it would otherwise show the pushed screen while
+/// [StatefulNavigationShell.currentIndex] (and the FloatingNavBar)
+/// keeps pointing at the previous tab. Every other push flows through
 /// unchanged.
 class GuardedGoRouter extends GoRouter {
   GuardedGoRouter({
@@ -411,7 +414,8 @@ class GuardedGoRouter extends GoRouter {
 
   @override
   Future<T?> push<T extends Object?>(String location, {Object? extra}) {
-    if (_wouldStackSecondShell(location, extra)) {
+    if (_wouldStackSecondShell(location, extra) ||
+        _wouldSwitchShellBranch(location, extra)) {
       go(location, extra: extra);
       return Future<T?>.value();
     }
@@ -432,6 +436,35 @@ class GuardedGoRouter extends GoRouter {
     final RouteMatchList next =
         configuration.findMatch(Uri.parse(location), extra: extra);
     return next.matches.any((RouteMatchBase match) => match is ShellRouteMatch);
+  }
+
+  /// True when [location] lands in a *different branch* of the shell that
+  /// is currently the top of the stack (a tab switch written as a push).
+  ///
+  /// go_router implements such a push by recursing into the shell's
+  /// children while keeping the shell match's original branch
+  /// `navigatorKey`, so the pushed screen shows but
+  /// `StatefulNavigationShell.currentIndex` — which the shell reads off
+  /// that key — never moves and the FloatingNavBar keeps highlighting the
+  /// previous tab. Switching branches is `go` semantics, so reroute.
+  bool _wouldSwitchShellBranch(String location, Object? extra) {
+    final RouteMatchList current = routerDelegate.currentConfiguration;
+    if (current.matches.isEmpty) return false;
+    final RouteMatchBase top = current.matches.last;
+    // While a full-screen route covers the shell, _wouldStackSecondShell
+    // already owns the decision; this is the plain shell-on-top case.
+    if (top is! ShellRouteMatch) return false;
+    final RouteMatchList next =
+        configuration.findMatch(Uri.parse(location), extra: extra);
+    if (next.matches.isEmpty) return false;
+    final RouteMatchBase nextTop = next.matches.last;
+    // A top-level route (cart, checkout, product detail, …) pushed over
+    // the shell is a normal full-screen overlay — leave it alone.
+    if (nextTop is! ShellRouteMatch) return false;
+    // A different shell entirely is not a tab switch (redirects gate it).
+    if (!identical(nextTop.route, top.route)) return false;
+    // Same branch → ordinary push; different branch → must switch.
+    return nextTop.navigatorKey != top.navigatorKey;
   }
 }
 

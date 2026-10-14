@@ -6,19 +6,31 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/utils/user_errors.dart';
 import '../../features/customer/ar/data/glb_bounds.dart';
 import '../../features/customer/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
 
-/// Thrown when a product's 3D model cannot be resolved AT ALL. The reason is
-/// always specific and actionable — the resolver has exactly ONE model
-/// source (a ready Tripo download) plus hard-stop preconditions, and it
-/// never substitutes another model. Callers (the AR viewer screen) surface
-/// [reason] verbatim instead of falling back to a catalog model.
-class No3dAvailableException implements Exception {
+/// Thrown when a product's 3D model cannot be resolved AT ALL. [reason] is
+/// short, plain CUSTOMER copy — customers are never told to edit the
+/// seller's fields. Callers surface it via [userMessage] instead of falling
+/// back to a catalog model. The literal [generatingSentinel] is a control
+/// signal (progress, not an error), checked by the viewer before display.
+class No3dAvailableException implements Exception, UserFacingException {
   const No3dAvailableException([this.reason]);
 
+  /// Sentinel reason: a Tripo task is running — the viewer shows progress
+  /// UI, not this text.
+  static const String generatingSentinel = 'generating';
+
+  /// Short customer-facing explanation, or null for the generic line.
   final String? reason;
+
+  @override
+  String get userMessage =>
+      (reason == null || reason == generatingSentinel)
+          ? "This product doesn't have a 3D view right now."
+          : reason!;
 
   @override
   String toString() => reason == null
@@ -56,12 +68,14 @@ class ResolvedGlb {
 /// present, uniform (height preferred) when only some are, refused when none
 /// are) → ground at y = 0 → cache.
 ///
-/// Failures are loud, not silent:
+/// Failures are loud, not silent — and always CUSTOMER copy (short, plain,
+/// never "edit the seller's dimensions"; seller-side guidance lives in
+/// generation_decider for the supplier UI):
 ///  * empty product id → nothing to cache under;
-///  * no seller dimension at all → AR needs the product's real size;
-///  * `ar3d` not ready (`none` / `generating` / `failed`) → the state's own
-///    message (generation still running is NOT an error — the caller shows
-///    progress);
+///  * no seller dimension at all → "size hasn't been set yet";
+///  * `ar3d` not ready (`none` / `generating` / `failed`) → a short
+///    "not ready / check back" line (generation still running is NOT an
+///    error — the caller shows progress);
 ///  * download HTTP/network failure → surfaced, never swallowed into a
 ///    different model;
 ///  * malformed GLB / degenerate geometry → surfaced.
@@ -110,46 +124,42 @@ class ModelGlbResolver {
     }
     // Seller dimensions are the only source of truth for size. Without at
     // least one declared axis there is no true size to place at → refuse
-    // (never guess, never substitute another model).
+    // (never guess, never substitute another model). The copy is CUSTOMER
+    // facing — it never asks the customer to edit the seller's fields.
     if (!hasAnySellerDimension(dims)) {
       throw const No3dAvailableException(
-          'This product has no Width/Height/Depth yet. AR needs the '
-          "product's real-world size — open the product form and set its "
-          'dimensions (meters), then reopen AR.');
+          "This product's size hasn't been set yet, so it can't be shown "
+          'in AR.');
     }
     final ar3d = product.ar3d;
     if (ar3d == null || ar3d.isNone) {
       throw const No3dAvailableException(
-          'No 3D model has been generated for this product yet. In the '
-          "seller's product list, tap Regenerate 3D to create the AI model "
-          '(a Tripo generation), then reopen AR.');
+          "This product doesn't have a 3D view yet. Check back later.");
     }
     if (ar3d.status == 'generating') {
       // Not an error — the viewer shows generation progress instead.
-      throw const No3dAvailableException('generating');
+      throw const No3dAvailableException(
+          No3dAvailableException.generatingSentinel);
     }
     if (ar3d.status == 'failed') {
+      // ar3d.error holds SELLER-side generation copy (what to fix in the
+      // product form) — never shown to customers; logged for support only.
       final detail = ar3d.error.trim();
-      throw No3dAvailableException(
-          detail.isEmpty
-              ? '3D generation failed for this product. In the seller’s '
-                  'product list, tap Retry to re-check the Tripo task '
-                  '(no new charge) or start a new generation.'
-              : '3D generation failed: $detail — in the seller’s product '
-                  'list, tap Retry to re-check the Tripo task (no new '
-                  'charge).');
+      if (detail.isNotEmpty) {
+        debugPrint('[model-3d] ar3d failed for $id: $detail');
+      }
+      throw const No3dAvailableException(
+          "This product's 3D view isn't ready yet. Check back later.");
     }
     if (ar3d.status != 'ready') {
-      throw No3dAvailableException(
-          'unexpected 3D state "${ar3d.status}" for this product.');
+      throw const No3dAvailableException(
+          "This product's 3D view isn't ready yet. Check back later.");
     }
     if (!ar3d.url.startsWith('http')) {
       // A ready record without a downloadable URL is a legacy / broken
       // record (the old procedural path could stamp `ready` with url '').
       throw const No3dAvailableException(
-          'This product’s 3D record has no downloadable model URL. In the '
-          "seller's product list, tap Regenerate 3D to create a fresh Tripo "
-          'model.');
+          "This product's 3D view isn't ready yet. Check back later.");
     }
 
     final cacheDir = await _ensureCacheDir();
@@ -160,53 +170,51 @@ class ModelGlbResolver {
       return ResolvedGlb(file: target);
     }
 
-    // Download. ANY failure is a hard stop with a specific reason — there
-    // is no other model to fall through to.
+    // Download. ANY failure is a hard stop with a specific CUSTOMER copy —
+    // there is no other model to fall through to.
     final Uint8List bytes;
     try {
       final resp =
           await _http.get(Uri.parse(ar3d.url)).timeout(_downloadTimeout);
       if (resp.statusCode != 200) {
-        throw No3dAvailableException(
-            'downloading the 3D model failed (HTTP ${resp.statusCode}). '
-            'Check the connection and tap Retry — re-downloading is free.');
+        debugPrint(
+            '[model-3d] download HTTP ${resp.statusCode} for ${ar3d.url}');
+        throw const No3dAvailableException(
+            "Couldn't load this product's 3D view. Check your connection "
+            'and try again.');
       }
       if (resp.bodyBytes.isEmpty) {
         throw const No3dAvailableException(
-            'the downloaded 3D model was empty. Tap Retry to download it '
-            'again.');
+            "This product's 3D view couldn't be loaded. Try again.");
       }
       bytes = resp.bodyBytes;
     } on No3dAvailableException {
       rethrow;
     } on TimeoutException {
       throw const No3dAvailableException(
-          'downloading the 3D model timed out. Check the connection and '
-          'tap Retry — re-downloading is free.');
+          'This is taking too long. Check your connection and try again.');
     } catch (e) {
       debugPrint('[model-3d] download of ${ar3d.url} failed: $e');
       throw const No3dAvailableException(
-          'Downloading the 3D model failed. Check your connection and '
-          'tap Retry — re-downloading is free.');
+          "Couldn't load this product's 3D view. Check your connection "
+          'and try again.');
     }
 
     // Validate + resize to the seller's declared size (throws
     // GlbParseException / GlbRescaleException / MissingDimensionsException
-    // with specifics — all surfaced verbatim).
+    // with specifics — all customer-safe copy only).
     final Uint8List prepared;
     try {
       GlbBounds.fromGlbBytes(bytes); // throws GlbParseException on garbage
       prepared = rescaleGlbToSellerSize(bytes, dims);
     } on MissingDimensionsException {
       throw const No3dAvailableException(
-          'This product has no Width/Height/Depth yet. AR needs the '
-          "product's real-world size — set its dimensions (meters) in the "
-          'product form.');
+          "This product's size hasn't been set yet, so it can't be shown "
+          'in AR.');
     } catch (e) {
       debugPrint('[model-3d] prepare of ${ar3d.url} failed: $e');
       throw const No3dAvailableException(
-          'The 3D model could not be prepared at the product’s size. '
-          'Tap Regenerate 3D to create a fresh model.');
+          "This product's 3D view couldn't be prepared. Try again later.");
     }
 
     await _writeAndPrune(cacheDir, id, target, prepared);

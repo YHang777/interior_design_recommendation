@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/ar_flutter_plugin.dart';
 import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
-import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/datatypes/node_types.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_anchor_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
@@ -12,18 +11,21 @@ import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/models/ar_anchor.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
+import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
 import '../../data/furniture_model_library.dart';
 import '../../data/glb_bounds.dart';
+import '../../data/placement_policy.dart';
 import '../../data/glb_file_saver.dart';
 import '../../data/glb_generator.dart';
 import '../../data/room_finishes.dart';
@@ -228,9 +230,39 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   /// taps repeat while nothing is armed, so the hint is throttled.
   DateTime? _lastNoFinishHintAt;
 
+  /// Moment the last "point at the floor/wall" placement hint was shown —
+  /// rejected taps repeat, so the hint is throttled like the one above.
+  DateTime? _lastPlacementHintAt;
+
+  /// Latest TRACKING-plane telemetry streamed by the platform
+  /// ("onPlanesUpdate"). Stored WITHOUT setState — placement reads it on
+  /// tap — and only refreshed while the screen is mounted.
+  List<ARPlaneInfo> _livePlanes = const [];
+
+  /// Moment the last plane-telemetry batch arrived. Floor placement
+  /// requires a qualifying plane within [_liveFloorFreshFor] of now.
+  DateTime? _livePlanesAt;
+
+  /// How recent a plane-telemetry batch must be for the floor to count as
+  /// "seen". Stale telemetry (session paused, camera away) never gates a
+  /// placement on an old floor height.
+  static const Duration _liveFloorFreshFor = Duration(seconds: 2);
+
+  /// The live floor's world-Y from recent plane telemetry, or null when the
+  /// floor has not been seen recently (no telemetry, it went stale, or only
+  /// elevated surfaces are in view). Null means floor placement must be
+  /// refused with a scan hint, never guessed.
+  double? get _currentLiveFloorY {
+    final at = _livePlanesAt;
+    if (at == null || DateTime.now().difference(at) > _liveFloorFreshFor) {
+      return null;
+    }
+    return ArPlacementPolicy.liveFloorYFromPlanes(_livePlanes);
+  }
+
   /// Bottom panel height (furniture catalog vs Room finish panel). The
-  /// floating overlays (delete button, chip, mode switcher) are anchored to
-  /// it, so they keep clearing the bar in both modes.
+  /// floating overlays (delete button, chip, mode switcher, rotation row)
+  /// are anchored to it, so they keep clearing the bar in both modes.
   static const double _furnitureBarHeight = 108;
   // Room panel content (finish strips + captions + hint) is ~172 px tall at
   // the default text scale; the panel body scrolls vertically when system
@@ -238,6 +270,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   static const double _roomBarHeight = 184;
   double get _bottomBarHeight =>
       _roomMode ? _roomBarHeight : _furnitureBarHeight;
+
+  /// The bar itself sits inside a SafeArea, so its VISUAL top edge is
+  /// [ MediaQuery.viewPadding ].bottom higher than [_bottomBarHeight].
+  /// Overlays anchored with the raw bar height alone therefore landed on
+  /// top of the bar (and each other) on phones with a gesture-nav inset —
+  /// every overlay bottom offset must add this.
+  double get _barOverlayInset => MediaQuery.viewPaddingOf(context).bottom;
 
   _BarEntry? get _selectedEntry => (_entries.isEmpty ||
           _selectedIndex >= _entries.length)
@@ -274,6 +313,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _watchdog?.cancel();
     _chipTimer?.cancel();
     _generationTicker?.cancel();
+    _stopRotateHold();
     _session?.dispose();
     super.dispose();
   }
@@ -314,12 +354,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     try {
       resolved = await resolver.resolveProductGlb(product);
     } on No3dAvailableException catch (e) {
-      failure = e.reason ??
-          'No 3D model is available for this product yet — tap Regenerate '
-              '3D in the seller’s product list to create one.';
+      // 'generating' is a control signal (progress UI below); everything
+      // else is short customer copy via userMessage — never a raw reason.
+      failure = e.reason == No3dAvailableException.generatingSentinel
+          ? No3dAvailableException.generatingSentinel
+          : userMessage(e,
+              fallback: "This product's 3D view isn't available right now.");
     } catch (e) {
-      failure = 'The 3D model could not be prepared. Check your '
-          'connection and reopen AR — re-downloading is free.';
+      failure = userMessage(e,
+          fallback: "Couldn't load this product's 3D view. Check your "
+              'connection and try again.');
     } finally {
       resolver.dispose();
     }
@@ -341,7 +385,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       return;
     }
 
-    if (failure == 'generating') {
+    if (failure == No3dAvailableException.generatingSentinel) {
       // Progress, not an error: "Generating 3D model… 40s".
       setState(() {
         _productGenerating = true;
@@ -480,6 +524,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         });
       }
     };
+    // Live plane telemetry (~every 3rd frame on Android; never on iOS).
+    // Stored without setState — floor placement reads it on tap.
+    _session!.onPlanesUpdate = (planes) {
+      if (!mounted) return;
+      _livePlanes = planes;
+      _livePlanesAt = DateTime.now();
+    };
     _session!.onError = (error) {
       if (mounted) setState(() => _arError = error);
     };
@@ -575,27 +626,47 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// Returns whether a hit test result's world transform indicates a
-  /// horizontal surface (floor/table) or vertical surface (wall).
-  /// Uses the plane normal (Y-axis of the transform's rotation) to
-  /// determine orientation: ~1.0 = horizontal, ~0.0 = vertical.
-  static bool _isHorizontalPlane(ARHitTestResult hit) {
-    // The world transform's column 1 (Y-axis) is the plane normal.
-    // For horizontal planes, normal.y ≈ 1.0; for vertical, normal.y ≈ 0.0.
-    final normalY = hit.worldTransform.getColumn(1).y.abs();
-    return normalY > 0.7;
+  /// The anchor transform that keeps the model glued to the tapped plane:
+  ///  * floor → the FULL hit pose (position + plane-aligned rotation), so
+  ///    the model's base lies exactly on the plane even when the plane is
+  ///    slightly tilted;
+  ///  * wall → [ArPlacementPolicy.wallAnchorTransform]: the hit position,
+  ///    yawed so the panel's +Z (pattern face) points OUT of the wall along
+  ///    the plane normal (ARCore vertical planes carry the normal on the
+  ///    pose's local +Y, NOT +Z — the old code read column 2 and left every
+  ///    panel edge-on), and pushed out half the panel depth so its back
+  ///    face sits flush.
+  static Matrix4 _anchorTransformFor(
+      ARHitTestResult hit, PlacementType placement) {
+    if (placement == PlacementType.wall) {
+      return ArPlacementPolicy.wallAnchorTransform(hit);
+    }
+    return Matrix4.copy(hit.worldTransform);
   }
 
-  /// SHARED anchor + node placement for every flow (furniture and finishes,
-  /// fix 22): picks a plane hit (falling back to the first feature point),
-  /// creates the anchor, adds the node and cleans up on failure. Returns the
-  /// placed item — the caller records it in its own (mounted-guarded)
-  /// setState, since only the caller knows the chip/label semantics.
+  /// SHARED anchor + node placement for every flow (furniture and finishes):
+  /// runs [ArPlacementPolicy] over the tap's hits, creates the plane-aligned
+  /// anchor, adds the node and cleans up on failure. Returns the placed
+  /// item — the caller records it in its own (mounted-guarded) setState,
+  /// since only the caller knows the chip/label semantics.
   ///
-  /// [requiredPlacement] filters plane hits by orientation:
-  /// - [PlacementType.floor] only allows horizontal planes
-  /// - [PlacementType.wall] only allows vertical planes
-  /// - [PlacementType.any] accepts any plane
+  /// [requiredPlacement] selects the policy:
+  /// - [PlacementType.floor] → [ArPlacementPolicy.chooseFloorHit]: requires
+  ///   a LIVE floor (recent plane telemetry) first — without one we refuse
+  ///   and prompt a scan — then large reported horizontal planes within
+  ///   [ArPlacementPolicy.maxAboveLiveFloorM] of that floor, lowest-Y
+  ///   preferred. Elevated surfaces (tables, fridge tops) are rejected even
+  ///   on the first tap, because the floor height comes from telemetry, not
+  ///   from the tap.
+  /// - [PlacementType.wall] → [ArPlacementPolicy.chooseWallHit]: large
+  ///   vertical planes (both extents ≥ 0.8 m) with a near-horizontal
+  ///   normal, largest-first.
+  /// - [PlacementType.any] → [ArPlacementPolicy.chooseAnyHit].
+  ///
+  /// There is NO wrong-surface fallback: tapping a wall while arming a
+  /// floor item (or vice versa) shows a throttled hint and places nothing —
+  /// gluing furniture to the wrong surface was how sofas ended up in
+  /// mid-air or on walls.
   Future<_PlacedItem?> _placeNodeAtTap(
     List<ARHitTestResult> hits,
     ARNode node,
@@ -603,59 +674,34 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     String failureMessage = 'Could not place the item.',
     PlacementType requiredPlacement = PlacementType.any,
   }) async {
-    ARHitTestResult? hit;
-
-    // First try to find a plane hit matching the required orientation.
-    for (final h in hits) {
-      if (h.type != ARHitTestResultType.plane) continue;
-      if (requiredPlacement == PlacementType.any) {
-        hit = h;
-        break;
-      }
-      final isHorizontal = _isHorizontalPlane(h);
-      if (requiredPlacement == PlacementType.floor && isHorizontal) {
-        hit = h;
-        break;
-      }
-      if (requiredPlacement == PlacementType.wall && !isHorizontal) {
-        hit = h;
-        break;
-      }
-    }
-
-    // If no matching plane found, try any plane hit.
-    if (hit == null) {
-      for (final h in hits) {
-        if (h.type == ARHitTestResultType.plane) {
-          hit = h;
-          break;
+    final ARHitTestResult? hit;
+    switch (requiredPlacement) {
+      case PlacementType.floor:
+        // A floor placement needs a RECENTLY-seen real floor. Without one
+        // (only a table-top in view, or telemetry went stale) we refuse
+        // and tell the user to scan the floor — never guess a height.
+        final liveFloorY = _currentLiveFloorY;
+        if (liveFloorY == null) {
+          _showLiveFloorScanHint();
+          return null;
         }
-      }
+        hit = ArPlacementPolicy.chooseFloorHit(hits, liveFloorY: liveFloorY);
+        break;
+      case PlacementType.wall:
+        hit = ArPlacementPolicy.chooseWallHit(hits);
+        break;
+      case PlacementType.any:
+        hit = ArPlacementPolicy.chooseAnyHit(hits);
+        break;
     }
 
-    // Last resort: use the first hit (feature point).
-    hit ??= hits.first;
-
-    // Show a hint if the hit doesn't match the required placement.
-    if (requiredPlacement != PlacementType.any && hit.type == ARHitTestResultType.plane) {
-      final isHorizontal = _isHorizontalPlane(hit);
-      if (requiredPlacement == PlacementType.floor && !isHorizontal) {
-        _showMessage('This item should be placed on the floor — '
-            'point your phone at the ground.',
-            color: AppColors.warning,
-            duration: const Duration(seconds: 2));
-        return null;
-      }
-      if (requiredPlacement == PlacementType.wall && isHorizontal) {
-        _showMessage('This item should be placed on a wall — '
-            'point your phone at a wall.',
-            color: AppColors.warning,
-            duration: const Duration(seconds: 2));
-        return null;
-      }
+    if (hit == null) {
+      _showPlacementHint(requiredPlacement);
+      return null;
     }
 
-    final anchor = ARPlaneAnchor(transformation: hit.worldTransform);
+    final anchor = ARPlaneAnchor(
+        transformation: _anchorTransformFor(hit, requiredPlacement));
     final anchorOk = await _anchors?.addAnchor(anchor) ?? false;
     if (anchorOk != true) {
       _showMessage('Could not create anchor — keep moving your phone.');
@@ -670,6 +716,40 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return _PlacedItem(label, node, anchor);
   }
 
+  /// Throttled hint shown when a floor placement is attempted before a real
+  /// floor has been seen in the plane telemetry (e.g. only a table-top is
+  /// in view). Plain short sentence, throttled like the placement hint.
+  void _showLiveFloorScanHint() {
+    final now = DateTime.now();
+    if (_lastPlacementHintAt != null &&
+        now.difference(_lastPlacementHintAt!) <= const Duration(seconds: 2)) {
+      return;
+    }
+    _lastPlacementHintAt = now;
+    _showMessage('Move your phone slowly to scan the floor, then tap.',
+        color: AppColors.warning, duration: const Duration(seconds: 2));
+  }
+
+  /// Throttled "point at the floor/wall" hint for rejected placement taps.
+  void _showPlacementHint(PlacementType requiredPlacement) {
+    final now = DateTime.now();
+    if (_lastPlacementHintAt != null &&
+        now.difference(_lastPlacementHintAt!) <= const Duration(seconds: 2)) {
+      return;
+    }
+    _lastPlacementHintAt = now;
+    String text;
+    if (requiredPlacement == PlacementType.floor) {
+      text = 'Point your phone at the floor, then tap to place.';
+    } else if (requiredPlacement == PlacementType.wall) {
+      text = 'Point your phone at a wall, then tap to place.';
+    } else {
+      text = 'Point your phone at a floor or wall, then tap to place.';
+    }
+    _showMessage(text,
+        color: AppColors.warning, duration: const Duration(seconds: 2));
+  }
+
   /// Builds the [ARNode] for [entry] honoring the plugin's scale contract:
   /// `node.scale.x` is read as the scene's scale-to-unit-cube — the model's
   /// MAX extent is normalized to scale.x meters.
@@ -682,6 +762,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   ///
   /// Geometry is pre-scaled and grounded (base on the tapped plane) — never
   /// per-axis scale or offsets here.
+  ///
+  /// Floor furniture carries `horizontalOnly: true` in its node data: the
+  /// Android side then restricts drag re-hit-tests to horizontal planes, so
+  /// a dragged sofa can never climb a wall or ride up into the air.
   ARNode _buildNode(_BarEntry entry) {
     final position = Vector3(0.0, 0.0, 0.0);
     final rotation = Vector4(1.0, 0.0, 0.0, 0.0);
@@ -693,6 +777,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         scale: Vector3.all(e.scaleToMeters),
         position: position,
         rotation: rotation,
+        data: {'horizontalOnly': true},
       );
     }
     final item = entry.item!;
@@ -702,6 +787,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       scale: Vector3.all(item.widthMeters),
       position: position,
       rotation: rotation,
+      data: {'horizontalOnly': item.placement == PlacementType.floor},
     );
   }
 
@@ -890,6 +976,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         uri: Uri.file(pending.filePath).toString(),
         scale: Vector3.all(pending.scaleMeters),
         name: pending.nodeName,
+        // Floor finishes are horizontal-only when dragged, like furniture;
+        // wall finishes stay free (they live on vertical planes).
+        data: {'horizontalOnly': pending.kindWord == 'floor'},
       );
       // Floor finishes must go on horizontal surfaces, wall finishes on vertical.
       final requiredPlacement = pending.kindWord == 'floor'
@@ -917,10 +1006,67 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   void _onNodeTap(List<String> nodeNames) {
     if (nodeNames.isEmpty) return;
+    _stopRotateHold(); // a new selection never inherits a running turn
     setState(() {
       _selectedNodeName = nodeNames.first;
       _sessionWasLive = true;
     });
+  }
+
+  /// Radians per tap of the ↺/↻ buttons — 15°.
+  static const double _rotateStepRad = 15.0 * math.pi / 180.0;
+
+  /// Rotates the selected item's MODEL by [deltaYawRad] around the world's
+  /// up axis via the plugin's yaw-only `rotateNode` channel. The tap
+  /// reports the ANCHOR name (the Android side walks the hit node up to
+  /// its anchor), so the placed item is correlated the same way
+  /// [_deleteNode] does, and the MODEL's own name is what the channel
+  /// expects.
+  Future<void> _rotateSelected(double deltaYawRad) async {
+    final selected = _selectedNodeName;
+    if (selected == null) return;
+    _PlacedItem? entry;
+    for (final p in _placed) {
+      if (p.node.name == selected || p.anchor.name == selected) {
+        entry = p;
+        break;
+      }
+    }
+    if (entry == null) return;
+    try {
+      await _objects?.rotateNodeY(entry.node.name, deltaYawRad);
+    } catch (_) {
+      // Older plugin build without the channel — ignore; the two-finger
+      // twist still rotates.
+    }
+  }
+
+  /// Press-and-HOLD slow rotation. A short tap steps 15°; holding a button
+  /// spins the selection continuously at ~15°/s (0.75° every 50 ms) for a
+  /// slow, controlled turn. Cancelled on pointer-up, on dispose, and whenever
+  /// the selection changes so a held turn never keeps spinning a deselected
+  /// model.
+  Timer? _rotateHoldTimer;
+
+  /// Radians applied per hold tick (50 ms) — 0.75°, i.e. ≈15°/s.
+  static const double _rotateHoldStepRad = 0.75 * math.pi / 180.0;
+
+  /// Hold tick period. 50 ms keeps the turn smooth without hammering the
+  /// channel.
+  static const Duration _rotateHoldTick = Duration(milliseconds: 50);
+
+  /// Starts the slow continuous turn in [dirSign] (+1 left ↺, −1 right ↻).
+  void _beginRotateHold(double dirSign) {
+    _rotateHoldTimer?.cancel();
+    _rotateHoldTimer = Timer.periodic(_rotateHoldTick, (_) {
+      _rotateSelected(dirSign * _rotateHoldStepRad);
+    });
+  }
+
+  /// Stops the slow continuous turn (pointer-up / deselect / dispose).
+  void _stopRotateHold() {
+    _rotateHoldTimer?.cancel();
+    _rotateHoldTimer = null;
   }
 
   Future<void> _deleteNode(String name) async {
@@ -1083,6 +1229,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           (item.node.name == _selectedNodeName ||
               item.anchor.name == _selectedNodeName)) {
         _selectedNodeName = null;
+        _stopRotateHold();
       }
     });
   }
@@ -1442,11 +1589,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
           ),
 
-        // Delete button for the tapped node (furniture or finish)
+        // Delete control for the tapped node (furniture or finish). The
+        // rotate buttons moved to a centered row ABOVE the bottom panel —
+        // see [_buildRotateControls] below.
         if (_selectedNodeName != null)
           Positioned(
             right: 16,
-            bottom: _bottomBarHeight + 24,
+            bottom: _bottomBarHeight + _barOverlayInset + 24,
             child: FloatingActionButton.small(
               heroTag: 'ar-delete',
               backgroundColor: AppColors.error,
@@ -1457,13 +1606,27 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
           ),
 
+        // Centered ↺ / ↻ rotation row ABOVE the bottom selection panel —
+        // visible only while a placed model is selected. Tap = 15° step;
+        // press-and-hold = slow continuous turn (~15°/s).
+        if (_selectedNodeName != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: _bottomBarHeight + _barOverlayInset + 56,
+            child: Center(child: _buildRotateControls()),
+          ),
+
         // "Placed at true size" / "Placed finish" chip — floats above the
-        // bottom bar (clear of the mode switcher) until tapped or after 8 s.
+        // bottom bar (clear of the mode switcher, and clear of the rotation
+        // row while a model is selected) until tapped or after 8 s.
         if (_showPlacedChip && _placedChipText != null)
           Positioned(
             left: 16,
             right: 88,
-            bottom: _bottomBarHeight + 46,
+            bottom: _bottomBarHeight +
+                _barOverlayInset +
+                (_selectedNodeName != null ? 108 : 46),
             child: Center(
               child: GestureDetector(
                 onTap: _dismissProductChip,
@@ -1529,7 +1692,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         Positioned(
           left: 0,
           right: 0,
-          bottom: _bottomBarHeight + 8,
+          bottom: _bottomBarHeight + _barOverlayInset + 8,
           child: Center(child: _buildModeSwitcher()),
         ),
       ],
@@ -1606,6 +1769,76 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               fontWeight: FontWeight.w600,
               color: active ? Colors.white : Colors.white70,
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Rotation controls (above the bottom panel) ───
+
+  /// Centered ↺ [Turn] ↻ row shown while a placed model is selected. A tap
+  /// steps 15°; pressing and holding turns the selection slowly (~15°/s)
+  /// for a controlled spin. Visible only when something is selected.
+  Widget _buildRotateControls() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xE6262626),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildRotateButton(
+            icon: Icons.rotate_left,
+            tooltip: 'Rotate left — tap for 15°, hold to turn slowly',
+            dirSign: 1.0,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              'Turn',
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+          _buildRotateButton(
+            icon: Icons.rotate_right,
+            tooltip: 'Rotate right — tap for 15°, hold to turn slowly',
+            dirSign: -1.0,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One rotate button. [dirSign] +1 turns left (↺), −1 turns right (↻).
+  /// A quick tap steps 15°; a press-and-hold starts a slow continuous turn
+  /// that stops on release (see [_beginRotateHold]/[_stopRotateHold]).
+  Widget _buildRotateButton({
+    required IconData icon,
+    required String tooltip,
+    required double dirSign,
+  }) {
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _rotateSelected(dirSign * _rotateStepRad),
+          onLongPressStart: (_) => _beginRotateHold(dirSign),
+          onLongPressEnd: (_) => _stopRotateHold(),
+          onLongPressCancel: _stopRotateHold,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(icon, color: Colors.white, size: 24),
           ),
         ),
       ),
@@ -2294,8 +2527,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (_placed.isEmpty) {
       return 'Tap $surfaceHint to place $name';
     }
-    return 'Tap to place $name • '
-        'Drag to move • Twist to rotate • Tap model to remove';
+    return 'Tap to place $name • Drag to move • '
+        'Tap a model, then use the ↺ ↻ buttons above to turn it';
   }
 }
 

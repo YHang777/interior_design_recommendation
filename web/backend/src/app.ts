@@ -12,6 +12,8 @@ import {
 } from './routes/account-deletion.routes';
 import { createAiChatRouter } from './routes/ai-chat.routes';
 import { defaultAiChatDeps } from './services/ai-chat.service';
+import { createProductVisionRouter } from './routes/product-vision.routes';
+import { defaultProductVisionDeps } from './services/product-vision.service';
 import { createTripoRouter } from './routes/tripo.routes';
 import { defaultTripoDeps } from './services/tripo.service';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -90,6 +92,10 @@ export function createApp(): express.Express {
   // alias so the path is claimed explicitly, and authenticated: it is a
   // proxy onto a paid model, so it is never left open.
   app.use('/api/ai', createAiChatRouter(defaultAiChatDeps()));
+
+  // Listing-photo analysis — same /api/ai prefix, same reasoning (a paid
+  // vision model behind an authenticated, ownership-checked route).
+  app.use('/api/ai', createProductVisionRouter(defaultProductVisionDeps()));
 
   // 3D model generation for the mobile app — same reasoning as /api/ai:
   // Tripo is pay-as-you-go, so the relay is authenticated and the key stays

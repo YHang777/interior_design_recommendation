@@ -165,6 +165,13 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                     result(nil)
                 }
                 break
+            case "rotateNode":
+                // No-op stub: iOS placement UI drives rotation through
+                // transformationChanged; the yaw-only channel exists for
+                // Android's ↺/↻ buttons. Keep the method resolvable so the
+                // Dart caller never sees MissingPluginException.
+                result(false)
+                break
             default:
                 result(FlutterMethodNotImplemented)
                 break

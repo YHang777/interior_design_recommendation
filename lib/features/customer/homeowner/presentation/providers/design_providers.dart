@@ -119,7 +119,15 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
 
   /// Appends a message to [sessionId]. A reply that lands after its chat
   /// was deleted is a no-op — it must never fall into another thread.
-  void addMessage(String sessionId, {required String role, required String text}) {
+  ///
+  /// [suggestions] is for assistant turns: the product cards that go with
+  /// the prose (null/empty for user turns and plain replies).
+  void addMessage(
+    String sessionId, {
+    required String role,
+    required String text,
+    List<ChatSuggestionSnapshot>? suggestions,
+  }) {
     final sessions = [...state.sessions];
     final index = sessions.indexWhere((s) => s.id == sessionId);
     if (index < 0) return;
@@ -132,6 +140,7 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
         role: role,
         text: text,
         createdAt: DateTime.now(),
+        suggestions: suggestions,
       )],
       title: isFirstUserMessage ? _titleFrom(text) : null,
       updatedAt: DateTime.now(),

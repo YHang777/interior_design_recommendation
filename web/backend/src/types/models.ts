@@ -132,3 +132,45 @@ export interface ReviewDecisionResult {
   /** products/{id}.supplier.verificationStatus rows kept in sync. */
   productsSynced: number;
 }
+
+// ── Photo-flag review queue (products whose photo contradicts the listing) ──
+
+/** Admin decision stored at `products/{id}.vision.review`. */
+export interface ProductFlagReview {
+  status: 'open' | 'resolved';
+  note?: string;
+  /** ISO-8601. */
+  reviewedAt: string;
+  /** Admin UID that made the decision. */
+  reviewedBy: string;
+}
+
+/** One flagged listing in the admin queue. */
+export interface ProductFlagRow {
+  productId: string;
+  name: string;
+  category: string;
+  price: number;
+  supplierId: string;
+  image: string;
+  /** Seller-written copy — what the photo allegedly contradicts. */
+  description: string;
+  /** The stored photo verdict (never fabricated here). */
+  vision: {
+    status: string;
+    labels: string[];
+    visualCategory: string;
+    summary: string;
+    mismatch: { flagged: boolean; reason: string };
+    analyzedAt: string | null;
+    model: string;
+  };
+  /** Absent ⇒ open. */
+  review: ProductFlagReview | null;
+}
+
+/** GET /products/flags response. */
+export interface ProductFlagListResult {
+  items: ProductFlagRow[];
+  total: number;
+}

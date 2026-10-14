@@ -1,5 +1,45 @@
 import 'dart:math';
 
+/// A product the assistant suggested, snapshotted at reply time.
+///
+/// Not just an id: the card must still render name/price/photo after the
+/// listing is edited or deleted. The id is what a tap acts on — the Add
+/// handler re-checks the live catalogue before anything enters the cart.
+class ChatSuggestionSnapshot {
+  const ChatSuggestionSnapshot({
+    required this.productId,
+    required this.name,
+    required this.price,
+    required this.image,
+    required this.reason,
+  });
+
+  final String productId;
+  final String name;
+  final int price;
+  final String image;
+
+  /// The model's one-line why.
+  final String reason;
+
+  Map<String, dynamic> toJson() => {
+        'productId': productId,
+        'name': name,
+        'price': price,
+        'image': image,
+        'reason': reason,
+      };
+
+  factory ChatSuggestionSnapshot.fromJson(Map<String, dynamic> json) =>
+      ChatSuggestionSnapshot(
+        productId: json['productId']?.toString() ?? '',
+        name: json['name']?.toString() ?? '',
+        price: (json['price'] as num?)?.toInt() ?? 0,
+        image: json['image']?.toString() ?? '',
+        reason: json['reason']?.toString() ?? '',
+      );
+}
+
 /// One message in a saved design chat.
 ///
 /// [role] matches the proxy's transcript roles: `'user'` for the person,
@@ -9,24 +49,41 @@ class ChatMessage {
     required this.role,
     required this.text,
     required this.createdAt,
+    this.suggestions,
   });
 
   final String role;
   final String text;
   final DateTime createdAt;
 
+  /// Product cards attached to an assistant reply; null/empty for the
+  /// plain prose bubbles older saved chats hold.
+  final List<ChatSuggestionSnapshot>? suggestions;
+
   Map<String, dynamic> toJson() => {
         'role': role,
         'text': text,
         'createdAt': createdAt.toUtc().toIso8601String(),
+        if (suggestions != null && suggestions!.isNotEmpty)
+          'suggestions': [for (final s in suggestions!) s.toJson()],
       };
 
-  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-        role: json['role'] == 'user' ? 'user' : 'model',
-        text: json['text']?.toString() ?? '',
-        createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
-            DateTime.now(),
-      );
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    final rawSuggestions = json['suggestions'];
+    return ChatMessage(
+      role: json['role'] == 'user' ? 'user' : 'model',
+      text: json['text']?.toString() ?? '',
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+          DateTime.now(),
+      suggestions: rawSuggestions is List
+          ? rawSuggestions
+              .whereType<Map<String, dynamic>>()
+              .map(ChatSuggestionSnapshot.fromJson)
+              .where((s) => s.productId.isNotEmpty && s.name.isNotEmpty)
+              .toList()
+          : null,
+    );
+  }
 }
 
 /// A saved design conversation, kept on-device (see `ChatHistoryStore`).

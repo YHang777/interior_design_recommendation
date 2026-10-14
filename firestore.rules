@@ -57,9 +57,25 @@ service cloud.firestore {
     }
 
     // ── Products: public catalogue, authenticated sellers write ──
+    //
+    // `vision` is the upload-time photo verdict (labels, summary, mismatch
+    // flag, admin review) — written ONLY by the backend with the Admin SDK,
+    // which bypasses these rules. Without the guards below any signed-in
+    // seller could stamp their own listing "photo verified" or clear a
+    // mismatch flag, which is exactly what the chat's trust model rests on.
+    //
+    // The update guard uses `diff().affectedKeys()`, which is VALUE-based:
+    // the seller's full-document save re-sends the stored `vision` map
+    // unchanged (preserveStoredVision in lib/models/product.dart), and an
+    // identical re-send is not an "affected" key — only an actual edit is.
     match /products/{productId} {
       allow read: if true;
-      allow create, update, delete: if signedIn();
+      allow create: if signedIn() &&
+          !('vision' in request.resource.data);
+      allow update: if signedIn() &&
+          !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['vision']);
+      allow delete: if signedIn();
 
       // ── Reviews: public read, authenticated buyers write ──
       match /reviews/{reviewId} {

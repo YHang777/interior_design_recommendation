@@ -17,6 +17,7 @@ import '../../../../models/product.dart';
 import '../../../../models/product_category.dart';
 import '../../../../services/media/media_store.dart';
 import '../../../../services/model_generation/model_generation_trigger.dart';
+import '../../../../services/vision/product_vision_trigger.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
@@ -799,6 +800,54 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       // Status shows up in the management list's chip when the seller
       // returns to it.
       kickOffProduct3DGeneration(saved);
+
+      // Photo analysis (server-side Gemini vision), awaited so a photo that
+      // contradicts the listing can warn the seller BEFORE they leave —
+      // but never a blocker: failure/timeout just skips the warning, and
+      // the admin flag queue is the safety net.
+      final vision = await kickOffProductVisionAnalysis(saved)
+          .timeout(const Duration(seconds: 20), onTimeout: () => null);
+      if (!mounted) return;
+      if (vision?.mismatchFlagged == true) {
+        final visual = vision!.visualCategory.isNotEmpty
+            ? 'Your photo looks like ${vision.visualCategory}. '
+                'Your listing says ${saved.category}.'
+            : 'Your photo does not match what your listing says.';
+        final edit = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text(
+              "Photo doesn't match the description",
+              style: GoogleFonts.poppins(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            content: Text(
+              '$visual What buyers see is the photo — our team will review '
+              'this listing.',
+              style: GoogleFonts.poppins(
+                fontSize: 13.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              ConfirmDialogActions(
+                confirmLabel: 'Edit listing',
+                cancelLabel: 'Keep it',
+                onCancel: () => Navigator.pop(ctx, false),
+                onConfirm: () => Navigator.pop(ctx, true),
+              ),
+            ],
+          ),
+        );
+        // "Edit listing": leave the form open (already saved and clean) so
+        // the seller can fix the text and re-save — which re-runs analysis.
+        if (edit == true) return;
+      }
       if (!mounted) return;
       // Capture the router while this context is still live — the snackbar
       // action below fires after the form has popped itself.

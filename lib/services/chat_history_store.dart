@@ -77,6 +77,9 @@ class ChatHistoryStore {
                       role: m.role,
                       text: m.text.substring(0, maxMessageChars),
                       createdAt: m.createdAt,
+                      // Cards survive the text trim — dropping them here
+                      // would silently un-render every old suggestion.
+                      suggestions: m.suggestions,
                     )
                   : m,
           ],

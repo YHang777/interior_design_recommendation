@@ -127,6 +127,74 @@ void main() {
         hasLength(ChatHistoryStore.maxMessageChars));
   });
 
+  test('suggestion cards round-trip through save and load', () async {
+    const card = ChatSuggestionSnapshot(
+      productId: 'sofa-1',
+      name: 'Nordic Sofa',
+      price: 1299,
+      image: 'https://cdn/sofa.jpg',
+      reason: 'Matches your grey floor.',
+    );
+    await store.save([
+      _session(
+        id: 'a',
+        updatedAt: DateTime(2026, 10, 1),
+        messages: [
+          _msg('user', 'sofa?'),
+          ChatMessage(
+            role: 'model',
+            text: 'This one fits.',
+            createdAt: DateTime(2026, 10, 1, 12),
+            suggestions: const [card],
+          ),
+        ],
+      ),
+    ]);
+
+    final loaded = await store.load();
+    final reply = loaded.first.messages.last;
+    expect(reply.suggestions, hasLength(1));
+    expect(reply.suggestions!.single.productId, 'sofa-1');
+    expect(reply.suggestions!.single.name, 'Nordic Sofa');
+    expect(reply.suggestions!.single.price, 1299);
+    expect(reply.suggestions!.single.reason, 'Matches your grey floor.');
+
+    // A legacy message with no cards still parses as null/absent.
+    final legacy = ChatMessage.fromJson(
+        const {'role': 'model', 'text': 'plain', 'createdAt': '2026-10-01T12:00:00Z'});
+    expect(legacy.suggestions, isNull);
+  });
+
+  test('over-long text truncation keeps the suggestion cards', () async {
+    final card = ChatSuggestionSnapshot(
+      productId: 'lamp-1',
+      name: 'Arc Lamp',
+      price: 210,
+      image: 'https://cdn/lamp.jpg',
+      reason: 'Lifts the dark corner.',
+    );
+    await store.save([
+      _session(
+        id: 'a',
+        updatedAt: DateTime(2026, 10, 1),
+        messages: [
+          ChatMessage(
+            role: 'model',
+            text: 'y' * 5000,
+            createdAt: DateTime(2026, 10, 1, 12),
+            suggestions: [card],
+          ),
+        ],
+      ),
+    ]);
+
+    final loaded = await store.load();
+    final kept = loaded.first.messages.single;
+    expect(kept.text, hasLength(ChatHistoryStore.maxMessageChars));
+    expect(kept.suggestions, hasLength(1));
+    expect(kept.suggestions!.single.productId, 'lamp-1');
+  });
+
   test('active session id round-trips and clears', () async {
     await store.save(
       [_session(id: 'a', updatedAt: DateTime(2026, 10, 1))],

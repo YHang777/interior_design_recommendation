@@ -1,15 +1,16 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { verificationApi } from '../api/api';
 import { useAuth } from '../state/AuthContext';
-import { IconGrid, IconLogout, IconSearch, IconShield, IconStore, IconUsers } from './icons';
+import { IconGrid, IconLogout, IconSearch, IconShield, IconStore, IconUsers, IconCamera } from './icons';
 
-export type PageKey = 'overview' | 'users' | 'suppliers' | 'verification';
+export type PageKey = 'overview' | 'users' | 'suppliers' | 'verification' | 'product-flags';
 
 export const PAGE_META: Record<PageKey, { title: string; breadcrumb: string }> = {
   overview: { title: 'Overview', breadcrumb: 'Marketplace health' },
   users: { title: 'Users', breadcrumb: 'Directory · all accounts' },
   suppliers: { title: 'Suppliers', breadcrumb: 'Directory · sellers' },
   verification: { title: 'Verification', breadcrumb: 'Directory · IC review queue' },
+  'product-flags': { title: 'Photo flags', breadcrumb: 'Monitor · photo-vs-claim queue' },
 };
 
 interface Props {
@@ -35,6 +36,11 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         key: 'overview',
         label: 'Overview',
         icon: <IconGrid size={17} />,
+      },
+      {
+        key: 'product-flags',
+        label: 'Photo flags',
+        icon: <IconCamera size={17} />,
       },
     ],
   },

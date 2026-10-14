@@ -21,7 +21,7 @@ async function withServer(
   const fullDeps: AiChatDeps = {
     model: 'test-model',
     isConfigured: () => true,
-    generate: async () => 'hello from the assistant',
+    generate: async () => ({ reply: 'hello from the assistant', suggestions: [] }),
     authorize: allow,
     log: () => {},
     ...deps,
@@ -92,7 +92,7 @@ test('chat → runs the auth step before generating a reply', async () => {
       },
       generate: async () => {
         order.push('generate');
-        return 'ok';
+        return { reply: 'ok', suggestions: [] };
       },
     },
     async (base) => {
@@ -122,18 +122,31 @@ test('chat → 200 with the assistant reply', async () => {
   await withServer({}, async (base) => {
     const res = await post(base, validBody);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { reply: string };
+    const body = (await res.json()) as { reply: string; suggestions: unknown[] };
     assert.equal(body.reply, 'hello from the assistant');
+    // Reply is always paired with a (possibly empty) suggestions array.
+    assert.deepEqual(body.suggestions, []);
   });
 });
 
-test('chat → forwards the transcript and context to the model', async () => {
+test('chat → forwards the transcript, context and photo fields to the model', async () => {
   let seen: unknown;
+  const product = {
+    id: 'nordic-sofa-1',
+    name: 'Nordic Sofa',
+    price: 1299,
+    category: 'Sofa',
+    designStyle: 'Scandinavian',
+    description: 'Three-seater in oatmeal boucle.',
+    photoLabels: ['sofa', 'oatmeal fabric'],
+    photoSummary: 'Light fabric three-seater sofa.',
+    photoMismatch: false,
+  };
   await withServer(
     {
       generate: async (req) => {
         seen = req;
-        return 'ok';
+        return { reply: 'ok', suggestions: [] };
       },
     },
     async (base) => {
@@ -145,7 +158,7 @@ test('chat → forwards the transcript and context to the model', async () => {
         ],
         style: 'Scandinavian',
         room: 'Living room',
-        products: [{ name: 'Nordic Sofa', price: 1299, category: 'Sofa' }],
+        products: [product],
       });
     }
   );
@@ -157,8 +170,75 @@ test('chat → forwards the transcript and context to the model', async () => {
     ],
     style: 'Scandinavian',
     room: 'Living room',
-    products: [{ name: 'Nordic Sofa', price: 1299, category: 'Sofa' }],
+    products: [product],
   });
+});
+
+test('chat → 400 when a catalogue item has no id', async () => {
+  await withServer({}, async (base) => {
+    const res = await post(base, {
+      ...validBody,
+      products: [{ name: 'Nameless Sofa' }],
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, 'VALIDATION_ERROR');
+  });
+});
+
+test('chat → valid suggestions reach the response', async () => {
+  await withServer(
+    {
+      generate: async () => ({
+        reply: 'Try this one.',
+        suggestions: [{ productId: 'sofa-1', reason: 'Matches your grey floor.' }],
+      }),
+    },
+    async (base) => {
+      const res = await post(base, {
+        ...validBody,
+        products: [{ id: 'sofa-1', name: 'Grey Sofa', price: 999 }],
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        reply: string;
+        suggestions: Array<{ productId: string; reason: string }>;
+      };
+      assert.equal(body.reply, 'Try this one.');
+      assert.deepEqual(body.suggestions, [
+        { productId: 'sofa-1', reason: 'Matches your grey floor.' },
+      ]);
+    }
+  );
+});
+
+test('chat → drops suggestion ids the client never sent', async () => {
+  await withServer(
+    {
+      generate: async () => ({
+        reply: 'How about these?',
+        suggestions: [
+          { productId: 'real-1', reason: 'Fits your space.' },
+          { productId: 'invented-99', reason: 'Hallucinated item.' },
+          { productId: 'real-1', reason: 'Duplicate of the first.' },
+        ],
+      }),
+    },
+    async (base) => {
+      const res = await post(base, {
+        ...validBody,
+        products: [{ id: 'real-1', name: 'Real Sofa' }],
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        suggestions: Array<{ productId: string; reason: string }>;
+      };
+      // Unknown ids are dropped, the duplicate collapses to its first use.
+      assert.deepEqual(body.suggestions, [
+        { productId: 'real-1', reason: 'Fits your space.' },
+      ]);
+    }
+  );
 });
 
 test('chat → upstream failure becomes 502 with a short sentence', async () => {

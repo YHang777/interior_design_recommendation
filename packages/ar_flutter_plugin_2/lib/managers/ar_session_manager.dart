@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
 import 'package:ar_flutter_plugin_2/models/ar_anchor.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
+import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:ar_flutter_plugin_2/utils/json_converters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import 'package:vector_math/vector_math_64.dart';
 // Type definitions to enforce a consistent use of the API
 typedef ARHitResultHandler = void Function(List<ARHitTestResult> hits);
 typedef ARPlaneResultHandler = void Function(int planeCount);
+typedef ARPlanesUpdateHandler = void Function(List<ARPlaneInfo> planes);
 typedef ErrorHandler = void Function(String error);
 
 /// Manages the session configuration, parameters and events of an [ARView]
@@ -33,6 +35,12 @@ class ARSessionManager {
 
   /// Receives total number of Planes when a plane is detected and added to the view
   late ARPlaneResultHandler onPlaneDetected;
+
+  /// Receives the live list of TRACKING planes each time the platform
+  /// streams plane telemetry (Android only; iOS never fires it). Cheap
+  /// center + extent payloads let the app gate placement on a recently
+  /// seen floor without hit-testing. Optional — leave null to ignore.
+  ARPlanesUpdateHandler? onPlanesUpdate;
 
   /// Callback that is triggered once error is triggered
   ErrorHandler? onError;
@@ -165,6 +173,16 @@ class ARSessionManager {
           if (onPlaneDetected != null) {
             final planeCountResult = call.arguments as int;
             onPlaneDetected(planeCountResult);
+          }
+          break;
+        case 'onPlanesUpdate':
+          final handler = onPlanesUpdate;
+          if (handler != null) {
+            final rawPlanes = (call.arguments as List<dynamic>? ?? const []);
+            final planes = rawPlanes
+                .map((p) => ARPlaneInfo.fromJson(Map<String, dynamic>.from(p)))
+                .toList();
+            handler(planes);
           }
           break;
         case 'dispose':

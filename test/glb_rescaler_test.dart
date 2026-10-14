@@ -308,5 +308,137 @@ void main() {
         throwsA(isA<GlbParseException>()),
       );
     });
+
+    test('dims stored in cm (> 10 m cap) are normalized to meters', () {
+      // 120/70/40 are cm slips for a 1.2 × 0.7 × 0.4 m product — without
+      // the guard the model would render 100× too big.
+      final out = rescaleGlbToSellerSize(
+        meshAt070Height(),
+        const ProductDimensions(widthM: 120, heightM: 70, depthM: 40),
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.widthM, 1.2, 0.01, 'width treated as 1.2 m');
+      expectNear(bounds.heightM, 0.7, 0.01, 'height treated as 0.7 m');
+      expectNear(bounds.depthM, 0.4, 0.01, 'depth treated as 0.4 m');
+    });
+  });
+
+  group('bakeGlbNodeTransforms (accessor space == world space)', () {
+    /// Rewrites [source]'s JSON chunk through [mutate], keeping the BIN.
+    Uint8List rewriteJson(
+        Uint8List source, void Function(Map<String, dynamic>) mutate) {
+      final json = jsonChunkOf(source);
+      mutate(json);
+      final jsonBytes = Uint8List.fromList(utf8.encode(jsonEncode(json)));
+      final jsonPadded = (jsonBytes.length + 3) & ~3;
+
+      final data = ByteData.sublistView(source);
+      Uint8List? bin;
+      var binLength = 0;
+      var offset = 12;
+      while (offset + 8 <= source.length) {
+        final len = data.getUint32(offset, Endian.little);
+        final type = data.getUint32(offset + 4, Endian.little);
+        if (type == 0x004E4942) {
+          bin = Uint8List.sublistView(source, offset + 8, offset + 8 + len);
+          binLength = len;
+          break;
+        }
+        offset += 8 + len;
+      }
+      final binPadded = bin == null ? 0 : (binLength + 3) & ~3;
+      final total = 12 + 8 + jsonPadded + (bin == null ? 0 : 8 + binPadded);
+
+      final out = BytesBuilder(copy: false);
+      final header = ByteData(12)
+        ..setUint32(0, 0x46546C67, Endian.little)
+        ..setUint32(4, 2, Endian.little)
+        ..setUint32(8, total, Endian.little);
+      out.add(header.buffer.asUint8List());
+      final jsonHead = ByteData(8)
+        ..setUint32(0, jsonPadded, Endian.little)
+        ..setUint32(4, 0x4E4F534A, Endian.little);
+      out.add(jsonHead.buffer.asUint8List());
+      out.add(jsonBytes);
+      if (jsonPadded > jsonBytes.length) {
+        out.add(Uint8List(jsonPadded - jsonBytes.length)
+          ..fillRange(0, jsonPadded - jsonBytes.length, 0x20));
+      }
+      if (bin != null) {
+        final binHead = ByteData(8)
+          ..setUint32(0, binPadded, Endian.little)
+          ..setUint32(4, 0x004E4942, Endian.little);
+        out.add(binHead.buffer.asUint8List());
+        out.add(bin);
+        if (binPadded > binLength) {
+          out.add(Uint8List(binPadded - binLength));
+        }
+      }
+      return out.toBytes();
+    }
+
+    test('identity files return the SAME bytes (free fast path)', () {
+      final source = wallSource();
+      final out = bakeGlbNodeTransforms(source);
+      expect(out, source, reason: 'procedural fixtures bake to themselves');
+    });
+
+    test('Z-up→Y-up root matrix is folded into the vertices', () {
+      // Sketchfab-style root rotation (x,y,z) → (x,z,−y): the wall's thin
+      // axis (Z, 0.05 m) becomes world Y; its height (Y, 2.7 m) becomes
+      // world −Z. Accessor-only measurement used to see 2.4×2.7×0.05 and
+      // per-axis rescale scrambled the seller's W/H/D across axes.
+      final wrapped = rewriteJson(wallSource(), (json) {
+        final node = (json['nodes'] as List)[0] as Map<String, dynamic>;
+        node['matrix'] = <double>[1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+      });
+      expectNear(GlbBounds.fromGlbBytes(wrapped).heightM, 2.7, 0.01,
+          'pre-bake accessor space still sees the old axes');
+
+      final baked = bakeGlbNodeTransforms(wrapped);
+      final bounds = GlbBounds.fromGlbBytes(baked);
+      expectNear(bounds.widthM, 2.4, 0.01, 'width (X) unchanged');
+      expectNear(bounds.heightM, 0.05, 0.01, 'thin axis is now world Y');
+      expectNear(bounds.depthM, 2.7, 0.01, 'panel height is now world Z');
+      expectNear(bounds.minY, -0.025, 1e-6,
+          'baked thin axis straddles y = 0 (grounding happens in rescale)');
+
+      final node0 = (jsonChunkOf(baked)['nodes'] as List)[0] as Map;
+      expect(node0.containsKey('matrix'), isFalse,
+          reason: 'baked node is reset to identity');
+    });
+
+    test('TRS node transforms (translation + scale) bake too', () {
+      final wrapped = rewriteJson(wallSource(), (json) {
+        final node = (json['nodes'] as List)[0] as Map<String, dynamic>;
+        node['translation'] = <double>[10, 0, 0];
+        node['scale'] = <double>[2, 2, 2];
+      });
+      final baked = bakeGlbNodeTransforms(wrapped);
+      final bounds = GlbBounds.fromGlbBytes(baked);
+      // Source X spans [−1.2, 1.2] → ×2 → [−2.4, 2.4] → +10 → [7.6, 12.4].
+      expectNear(bounds.minX, 7.6, 0.01, 'translated + scaled minX');
+      expectNear(bounds.widthM, 4.8, 0.01, 'doubled width');
+      expectNear(bounds.heightM, 5.4, 0.01, 'doubled height');
+    });
+
+    test('rescaleGlbToDimensions measures the BAKED axes (seller W/H/D '
+        'stay on the right world axes)', () {
+      final wrapped = rewriteJson(wallSource(), (json) {
+        final node = (json['nodes'] as List)[0] as Map<String, dynamic>;
+        node['matrix'] = <double>[1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+      });
+      final out = rescaleGlbToDimensions(
+        wrapped,
+        targetWidthM: 1.2,
+        targetHeightM: 0.5,
+        targetDepthM: 0.7,
+      );
+      final bounds = parseGlb(out);
+      expectNear(bounds.widthM, 1.2, 0.01, 'seller width on world X');
+      expectNear(bounds.heightM, 0.5, 0.01, 'seller height on world Y');
+      expectNear(bounds.depthM, 0.7, 0.01, 'seller depth on world Z');
+      expectNear(bounds.minY, 0.0, 1e-6, 'grounded');
+    });
   });
 }

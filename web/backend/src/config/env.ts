@@ -85,6 +85,13 @@ export const env = {
    * keys; `gemini-3.1-flash` without the -lite suffix never existed).
    */
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.1-flash-lite',
+  /**
+   * Model for listing-photo analysis (`POST /api/ai/analyze-product`).
+   * Empty (the default) → reuse the chat model; verified 2026-10-14 that
+   * `gemini-3.1-flash-lite` accepts image `inlineData`. Point it elsewhere
+   * only if the chat tier ever stops handling images.
+   */
+  geminiVisionModel: process.env.GEMINI_VISION_MODEL ?? '',
 
   // ── 3D generation (`/api/tripo/*`) ──────────────────────────────────────
   //

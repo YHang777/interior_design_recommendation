@@ -20,7 +20,7 @@ import com.google.ar.core.Frame
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
-import com.uhg0.ar_flutter_plugin_2.Serialization.deserializeMatrix4
+import com.uhg0.ar_flutter_plugin_2.Serialization.deserializePoseParts
 import com.uhg0.ar_flutter_plugin_2.Serialization.serializeHitResult
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -35,7 +35,8 @@ import io.github.sceneview.ar.node.HitResultNode
 import io.github.sceneview.gesture.MoveGestureDetector
 import io.github.sceneview.gesture.RotateGestureDetector
 import io.github.sceneview.math.Position
-import io.github.sceneview.math.Transform
+import dev.romainguy.kotlin.math.Float3
+import dev.romainguy.kotlin.math.Quaternion
 import io.github.sceneview.model.ModelInstance
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
@@ -66,6 +67,12 @@ class ArView(
     id: Int,
 ) : PlatformView {
     private val TAG: String = ArView::class.java.name
+
+    companion object {
+        // Quaternion.fromAxisAngle takes DEGREES in kotlin-math 1.5.x (it
+        // multiplies by π/180 internally); gesture angles are radians.
+        private const val RADIANS_TO_DEGREES = 57.2957795f
+    }
     private val viewContext: Context = context
     private var sceneView: ARSceneView
     private val mainScope = CoroutineScope(Dispatchers.Main)
@@ -87,9 +94,28 @@ class ArView(
     private var lastPointCloudTimestamp: Long? = null
     private var lastPointCloudFrame: Frame? = null
     private var pointCloudModelInstances = mutableListOf<ModelInstance>()
-    private var handlePans = false  
+    private var handlePans = false
     private var handleRotation = false
     private var isSessionPaused = false
+
+    // Last ARCore frame produced by this view's own session.update() call
+    // (see the onFrame lambda in handleInit). Gesture callbacks run on the
+    // same UI thread between two frame updates, so this frame is still
+    // valid while a drag hit-tests against it — used to glue moved nodes
+    // back onto real planes.
+    private var latestFrame: Frame? = null
+
+    // Live TRACKING-plane snapshot for the onPlanesUpdate telemetry (Bug 2).
+    // Keyed by the ARCore Plane (stable per-session reference). A fully-formed
+    // floor stops appearing in getUpdatedTrackables once it is stable, but must
+    // keep counting as "seen" — so we persist each plane here when it updates
+    // and only drop it once it stops tracking. Read/merged on the frame thread.
+    private val livePlanes = mutableMapOf<Plane, Map<String, Any>>()
+
+    // Throttle for the onPlanesUpdate telemetry: stream the live plane
+    // snapshot to Flutter every ~3rd frame (not every frame) to keep the
+    // channel traffic cheap. Counter is only touched on the frame thread.
+    private var planesFrameCounter = 0
 
     private class PointCloudNode(
         modelInstance: ModelInstance,
@@ -145,6 +171,9 @@ class ArView(
                 }
                 "transformationChanged" -> {
                     handleTransformNode(call, result)
+                }
+                "rotateNode" -> {
+                    handleRotateNode(call, result)
                 }
                 else -> result.notImplemented()
             }
@@ -220,33 +249,99 @@ class ArView(
             return null
         }
 
+        // Floor furniture / floor finishes opt out of vertical drag
+        // surfaces: when true, onMove re-hit-tests HORIZONTAL planes only,
+        // so a dragged item can never climb a wall or float up a fridge.
+        val horizontalOnly =
+            ((nodeData["data"] as? Map<*, *>)
+                ?.get("horizontalOnly") as? Boolean) ?: false
+
         return try {
             sceneView.modelLoader.loadModelInstance(fileLocation)?.let { modelInstance ->
                 object : ModelNode(
                     modelInstance = modelInstance,
                     scaleToUnits = transformation.first().toFloat(),
                 ) {
-                    override fun onMove(detector: MoveGestureDetector, e: MotionEvent): Boolean {
-                            if (handlePans) {
-                            val defaultResult = super.onMove(detector, e)
-                            objectChannel.invokeMethod("onPanChange", name)
-                            return defaultResult
-                            }
-                    return false
+                    // Drag = re-hit-test the finger against REAL tracked
+                    // planes and glue the parent AnchorNode to that surface
+                    // point. SceneView's default move snaps to the parent's
+                    // collision surface; an AnchorNode has no geometry, so
+                    // the default was a no-op and anchored furniture could
+                    // not be dragged at all. Forwarding begin/end to the
+                    // AnchorNode lets it detach the AR anchor while moving
+                    // and re-anchor at the final pose (its built-in
+                    // detach-drag-reattach lifecycle).
+
+                    override fun onMoveBegin(
+                        detector: MoveGestureDetector,
+                        e: MotionEvent
+                    ): Boolean {
+                        if (!handlePans) return false
+                        parent?.onMoveBegin(detector, e)
+                        objectChannel.invokeMethod("onPanStart", name)
+                        return true
                     }
-                    
-                    override fun onMoveBegin(detector: MoveGestureDetector, e: MotionEvent): Boolean {
-                        if (handlePans) {
-                            val defaultResult = super.onMoveBegin(detector, e)
-                            objectChannel.invokeMethod("onPanStart", name)
-                            defaultResult
-                        } 
+
+                    override fun onMove(
+                        detector: MoveGestureDetector,
+                        e: MotionEvent
+                    ): Boolean {
+                        if (!handlePans) return false
+                        val anchorNode = parent as? AnchorNode
+                        if (anchorNode != null) {
+                            try {
+                                // SceneView 2.2.1's GestureDetector forwards
+                                // the STORED BEGIN event to node.onMove on
+                                // every frame (moveBeginEvent.component1),
+                                // so `e` is frozen at the touch-down point —
+                                // hit-testing with it never moves anything.
+                                // The live finger position is on the detector.
+                                val moveEvent = detector.currentMotionEvent ?: e
+                                latestFrame?.hitTest(moveEvent.x, moveEvent.y)
+                                    ?.firstOrNull { hit ->
+                                        val trackable = hit.trackable
+                                        if (trackable !is Plane ||
+                                            trackable.trackingState !=
+                                            TrackingState.TRACKING ||
+                                            !trackable.isPoseInPolygon(hit.hitPose)
+                                        ) {
+                                            return@firstOrNull false
+                                        }
+                                        if (horizontalOnly) {
+                                            // Floor-bound item: ONLY real
+                                            // upward-facing horizontal
+                                            // planes are valid drag
+                                            // targets.
+                                            trackable.type ==
+                                                Plane.Type.HORIZONTAL_UPWARD_FACING
+                                        } else {
+                                            trackable.type ==
+                                                Plane.Type.HORIZONTAL_UPWARD_FACING ||
+                                                trackable.type ==
+                                                Plane.Type.VERTICAL
+                                        }
+                                    }
+                                    ?.let { hit ->
+                                        val t = hit.hitPose.translation
+                                        anchorNode.worldPosition =
+                                            Position(t[0], t[1], t[2])
+                                    }
+                            } catch (ex: Exception) {
+                                // Frame went stale mid-drag — keep the last
+                                // glued position instead of jumping.
+                            }
+                            objectChannel.invokeMethod("onPanChange", name)
+                            return true
+                        }
                         return false
                     }
-                    
-                    override fun onMoveEnd(detector: MoveGestureDetector, e: MotionEvent) {
+
+                    override fun onMoveEnd(
+                        detector: MoveGestureDetector,
+                        e: MotionEvent
+                    ) {
                         if (handlePans) {
-                            super.onMoveEnd(detector, e)
+                            parent?.onMoveEnd(detector, e)
                             val transformMap = mapOf(
                                 "name" to name,
                                 "transform" to transform.toFloatArray().toList()
@@ -265,12 +360,30 @@ class ArView(
                     }
 
                     override fun onRotate(detector: RotateGestureDetector, e: MotionEvent): Boolean {
-                        if (handleRotation) {
-                            val defaultResult = super.onRotate(detector, e)
-                            objectChannel.invokeMethod("onRotationChange", name)
-                            return defaultResult
+                        if (!handleRotation) return false
+                        // SceneView's default composes the twist delta in
+                        // the node's LOCAL frame around its local Y — once
+                        // the anchor carries any plane tilt that delta
+                        // accumulates into visible furniture tilt, and the
+                        // gesture feels unresponsive. Apply the delta as a
+                        // WORLD-space yaw instead: left-multiply a
+                        // +Y-axis rotation onto the world quaternion, so
+                        // furniture turns like a turntable and can never
+                        // pitch or roll.
+                        val deltaRad = detector.currentAngle - detector.lastAngle
+                        if (deltaRad != 0f) {
+                            // fromAxisAngle takes DEGREES in this kotlin-math
+                            // build (it internally multiplies by π/180).
+                            val deltaYawDeg =
+                                -deltaRad * RADIANS_TO_DEGREES
+                            val deltaQ = Quaternion.fromAxisAngle(
+                                Float3(0f, 1f, 0f),
+                                deltaYawDeg
+                            )
+                            worldQuaternion = deltaQ * worldQuaternion
                         }
-                        return false
+                        objectChannel.invokeMethod("onRotationChange", name)
+                        return true
                     }
 
                     override fun onRotateEnd(detector: RotateGestureDetector, e: MotionEvent) {
@@ -425,6 +538,7 @@ class ArView(
                     try {
                         if (!isSessionPaused) {
                             session?.update()?.let { frame ->
+                                latestFrame = frame
                                 if (showAnimatedGuide) {
                                     frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
                                         if (plane.trackingState == TrackingState.TRACKING) {
@@ -479,6 +593,41 @@ class ArView(
                                         }
                                     }
                                 }
+
+                                // Live plane telemetry for the app's floor gate (Bug 2).
+                                // Merge this frame's UPDATED trackables into the persistent
+                                // livePlanes map so a stable, fully-formed floor — which
+                                // drops out of getUpdatedTrackables once it stops being
+                                // refined — keeps counting as "seen" until it stops
+                                // tracking. Payload is center + type + extent only (cheap).
+                                frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
+                                    if (plane.trackingState == TrackingState.TRACKING) {
+                                        val c = plane.centerPose.translation
+                                        livePlanes[plane] = mapOf(
+                                            "planeType" to when (plane.type) {
+                                                Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
+                                                Plane.Type.VERTICAL -> 2
+                                                else -> 0
+                                            },
+                                            "centerX" to c[0].toDouble(),
+                                            "centerY" to c[1].toDouble(),
+                                            "centerZ" to c[2].toDouble(),
+                                            "extentX" to plane.extentX.toDouble(),
+                                            "extentZ" to plane.extentZ.toDouble(),
+                                        )
+                                    } else {
+                                        livePlanes.remove(plane)
+                                    }
+                                }
+
+                                // Stream the snapshot to Flutter every ~3rd frame (throttled).
+                                planesFrameCounter++
+                                if (planesFrameCounter % 3 == 0) {
+                                    val planesPayload = ArrayList(livePlanes.values)
+                                    mainScope.launch {
+                                        sessionChannel.invokeMethod("onPlanesUpdate", planesPayload)
+                                    }
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -516,24 +665,49 @@ class ArView(
                             true
                         } else {
                             session?.update()?.let { frame ->
+                                latestFrame = frame
                                 val hitResults = frame.hitTest(motionEvent)
-
-                                Log.d("ArView", "Hit Results count: ${hitResults.size}")
 
                                 val planeHits =
                                     hitResults
                                         .filter { hit ->
                                             val trackable = hit.trackable
-                                            trackable is Plane && trackable.trackingState == TrackingState.TRACKING
+                                            trackable is Plane &&
+                                                    trackable.trackingState == TrackingState.TRACKING
                                         }.map { hit ->
+                                            val plane = hit.trackable as Plane
+                                            val pose = hit.hitPose
                                             mapOf(
                                                 "type" to 1,
                                                 "distance" to hit.distance.toDouble(),
                                                 "position" to
                                                     mapOf(
-                                                        "x" to hit.hitPose.tx().toDouble(),
-                                                        "y" to hit.hitPose.ty().toDouble(),
-                                                        "z" to hit.hitPose.tz().toDouble(),
+                                                        "x" to pose.tx().toDouble(),
+                                                        "y" to pose.ty().toDouble(),
+                                                        "z" to pose.tz().toDouble(),
+                                                    ),
+                                                // REAL surface orientation — without this every
+                                                // hit looked horizontally-flat to the app.
+                                                "rotation" to
+                                                    mapOf(
+                                                        "x" to pose.qx().toDouble(),
+                                                        "y" to pose.qy().toDouble(),
+                                                        "z" to pose.qz().toDouble(),
+                                                        "w" to pose.qw().toDouble(),
+                                                    ),
+                                                // 1 = horizontal (upward-facing), 2 = vertical,
+                                                // 0 = downward-facing (ceiling) / unknown.
+                                                "planeType" to when (plane.type) {
+                                                    Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
+                                                    Plane.Type.VERTICAL -> 2
+                                                    else -> 0
+                                                },
+                                                // Polygon extent — lets the app refuse still-tiny
+                                                // newborn planes (anchors on them drift later).
+                                                "planeExtent" to
+                                                    mapOf(
+                                                        "x" to plane.extentX.toDouble(),
+                                                        "z" to plane.extentZ.toDouble(),
                                                     ),
                                             )
                                         }
@@ -638,6 +812,48 @@ class ArView(
         } catch (e: Exception) {
             Log.e(TAG, "Error removing node", e)
             result.error("REMOVE_NODE_ERROR", e.message, null)
+        }
+    }
+
+    /// Rotates the named node by [deltaYawRadians] around the WORLD's up
+    /// (+Y) axis — yaw only, so the node can never tilt. Used by the
+    /// viewer's ↺/↻ buttons; the two-finger twist applies the same
+    /// world-Yaw constraint (see ModelNode.onRotate in buildModelNode).
+    private fun handleRotateNode(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        try {
+            if (!handleRotation) {
+                // Rotation disabled for this session — treat as a no-op
+                // instead of silently mutating the scene.
+                result.success(false)
+                return
+            }
+            val name = call.argument<String>("name")
+            val deltaYawRad = call.argument<Double>("deltaYawRadians")
+            if (name == null || deltaYawRad == null) {
+                result.error(
+                    "INVALID_ARGUMENT",
+                    "name and deltaYawRadians are required",
+                    null
+                )
+                return
+            }
+            val node = nodesMap[name]
+            if (node == null) {
+                result.error("NODE_NOT_FOUND", "Node with name $name not found", null)
+                return
+            }
+            val deltaYawDeg = (deltaYawRad.toFloat()) * RADIANS_TO_DEGREES
+            val deltaQ = Quaternion.fromAxisAngle(
+                Float3(0f, 1f, 0f),
+                deltaYawDeg
+            )
+            node.worldQuaternion = deltaQ * node.worldQuaternion
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("ROTATE_NODE_ERROR", e.message, null)
         }
     }
 
@@ -927,27 +1143,29 @@ class ArView(
 
                 if (name != null && transform != null) {
                     try {
-                        // Décomposer la matrice de transformation
-                        val (position, rotation) = deserializeMatrix4(transform)
+                        // Position + UNIT quaternion from the full matrix —
+                        // the old path built the Pose with quaternion w = 1
+                        // (wrong for any non-identity rotation) and then
+                        // overwrote the AnchorNode's transform with a
+                        // quaternion misread as Euler angles.
+                        val parts = deserializePoseParts(transform)
 
                         val pose =
                             Pose(
-                                floatArrayOf(position.x, position.y, position.z),
-                                floatArrayOf(rotation.x, rotation.y, rotation.z, 1f),
+                                floatArrayOf(
+                                    parts.position.x,
+                                    parts.position.y,
+                                    parts.position.z
+                                ),
+                                parts.quaternion,
                             )
 
                         val anchor = sceneView.session?.createAnchor(pose)
                         if (anchor != null) {
+                            // AnchorNode syncs its transform from anchor.pose
+                            // (and re-syncs while TRACKING) — no manual
+                            // transform override here.
                             val anchorNode = AnchorNode(sceneView.engine, anchor)
-                            try {
-                                anchorNode.transform =
-                                    Transform(
-                                        position = position,
-                                        rotation = rotation,
-                                    )
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Transform warning suppressed: ${e.message}")
-                            }
 
                             sceneView.addChildNode(anchorNode)
                             anchorNodesMap[name] = anchorNode
@@ -1145,6 +1363,8 @@ class ArView(
         objectChannel.setMethodCallHandler(null)
         anchorChannel.setMethodCallHandler(null)
         nodesMap.clear()
+        livePlanes.clear()
+        planesFrameCounter = 0
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }
         pointCloudModelInstances.clear()

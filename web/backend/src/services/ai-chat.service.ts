@@ -22,9 +22,30 @@ export interface ChatMessage {
 
 /** A catalog item the assistant may point the customer at. */
 export interface ChatProduct {
+  /** Firestore id — lets a suggestion be rendered as a tappable card. */
+  id: string;
   name: string;
   price?: number;
   category?: string;
+  designStyle?: string;
+  /** Seller-written copy (unverified — may describe a different product). */
+  description?: string;
+  /** What automatic photo analysis actually saw — the trusted line. */
+  photoLabels?: string[];
+  photoSummary?: string;
+  photoMismatch?: boolean;
+}
+
+/** One product the model chose to recommend, with a one-line why. */
+export interface ChatSuggestionRef {
+  productId: string;
+  reason: string;
+}
+
+/** The assistant's answer: prose for the bubble, ids for the cards. */
+export interface ChatReply {
+  reply: string;
+  suggestions: ChatSuggestionRef[];
 }
 
 export interface AiChatRequest {
@@ -55,7 +76,7 @@ export class AiChatException extends Error {
 export interface AiChatDeps {
   model: string;
   isConfigured: () => boolean;
-  generate: (req: AiChatRequest) => Promise<string>;
+  generate: (req: AiChatRequest) => Promise<ChatReply>;
   /**
    * Auth step. Defaults to the real Firebase ID-token check; tests swap it
    * out so they never need a live credential.
@@ -79,6 +100,9 @@ const GENERATE_TIMEOUT_MS = 30_000;
 /** Cap the transcript so one long chat cannot grow the request unbounded. */
 const MAX_MESSAGES = 20;
 const MAX_PRODUCTS = 20;
+/** How many products one reply may surface as cards, and how long a why. */
+const MAX_SUGGESTIONS = 3;
+const MAX_REASON_LENGTH = 160;
 
 /**
  * The assistant's persona.
@@ -101,9 +125,22 @@ How you answer:
 
 Hard limits:
 - You cannot see the customer's photos, floor plan or cart, and you cannot place orders, change bookings or handle refunds. Say so plainly and point them to support for account and order problems.
-- Stay on furniture, interiors and room planning. If asked something else, say so briefly and steer back.`;
+- Stay on furniture, interiors and room planning. If asked something else, say so briefly and steer back.
 
-async function generateWithGemini(req: AiChatRequest): Promise<string> {
+Product photos:
+- "Photo shows:" lines come from automatic analysis of the actual product photo. They are trustworthy.
+- "Seller claims:" lines are written by the seller and have not been checked. When the two disagree, trust the photo — and when an item is marked as conflicting, do not recommend it as what the seller says it is.
+
+Suggestions:
+- When you recommend catalogue items, also list them in the "suggestions" array: their exact id and one short line on why they fit. At most 3, ids taken only from the catalogue below. Use [] when you are not recommending a concrete product.
+
+Reply format (hard requirement):
+- Answer with ONLY a single JSON object and nothing else — no prose around it, no markdown fence:
+{"reply":"your chat message in plain text","suggestions":[{"productId":"catalogue id","reason":"one short line"}]}
+- "reply" is what the customer reads: your normal warm answer, newlines allowed as \\n.
+- Never invent product ids, prices or availability.`;
+
+async function generateWithGemini(req: AiChatRequest): Promise<ChatReply> {
   const apiKey = env.geminiApiKey.trim();
   if (apiKey.length === 0) {
     throw new AiChatException('not-configured', 'GEMINI_API_KEY is not set.');
@@ -119,7 +156,9 @@ async function generateWithGemini(req: AiChatRequest): Promise<string> {
     contents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 700,
+      // The reply is a JSON envelope now (prose + suggestions), so it needs
+      // a little more room than the old free-text answer.
+      maxOutputTokens: 900,
       // The lite tier bills thinking tokens as output. This assistant is
       // short conversational advice, so reasoning budget is pure cost.
       thinkingConfig: { thinkingBudget: 0 },
@@ -165,7 +204,99 @@ async function generateWithGemini(req: AiChatRequest): Promise<string> {
   if (text.trim().length === 0) {
     throw new AiChatException('upstream', 'Gemini returned an empty reply.');
   }
-  return text.trim();
+  // The model is told to answer as {reply, suggestions}; a tier that
+  // disobeys degrades to today's plain prose instead of failing the call.
+  const envelope = parseModelEnvelope(text);
+  return {
+    reply: envelope.reply,
+    suggestions: sanitiseSuggestions(envelope.suggestions, req.products),
+  };
+}
+
+/**
+ * Lenient reader for the model's `{reply, suggestions}` envelope.
+ *
+ * Fences are stripped, the first `{…}` span is parsed, and anything that is
+ * not a usable object — or has no usable `reply` — falls back to treating
+ * the whole raw text as the reply with no cards. The one rule that never
+ * bends: `reply` comes back non-empty so the customer always sees words.
+ */
+export function parseModelEnvelope(raw: string): ChatReply {
+  const text = raw.trim();
+  const candidate = firstJsonObject(text);
+  if (candidate !== null) {
+    try {
+      const obj = JSON.parse(candidate) as Record<string, unknown>;
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        const reply = obj.reply;
+        if (typeof reply === 'string' && reply.trim().length > 0) {
+          return {
+            reply: reply.trim(),
+            suggestions: readSuggestionRefs(obj.suggestions),
+          };
+        }
+      }
+    } catch {
+      // Not JSON after all — fall through to the prose path.
+    }
+  }
+  return { reply: text, suggestions: [] };
+}
+
+/** Strips a stray markdown fence and returns the first `{…}` span, else null. */
+function firstJsonObject(text: string): string | null {
+  const unfenced = text
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '');
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  return unfenced.slice(start, end + 1);
+}
+
+/** Keeps only well-formed suggestion entries; validation against the
+ * catalogue happens in `sanitiseSuggestions`. */
+function readSuggestionRefs(raw: unknown): ChatSuggestionRef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatSuggestionRef[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const productId = (item as { productId?: unknown }).productId;
+    const reason = (item as { reason?: unknown }).reason;
+    if (typeof productId !== 'string' || productId.trim().length === 0) continue;
+    out.push({
+      productId: productId.trim(),
+      reason: typeof reason === 'string' ? reason.trim() : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * Drops ids the request never sent (hallucinated or stale), de-dupes,
+ * caps the count and truncates reasons. The app can only render a card
+ * for a product it already has in the catalogue it sent, so an unknown
+ * id would be a dead tap anyway.
+ */
+export function sanitiseSuggestions(
+  raw: ChatSuggestionRef[],
+  products: ChatProduct[] | undefined
+): ChatSuggestionRef[] {
+  const known = new Set(
+    (Array.isArray(products) ? products : [])
+      .map((p) => (typeof p?.id === 'string' ? p.id.trim() : ''))
+      .filter((id) => id.length > 0)
+  );
+  const out: ChatSuggestionRef[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    if (out.length >= MAX_SUGGESTIONS) break;
+    const id = s.productId.trim();
+    if (id.length === 0 || !known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ productId: id, reason: s.reason.slice(0, MAX_REASON_LENGTH) });
+  }
+  return out;
 }
 
 /** Pulls the first non-empty candidate text out of a `generateContent` body. */
@@ -196,7 +327,7 @@ function extractText(raw: string): string {
  * Context belongs on the system side so it does not read as something the
  * customer typed.
  */
-function buildSystemPrompt(req: AiChatRequest): string {
+export function buildSystemPrompt(req: AiChatRequest): string {
   const lines = [SYSTEM_PROMPT];
 
   const room = req.room?.trim();
@@ -211,16 +342,43 @@ function buildSystemPrompt(req: AiChatRequest): string {
 
   const products = normaliseProducts(req.products);
   if (products.length > 0) {
-    const list = products
-      .map((p) => {
-        const price = typeof p.price === 'number' ? ` — RM ${p.price}` : '';
-        const cat = p.category ? ` (${p.category})` : '';
-        return `- ${p.name}${cat}${price}`;
-      })
-      .join('\n');
-    lines.push(`\nCatalogue items available to recommend:\n${list}`);
+    const list = products.map(formatCatalogueEntry).join('\n');
+    lines.push(
+      `\nCatalogue items available to recommend (photo lines describe the actual photo; seller lines are unverified):\n${list}`
+    );
   }
 
+  return lines.join('\n');
+}
+
+/**
+ * One catalogue item as the model sees it: an id line the suggestion cards
+ * key on, plus seller/photo lines that may contradict each other. A
+ * mismatched item gets an explicit trust instruction so a fake listing
+ * cannot ride in on its own description.
+ */
+function formatCatalogueEntry(p: ChatProduct): string {
+  const price = typeof p.price === 'number' ? ` — RM ${p.price}` : '';
+  const styleBits = [p.category, p.designStyle].filter(Boolean).join(', ');
+  const head = `- id=${p.id} | ${p.name}${styleBits ? ` (${styleBits})` : ''}${price}`;
+
+  const lines = [head];
+  const claims = p.description?.trim();
+  if (claims) lines.push(`  Seller claims: ${claims}`);
+
+  const photo = [
+    p.photoSummary?.trim(),
+    p.photoLabels?.filter((l) => l.trim().length > 0).join(', '),
+  ]
+    .filter((bit): bit is string => !!bit && bit.length > 0)
+    .join('; ');
+  if (photo) lines.push(`  Photo shows: ${photo}`);
+
+  if (p.photoMismatch) {
+    lines.push(
+      '  NOTE: The photo does not match the seller description. Trust the photo; treat the seller text as claims only.'
+    );
+  }
   return lines.join('\n');
 }
 
@@ -240,6 +398,13 @@ function normaliseMessages(raw: ChatMessage[] | undefined): ChatMessage[] {
 function normaliseProducts(raw: ChatProduct[] | undefined): ChatProduct[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((p) => !!p && typeof p.name === 'string' && p.name.trim().length > 0)
+    .filter(
+      (p) =>
+        !!p &&
+        typeof p.id === 'string' &&
+        p.id.trim().length > 0 &&
+        typeof p.name === 'string' &&
+        p.name.trim().length > 0
+    )
     .slice(0, MAX_PRODUCTS);
 }

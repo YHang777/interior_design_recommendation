@@ -21,19 +21,69 @@ class ChatTurn {
 
 /// A marketplace listing trimmed to what the assistant needs to
 /// recommend real items.
+///
+/// [id] makes a recommendation tappable (the reply can name products the
+/// app then renders as cards); the photo fields carry the server's
+/// upload-time analysis so the model sees what the photo shows, not just
+/// what the seller wrote.
 class ChatProduct {
   const ChatProduct({
+    required this.id,
     required this.name,
     required this.price,
     required this.category,
+    this.designStyle,
+    this.description,
+    this.photoLabels = const [],
+    this.photoSummary,
+    this.photoMismatch = false,
   });
 
+  final String id;
   final String name;
   final int price;
   final String category;
+  final String? designStyle;
 
-  Map<String, Object> toJson() =>
-      {'name': name, 'price': price, 'category': category};
+  /// Seller-written copy — the unverified claim.
+  final String? description;
+
+  /// What the server's photo analysis saw — the trusted line.
+  final List<String> photoLabels;
+  final String? photoSummary;
+  final bool photoMismatch;
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        'price': price,
+        'category': category,
+        if (designStyle != null && designStyle!.isNotEmpty)
+          'designStyle': designStyle,
+        if (description != null && description!.isNotEmpty)
+          'description': description,
+        if (photoLabels.isNotEmpty) 'photoLabels': photoLabels,
+        if (photoSummary != null && photoSummary!.isNotEmpty)
+          'photoSummary': photoSummary,
+        if (photoMismatch) 'photoMismatch': true,
+      };
+}
+
+/// One product the assistant picked, as referenced by id in a reply.
+class ChatSuggestionRef {
+  const ChatSuggestionRef({required this.productId, required this.reason});
+
+  final String productId;
+  final String reason;
+}
+
+/// One assistant answer: prose for the bubble plus the catalogue items it
+/// points at (already validated server-side against the request).
+class ChatReply {
+  const ChatReply({required this.reply, this.suggestions = const []});
+
+  final String reply;
+  final List<ChatSuggestionRef> suggestions;
 }
 
 /// A chat failure already phrased for the person waiting on a reply:
@@ -77,7 +127,7 @@ class ChatDatasource {
     return user.getIdToken();
   }
 
-  Future<String> send({
+  Future<ChatReply> send({
     required List<ChatTurn> messages,
     String? style,
     String? room,
@@ -88,7 +138,7 @@ class ChatDatasource {
       // No proxy in this build — reply locally so the chat is never a
       // dead end. Small delay so the typing indicator has a beat to show.
       await Future.delayed(const Duration(milliseconds: 600));
-      return _localReply(style: style, room: room);
+      return ChatReply(reply: _localReply(style: style, room: room));
     }
     // Fail fast without a token: an unauthenticated call would only earn
     // a 401 from the proxy.
@@ -129,18 +179,35 @@ class ChatDatasource {
       throw ChatException(_messageForStatus(resp.statusCode));
     }
 
-    Object? reply;
+    Map<String, dynamic>? decoded;
     try {
-      final decoded = jsonDecode(resp.body);
-      reply = decoded is Map ? decoded['reply'] : null;
+      final body = jsonDecode(resp.body);
+      if (body is Map<String, dynamic>) decoded = body;
     } on FormatException catch (e) {
       debugPrint('[chat] unparseable reply body: $e');
     }
+    final reply = decoded?['reply'];
     if (reply is! String || reply.trim().isEmpty) {
       throw const ChatException(
           'The design assistant could not reply. Try again.');
     }
-    return reply.trim();
+    // Suggestions are optional garnish: a proxy without them (or a junk
+    // entry) must never fail a reply that has perfectly good prose.
+    final rawSuggestions = decoded?['suggestions'];
+    final suggestions = <ChatSuggestionRef>[];
+    if (rawSuggestions is List) {
+      for (final item in rawSuggestions) {
+        if (item is! Map) continue;
+        final id = item['productId'];
+        if (id is! String || id.trim().isEmpty) continue;
+        final reason = item['reason'];
+        suggestions.add(ChatSuggestionRef(
+          productId: id.trim(),
+          reason: reason is String ? reason.trim() : '',
+        ));
+      }
+    }
+    return ChatReply(reply: reply.trim(), suggestions: suggestions);
   }
 
   /// Canned reply for builds without a configured proxy. Short, plain

@@ -145,4 +145,19 @@ class ARObjectManager {
   removeNode(ARNode node) {
     _channel.invokeMethod<String>('removeNode', {'name': node.name});
   }
+
+  /// Rotates the node named [name] by [deltaYawRadians] around the world's
+  /// up (+Y) axis — yaw only, pitch/roll are never modified, so furniture
+  /// can not tilt. No-op when node manipulation is disabled on the native
+  /// side, or on platforms whose handler does not implement the call.
+  Future<void> rotateNodeY(String name, double deltaYawRadians) async {
+    try {
+      await _channel.invokeMethod<void>('rotateNode', {
+        'name': name,
+        'deltaYawRadians': deltaYawRadians,
+      });
+    } on MissingPluginException {
+      // Platform (e.g. iOS stub) does not implement rotateNode.
+    }
+  }
 }

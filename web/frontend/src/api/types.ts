@@ -146,3 +146,43 @@ export interface DeleteResult {
   wishlistItemsDeleted: number;
   productsDeactivated: number;
 }
+
+/**
+ * Photo-vs-claim flag queue — mirrors the backend's `ProductFlagRow`
+ * (`products/{id}.vision` + `vision.review`, both written server-side).
+ */
+export type ProductFlagStatusFilter = 'open' | 'resolved' | 'all';
+
+export interface ProductFlagReview {
+  status: 'open' | 'resolved';
+  note?: string;
+  reviewedAt: string;
+  reviewedBy: string;
+}
+
+export interface ProductFlagVision {
+  status: string;
+  labels: string[];
+  visualCategory: string;
+  summary: string;
+  mismatch: { flagged: boolean; reason: string };
+  analyzedAt: string | null;
+  model: string;
+}
+
+export interface ProductFlagRow {
+  productId: string;
+  name: string;
+  category: string;
+  price: number;
+  supplierId: string;
+  image: string;
+  description: string;
+  vision: ProductFlagVision;
+  review: ProductFlagReview | null;
+}
+
+export interface ProductFlagListResult {
+  items: ProductFlagRow[];
+  total: number;
+}

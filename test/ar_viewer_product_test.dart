@@ -199,8 +199,9 @@ void main() {
 
     test('productError is carried verbatim and flags the slot as failed',
         () {
-      const reason = '3D generation needs the product size: set '
-          'Width/Height/Depth (meters) in the product form.';
+      // Sample of the short customer copy the resolver now produces.
+      const reason = "This product's size hasn't been set yet, so it "
+          "can't be shown in AR.";
       final entry = ArProductEntry(
         product: _product(dimensions: _dims),
         productError: reason,

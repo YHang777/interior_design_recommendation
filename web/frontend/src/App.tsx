@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { UsersPage } from './pages/UsersPage';
 import { VerificationPage } from './pages/VerificationPage';
+import { ProductFlagsPage } from './pages/ProductFlagsPage';
 
 function Shell() {
   const { user, ready } = useAuth();
@@ -30,6 +31,7 @@ function Shell() {
       {page === 'users' && <UsersPage key="users" role="all" showRoleChips query={query} onQueryChange={setQuery} />}
       {page === 'suppliers' && <UsersPage key="suppliers" role="supplier" query={query} onQueryChange={setQuery} />}
       {page === 'verification' && <VerificationPage query={query} />}
+      {page === 'product-flags' && <ProductFlagsPage query={query} />}
     </Layout>
   );
 }

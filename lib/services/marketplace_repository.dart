@@ -172,7 +172,10 @@ class MarketplaceRepository {
         // the form opening and this save) always wins over the form copy.
         ar3d: existing.ar3d,
       );
-      txn.set(doc, updated.toJson());
+      // vision is server-owned (backend photo analysis writes it; the client
+      // never serializes it — see preserveStoredVision), so a full toJson()
+      // write would erase the verdict exactly like it would ar3d above.
+      txn.set(doc, preserveStoredVision(updated.toJson(), snapshot.data()));
       return updated;
     });
     if (removedImageUrls.isNotEmpty) {
@@ -571,8 +574,11 @@ class MarketplaceRepository {
 
       final product = Product.fromJson(productSnap.data()!);
       final count = product.ratingCount + 1;
-      final total = product.rating * product.ratingCount + review.rating;
-      final newRating = (total / count * 10).roundToDouble() / 10;
+      final newRating = rollingRating(
+        ratingCount: product.ratingCount,
+        rating: product.rating,
+        added: review.rating,
+      );
 
       final reviewDoc =
           _reviews(productId).doc(review.id.isEmpty ? _newId() : review.id);
@@ -628,14 +634,68 @@ class MarketplaceRepository {
             '',
         images: [json['image']?.toString() ?? ''],
         isActive: true,
-        rating: (json['rating'] as num?)?.toDouble() ?? 4.5,
-        ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 12,
+        // F6, seed edition: a freshly-seeded collection has zero reviews,
+        // so every seeded row starts at 0.0 rating / 0 count. The old
+        // `?? 4.5` / `?? 12` fallbacks stamped fake social proof on every
+        // demo listing, which then poisoned the rolling aggregate on the
+        // first real review (see backfillRatingsFromReviews).
+        rating: 0.0,
+        ratingCount: 0,
         // Stagger createdAt so "Newest" ordering is meaningful at boot.
         createdAt: now.subtract(Duration(days: 3 * i)),
       );
       batch.set(_products.doc(id), product.toJson());
     }
     await batch.commit();
+  }
+
+  /// Recomputes every product's denormalized (rating, ratingCount) from the
+  /// reviews that actually exist, writing only the rows that differ.
+  ///
+  /// The catalogue seed used to stamp fabricated 4.5/12 defaults on every
+  /// demo listing. Those values live on in already-seeded databases, and
+  /// [addReview] builds its rolling aggregate on top of them — a first real
+  /// five-star review would still read as "4.5 (13)". Erasing the fiction
+  /// (no reviews → 0.0 / 0) makes the stored aggregate honest again, and
+  /// every later review rolls up from a truthful baseline.
+  ///
+  /// Idempotent and read-only until a difference is found, so the caller
+  /// gates it behind a one-shot preference flag (see `lib/main.dart`).
+  /// Returns how many product documents were rewritten.
+  Future<int> backfillRatingsFromReviews() async {
+    final products = await _products.get();
+    var batch = _db.batch();
+    var staged = 0;
+    var repaired = 0;
+    for (final doc in products.docs) {
+      final stored = doc.data();
+      // A plain get() (no orderBy) — every review doc counts, including
+      // legacy ones missing the createdAt field a listing query would drop.
+      final reviews = await _reviews(doc.id).get();
+      final target = aggregateForRatings([
+        for (final review in reviews.docs) Review.fromJson(review.data()).rating,
+      ]);
+      final currentRating = (stored['rating'] as num?)?.toDouble() ?? 0.0;
+      final currentCount = (stored['ratingCount'] as num?)?.toInt() ?? 0;
+      if (currentRating == target.rating &&
+          currentCount == target.ratingCount) {
+        continue;
+      }
+      batch.update(doc.reference, {
+        'rating': target.rating,
+        'ratingCount': target.ratingCount,
+      });
+      repaired++;
+      staged++;
+      // Firestore batches cap at 500 writes; ship early and start a new one.
+      if (staged == 400) {
+        await batch.commit();
+        batch = _db.batch();
+        staged = 0;
+      }
+    }
+    if (staged > 0) await batch.commit();
+    return repaired;
   }
 
   static String _dateStamp(DateTime dt) {

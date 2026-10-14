@@ -10,8 +10,11 @@ class ARHitTestResult {
   ARHitTestResult(
     this.type,
     this.distance,
-    this.worldTransform,
-  );
+    this.worldTransform, {
+    this.planeType,
+    this.planeExtentX,
+    this.planeExtentZ,
+  });
 
   /// The type of the hit-test result.
   final ARHitTestResultType type;
@@ -20,8 +23,23 @@ class ARHitTestResult {
   final double distance;
 
   /// The transformation matrix that defines the intersection’s rotation, translation and scale
-  /// relative to the world.
+  /// relative to the world. For plane hits the rotation is the REAL plane
+  /// orientation (its normal is the transformed Z/Y axis), not identity.
   final Matrix4 worldTransform;
+
+  /// Orientation of the hit PLANE, when the platform reports it:
+  /// 1 = horizontal (upward-facing), 2 = vertical, 0 = downward-facing
+  /// (ceiling). Null for feature points and on platforms that predate this
+  /// field — callers fall back to [worldTransform]'s normal.
+  final int? planeType;
+
+  /// Plane polygon extent along its local X axis, in meters. Null when the
+  /// platform does not report it.
+  final double? planeExtentX;
+
+  /// Plane polygon extent along its local Z axis, in meters. Null when the
+  /// platform does not report it.
+  final double? planeExtentZ;
 
   /// Instantiates am [ARHitTestResult] from a serialized ARHitTestResult
   static ARHitTestResult fromJson(Map<String, dynamic> json) =>
@@ -33,10 +51,16 @@ class ARHitTestResult {
 
 /// Instantiates am [ARHitTestResult] from a serialized ARHitTestResult
 ARHitTestResult _$ARHitTestResultFromJson(Map<String, dynamic> json) {
+  final planeExtent = json['planeExtent'];
   return ARHitTestResult(
     const ARHitTestResultTypeConverter().fromJson(json['type'] as int),
     (json['distance'] as num).toDouble(),
     const MatrixConverter().fromJson(json['worldTransform'] as List),
+    planeType: (json['planeType'] as num?)?.toInt(),
+    planeExtentX: (planeExtent is Map ? planeExtent['x'] as num? : null)
+        ?.toDouble(),
+    planeExtentZ: (planeExtent is Map ? planeExtent['z'] as num? : null)
+        ?.toDouble(),
   );
 }
 
@@ -55,6 +79,13 @@ Map<String, dynamic> _$ARHitTestResultToJson(ARHitTestResult instance) {
   val['distance'] = instance.distance;
   writeNotNull('worldTransform',
       const MatrixConverter().toJson(instance.worldTransform));
+  writeNotNull('planeType', instance.planeType);
+  if (instance.planeExtentX != null || instance.planeExtentZ != null) {
+    writeNotNull('planeExtent', <String, dynamic>{
+      'x': instance.planeExtentX,
+      'z': instance.planeExtentZ,
+    });
+  }
   return val;
 }
 

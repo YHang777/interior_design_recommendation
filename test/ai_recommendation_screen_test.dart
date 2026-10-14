@@ -7,6 +7,7 @@
 // ChatDatasource over a MockClient — the app's chatApiUrl points at the
 // deployed backend, so with a mocked http.Client no network is touched.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,9 @@ import 'package:interior_design_recommendation/features/customer/homeowner/data/
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
+import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_suggestion_card.dart';
+import 'package:interior_design_recommendation/models/cart_item.dart';
+import 'package:interior_design_recommendation/models/product.dart';
 import 'package:interior_design_recommendation/services/chat_history_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,17 +32,42 @@ class _ChatCapture {
   Map<String, dynamic>? body;
 }
 
-MockClient _client(_ChatCapture capture) => MockClient((request) async {
+MockClient _client(
+  _ChatCapture capture, {
+  List<Map<String, dynamic>> suggestions = const [],
+}) =>
+    MockClient((request) async {
       capture.calls++;
       capture.body = jsonDecode(request.body) as Map<String, dynamic>;
       return http.Response(
-        jsonEncode({'reply': _aiReply}),
+        jsonEncode({'reply': _aiReply, 'suggestions': suggestions}),
         200,
         headers: {'content-type': 'application/json'},
       );
     });
 
-Future<void> _pumpScreen(WidgetTester tester, _ChatCapture capture) async {
+/// Cart that records adds without touching Firestore: `CartNotifier.build`
+/// and the real `addItem` reach for the repository, which a widget test
+/// cannot construct (there is no Firebase app under test). What these
+/// tests care about is the screen's side of the contract — WHICH product
+/// it hands the cart, and when it refuses to.
+class _RecordingCart extends CartNotifier {
+  @override
+  List<CartItem> build() => [];
+
+  @override
+  void addItem(Product product, {int qty = 1}) {
+    state = [...state, CartItem(product: product, quantity: qty)];
+  }
+}
+
+Future<void> _pumpScreen(
+  WidgetTester tester,
+  _ChatCapture capture, {
+  List<Product> products = const [],
+  Stream<List<Product>>? productStream,
+  List<Map<String, dynamic>> replySuggestions = const [],
+}) async {
   await tester.binding.setSurfaceSize(const Size(393, 852));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
@@ -46,18 +75,33 @@ Future<void> _pumpScreen(WidgetTester tester, _ChatCapture capture) async {
       overrides: [
         chatDatasourceProvider.overrideWithValue(
           ChatDatasource(
-            client: _client(capture),
+            client: _client(capture, suggestions: replySuggestions),
             idTokenProvider: () async => 'tok-123',
           ),
         ),
         marketplaceProductsProvider
-            .overrideWith((ref) => Stream.value(const [])),
+            .overrideWith((ref) => productStream ?? Stream.value(products)),
+        cartProvider.overrideWith(() => _RecordingCart()),
       ],
       child: const MaterialApp(home: AiRecommendationScreen()),
     ),
   );
   await tester.pumpAndSettle();
 }
+
+/// A live listing for suggestion tests. Empty image on purpose: a network
+/// URL would pull CachedNetworkImage's cache manager (path_provider), which
+/// a widget test cannot host — the card's error box renders fine.
+Product _chatProduct() => Product.fromJson({
+      'id': 'sofa-1',
+      'name': 'Nordic Sofa',
+      'price': 1299,
+      'stock': 4,
+      'category': 'Sofa',
+      'designStyle': 'Scandinavian',
+      'description': 'Oatmeal boucle three-seater.',
+      'image': '',
+    });
 
 String _inputText(WidgetTester tester) =>
     tester.widget<TextField>(find.byType(TextField)).controller!.text;
@@ -160,6 +204,126 @@ void main() {
     expect(saved.any((m) => m['text'] == '...'), isFalse);
     expect(saved.last['role'], 'model');
     expect(saved.last['text'], _aiReply);
+  });
+
+  testWidgets('catalogue payload carries ids and the photo verdict',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture, products: [
+      Product.fromJson({
+        'id': 'wall-1',
+        'name': 'Floral Wallpaper',
+        'price': 30,
+        'stock': 5,
+        'category': 'Wallpaper',
+        'description': 'Premium vinyl, waterproof.',
+        'designStyle': 'Floral',
+        'image': 'https://cdn.example/wall.jpg',
+        'vision': {
+          'status': 'ok',
+          'labels': ['living room', 'sofa'],
+          'visualCategory': 'Living room',
+          'visualStyle': 'Modern',
+          'summary': 'A living room with a grey sofa.',
+          'mismatch': {
+            'flagged': true,
+            'reason': 'Photo shows a room, not wallpaper.',
+          },
+        },
+      }),
+    ]);
+
+    await _send(tester, 'Wallpaper for my bedroom?');
+
+    final body = capture.body!;
+    final products = (body['products'] as List).cast<Map<String, dynamic>>();
+    expect(products, hasLength(1));
+    final p = products.single;
+    // The id the reply's suggestion cards key on…
+    expect(p['id'], 'wall-1');
+    expect(p['name'], 'Floral Wallpaper');
+    // …the seller's claim…
+    expect(p['description'], 'Premium vinyl, waterproof.');
+    expect(p['designStyle'], 'Floral');
+    // …and what the photo analysis actually saw, mismatch included.
+    expect(p['photoLabels'], ['living room', 'sofa']);
+    expect(p['photoSummary'], 'A living room with a grey sofa.');
+    expect(p['photoMismatch'], true);
+  });
+
+  testWidgets('suggestion card renders and Add hands the live product to the cart',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      products: [_chatProduct()],
+      replySuggestions: [
+        {'productId': 'sofa-1', 'reason': 'Matches your grey floor.'},
+      ],
+    );
+
+    await _send(tester, 'Which sofa fits my room?');
+
+    // The card sits under the reply: photo, name, price, the model's why.
+    expect(find.byType(ChatSuggestionCard), findsOneWidget);
+    expect(find.text('Nordic Sofa'), findsOneWidget);
+    expect(find.text('RM 1,299'), findsOneWidget);
+    expect(find.text('Matches your grey floor.'), findsOneWidget);
+
+    // Add → the LIVE product lands in the cart, with the usual snackbar.
+    await tester.tap(find.widgetWithText(TextButton, 'Add'));
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(AiRecommendationScreen)));
+    final cart = container.read(cartProvider);
+    expect(cart, hasLength(1));
+    expect(cart.single.product.id, 'sofa-1');
+    expect(find.text('Nordic Sofa added to cart'), findsOneWidget);
+  });
+
+  testWidgets(
+      'a card whose listing vanished says so and keeps the cart empty',
+      (tester) async {
+    final capture = _ChatCapture();
+    // Live catalogue stream: the listing is present when the reply lands…
+    final catalogue = StreamController<List<Product>>();
+    addTearDown(catalogue.close);
+    catalogue.add([_chatProduct()]);
+    await _pumpScreen(
+      tester,
+      capture,
+      productStream: catalogue.stream,
+      replySuggestions: [
+        {'productId': 'sofa-1', 'reason': 'Fits your space.'},
+      ],
+    );
+    await _send(tester, 'Any ideas for my lounge?');
+    expect(find.byType(ChatSuggestionCard), findsOneWidget);
+
+    // …and gone by the time the buyer taps Add. The snapshot card still
+    // renders (history survives), but the live lookup fails.
+    catalogue.add(const []);
+    await tester.pumpAndSettle();
+    expect(find.byType(ChatSuggestionCard), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('That item is no longer available.'), findsOneWidget);
+
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(AiRecommendationScreen)));
+    expect(container.read(cartProvider), isEmpty);
+  });
+
+  testWidgets('a reply without suggestions renders no cards', (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture, products: [_chatProduct()]);
+
+    await _send(tester, 'Hello there');
+
+    expect(find.text(_aiReply), findsOneWidget);
+    expect(find.byType(ChatSuggestionCard), findsNothing);
   });
 
   testWidgets('history sheet lists, reopens and deletes saved chats',

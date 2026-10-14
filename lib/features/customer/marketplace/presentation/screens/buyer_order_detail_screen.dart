@@ -74,6 +74,44 @@ class _BuyerOrderDetailScreenState
     }
   }
 
+  /// Buyer-side "it arrived" step: advances shipped → delivered so the
+  /// review section unlocks even when the seller never taps their own
+  /// "Mark as delivered" (seeded demo listings have no seller account
+  /// behind them at all). Runs through the same repository state machine
+  /// as the supplier path, so `OrderStatus.ensureAdvance` still rejects
+  /// anything but the single legal next step.
+  Future<void> _confirmDelivery(Order order) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Confirm delivery?',
+      message: 'Confirm that your items have arrived. This completes the '
+          'order and lets you rate each item.',
+      confirmLabel: 'Confirm delivery',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() => _working = true);
+    try {
+      await ref
+          .read(marketplaceRepositoryProvider)
+          .updateOrderStatus(order.id, OrderStatus.delivered);
+      if (mounted) {
+        showAppSnackbar(context, 'Delivery confirmed — rate your items now',
+            color: AppColors.success, duration: const Duration(seconds: 3));
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppSnackbar(
+            context,
+            userMessage(e,
+                fallback: 'Could not update the order. Please try again.'),
+            color: AppColors.error, duration: const Duration(seconds: 4));
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
   /// Puts every still-available item of the order back into the cart at the
   /// ordered quantity (clamped to current stock by the cart notifier).
   /// Unavailable listings are skipped and reported once at the end.
@@ -225,6 +263,36 @@ class _BuyerOrderDetailScreenState
               ),
             ),
             child: const Text('Cancel order',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+          ),
+        ),
+      );
+      buttons.insert(1, const SizedBox(width: 10));
+    }
+    // Buyer-side close of the status loop: shipped → delivered is the one
+    // step a customer may take themselves (see _confirmDelivery). Without
+    // it, the review section — gated on delivered — never unlocks unless
+    // the seller taps "Mark as delivered", which is impossible for orders
+    // whose seller is a seeded demo id (s-elegant & co.) with no account
+    // behind it.
+    if (order.status == OrderStatus.shipped) {
+      buttons.insert(
+        0,
+        SizedBox(
+          height: 52,
+          width: 160,
+          child: ElevatedButton(
+            onPressed: _working ? null : () => _confirmDelivery(order),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.white,
+              padding:
+                  const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: const Text('Confirm delivery',
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           ),
         ),
@@ -1274,7 +1342,12 @@ class _OrderSkeleton extends StatelessWidget {
         for (var i = 0; i < 4; i++) ...[
           if (i > 0) const SizedBox(height: 14),
           Container(
-            height: i == 0 ? 200 : 120,
+            // The fixed height must fit the skeleton Column inside it:
+            // 135px of bars + 32px padding + 2px border. Cards 1–3 used to
+            // be 120 tall — 49px short — so every order-detail load painted
+            // a yellow-striped RenderFlex overflow for its first frames
+            // (pinned by test/product_review_test.dart).
+            height: i == 0 ? 200 : 175,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.surface,

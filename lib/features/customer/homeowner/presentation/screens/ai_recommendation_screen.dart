@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/chat_session.dart';
+import '../../../../../models/product.dart';
+import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/filter_chip_bar.dart';
@@ -12,6 +16,7 @@ import '../../../../../shared/widgets/page_heading.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
 import '../../data/datasources/chat_datasource.dart';
 import '../providers/design_providers.dart';
+import '../widgets/chat_suggestion_card.dart';
 
 class AiRecommendationScreen extends ConsumerStatefulWidget {
   const AiRecommendationScreen({super.key});
@@ -144,14 +149,19 @@ class _AiRecommendationScreenState
     _scrollToBottom();
 
     try {
-      final reply = await ref.read(chatDatasourceProvider).send(
+      final result = await ref.read(chatDatasourceProvider).send(
             messages: transcript,
             style: _chipStyle,
             room: _chipRoom,
             products: _productContext(),
           );
       if (!mounted) return;
-      historyNotifier.addMessage(sessionId, role: 'model', text: reply);
+      historyNotifier.addMessage(
+        sessionId,
+        role: 'model',
+        text: result.reply,
+        suggestions: _hydrateSuggestions(result.suggestions),
+      );
     } catch (e) {
       if (!mounted) return;
       historyNotifier.addMessage(
@@ -184,20 +194,70 @@ class _AiRecommendationScreenState
 
   /// A handful of live listings so the assistant can recommend real items
   /// instead of made-up ones.
+  ///
+  /// Each entry carries the server's photo verdict alongside the seller's
+  /// own words — that is the whole point: the model gets to see what the
+  /// photo shows, not just the description a seller typed. Bounded to the
+  /// proxy's per-field limits so a long listing can never 400 the request.
   List<ChatProduct> _productContext() {
     final products =
         ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
     return products
         .where((p) => p.isActive)
         .take(12)
-        .map((p) =>
-            ChatProduct(name: p.name, price: p.price, category: p.category))
+        .map((p) {
+          final vision = p.vision;
+          final verified = vision != null && vision.isOk;
+          return ChatProduct(
+            id: p.id,
+            name: p.name,
+            price: p.price,
+            category: p.category,
+            designStyle: _clip(p.designStyle, 120),
+            description: _clip(p.description, 200),
+            photoLabels:
+                verified ? vision.labels.take(8).toList(growable: false) : const [],
+            photoSummary: verified ? _clip(vision.summary, 240) : null,
+            photoMismatch: verified && vision.mismatchFlagged,
+          );
+        })
         .toList();
+  }
+
+  static String _clip(String text, int max) =>
+      text.length <= max ? text : text.substring(0, max);
+
+  /// Turns the reply's ids into self-contained card snapshots (name, price,
+  /// photo) taken now, while the catalogue is loaded. Ids with no live
+  /// product are dropped — there is nothing to render or add.
+  List<ChatSuggestionSnapshot> _hydrateSuggestions(
+      List<ChatSuggestionRef> refs) {
+    if (refs.isEmpty) return const [];
+    final products =
+        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
+    final byId = {for (final p in products) p.id: p};
+    final out = <ChatSuggestionSnapshot>[];
+    for (final s in refs) {
+      final product = byId[s.productId];
+      if (product == null) continue;
+      out.add(ChatSuggestionSnapshot(
+        productId: s.productId,
+        name: product.name,
+        price: product.price,
+        image: product.image,
+        reason: s.reason,
+      ));
+    }
+    return out;
   }
 
   void _openHistorySheet() {
     showModalBottomSheet<void>(
       context: context,
+      // Without this Flutter caps the sheet at 9/16 of the screen, which
+      // beats the sheet's own 0.7-height budget and squeezes the empty
+      // state until it overflows on short windows.
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -445,6 +505,9 @@ class _AiRecommendationScreenState
 
   Widget _buildBubble(ChatMessage msg) {
     final isAI = msg.role == 'model';
+    // Product cards ride under the prose; a message without them renders
+    // exactly as the old plain-text bubble.
+    final cards = msg.suggestions ?? const <ChatSuggestionSnapshot>[];
 
     return Align(
       alignment: isAI ? Alignment.centerLeft : Alignment.centerRight,
@@ -472,12 +535,51 @@ class _AiRecommendationScreenState
             bottomRight: Radius.circular(isAI ? 18 : 4),
           ),
         ),
-        child: Text(msg.text,
-            style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: isAI ? AppColors.textPrimary : Colors.white,
-                height: 1.4)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(msg.text,
+                style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: isAI ? AppColors.textPrimary : Colors.white,
+                    height: 1.4)),
+            for (final s in cards)
+              ChatSuggestionCard(
+                suggestion: s,
+                onAdd: () => _addToCart(s),
+              ),
+          ],
+        ),
       ),
+    );
+  }
+
+  /// Add-to-cart from a suggestion card.
+  ///
+  /// The snapshot may have aged: the listing could be gone or sold out
+  /// since the reply landed, so the LIVE catalogue decides — a stale card
+  /// says so instead of quietly carting dead stock.
+  void _addToCart(ChatSuggestionSnapshot suggestion) {
+    final products =
+        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
+    Product? live;
+    for (final p in products) {
+      if (p.id == suggestion.productId) {
+        live = p;
+        break;
+      }
+    }
+    final product = live;
+    if (product == null || !product.isActive || product.isOutOfStock) {
+      showAppSnackbar(context, 'That item is no longer available.');
+      return;
+    }
+    ref.read(cartProvider.notifier).addItem(product);
+    showAddedToCartSnack(
+      context,
+      '${product.name} added to cart',
+      onViewCart: () => context.pushNamed(RouteNames.homeownerCart),
     );
   }
 
@@ -572,12 +674,18 @@ class _ChatHistorySheet extends ConsumerWidget {
               ),
             ),
             if (sessions.isEmpty)
-              const Expanded(
-                child: EmptyState(
-                  icon: Icons.forum_outlined,
-                  title: 'No saved chats',
-                  subtitle:
-                      'Start a conversation and it will appear here.',
+              Flexible(
+                // Scrollable so the fixed-height EmptyState can never
+                // overflow a squeezed sheet; the sheet sizes to its
+                // content instead of force-filling like Expanded did.
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: const EmptyState(
+                    icon: Icons.forum_outlined,
+                    title: 'No saved chats',
+                    subtitle:
+                        'Start a conversation and it will appear here.',
+                  ),
                 ),
               )
             else

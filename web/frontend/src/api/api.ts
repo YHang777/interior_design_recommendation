@@ -8,6 +8,9 @@ import type {
   LoginResponse,
   MeResponse,
   PasswordResetResponse,
+  ProductFlagListResult,
+  ProductFlagRow,
+  ProductFlagStatusFilter,
   ReviewDecisionResult,
   VerificationApplication,
   VerificationListResult,
@@ -77,5 +80,20 @@ export const verificationApi = {
     apiPatch<ReviewDecisionResult>(`/verification/applications/${encodeURIComponent(uid)}`, {
       status,
       ...(reviewNote !== undefined ? { reviewNote } : {}),
+    }),
+};
+
+/**
+ * Photo-vs-claim review queue (`/products/flags`). Rows come from the
+ * upload-time vision verdict; the PATCH writes `vision.review` — a
+ * server-owned field no client can forge.
+ */
+export const productFlagsApi = {
+  list: (status: ProductFlagStatusFilter = 'open') =>
+    apiGet<ProductFlagListResult>(`/products/flags?status=${status}`),
+  setReview: (productId: string, status: 'resolved' | 'open', note?: string) =>
+    apiPatch<{ item: ProductFlagRow }>(`/products/flags/${encodeURIComponent(productId)}`, {
+      status,
+      ...(note !== undefined && note.length > 0 ? { note } : {}),
     }),
 };

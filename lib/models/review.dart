@@ -49,6 +49,39 @@ class Review {
       };
 }
 
+/// The product-level rating after ONE more review of [added] stars lands on
+/// a listing currently showing [rating] over [ratingCount] reviews.
+///
+/// Sum-based over the stored (rating × ratingCount) baseline — never
+/// re-averages an already-rounded average — then rounded to one decimal.
+/// This is the exact arithmetic `MarketplaceRepository.addReview` commits
+/// inside its transaction, kept pure so tests can pin it without Firestore.
+/// A virgin listing (0.0 / 0) simply becomes the new review's rating.
+double rollingRating({
+  required int ratingCount,
+  required double rating,
+  required int added,
+}) {
+  final count = ratingCount + 1;
+  final total = rating * ratingCount + added;
+  return (total / count * 10).roundToDouble() / 10;
+}
+
+/// The (rating, ratingCount) a product document SHOULD show given [stars] —
+/// the star values of every review that actually exists for it.
+///
+/// No reviews resolves to 0.0 / 0: the honest answer, and the repair for
+/// catalogues seeded with fabricated 4.5/12 defaults (which would otherwise
+/// poison every rolling aggregate computed on top of them).
+({double rating, int ratingCount}) aggregateForRatings(List<int> stars) {
+  if (stars.isEmpty) return (rating: 0.0, ratingCount: 0);
+  final total = stars.fold<int>(0, (sum, star) => sum + star);
+  return (
+    rating: (total / stars.length * 10).roundToDouble() / 10,
+    ratingCount: stars.length,
+  );
+}
+
 /// Parses a date that may be an ISO-8601 string or a Firestore Timestamp.
 DateTime? _parseReviewDate(dynamic value) {
   if (value is DateTime) return value;

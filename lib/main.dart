@@ -16,6 +16,12 @@ import 'services/model_generation/model_generation_trigger.dart';
 /// the next launch.
 const _seedDoneKey = 'marketplace_seed_v1';
 
+/// Preference key gating the one-shot repair of fabricated rating aggregates
+/// (the old seed stamped 4.5/12 on every demo listing). Same contract as
+/// [_seedDoneKey]: set only after a successful run. See
+/// `MarketplaceRepository.backfillRatingsFromReviews`.
+const _ratingBackfillKey = 'marketplace_rating_backfill_v1';
+
 /// How long to hold post-sign-in background work so it does not compete with
 /// the login transition's own Firestore reads. See [_scheduleSeedAfterSignIn].
 const _bootWorkDelay = Duration(seconds: 3);
@@ -78,13 +84,21 @@ void _scheduleSeedAfterSignIn() {
     await Future<void>.delayed(_bootWorkDelay);
     try {
       final prefs = await SharedPreferences.getInstance();
+      final repo = MarketplaceRepository(FirebaseFirestore.instance);
       if (!(prefs.getBool(_seedDoneKey) ?? false)) {
-        final repo = MarketplaceRepository(FirebaseFirestore.instance);
         await repo.seedMarketplaceIfEmpty();
         await prefs.setBool(_seedDoneKey, true);
       }
+      // One-shot data repair: recompute product rating aggregates from the
+      // reviews that actually exist, erasing the fabricated 4.5/12 defaults
+      // the pre-reviews seed stamped on every demo listing.
+      if (!(prefs.getBool(_ratingBackfillKey) ?? false)) {
+        final repaired = await repo.backfillRatingsFromReviews();
+        await prefs.setBool(_ratingBackfillKey, true);
+        debugPrint('[bootstrap] rating backfill repaired $repaired products');
+      }
     } catch (e) {
-      debugPrint('[bootstrap] marketplace seed skipped: $e');
+      debugPrint('[bootstrap] marketplace seed/backfill skipped: $e');
     }
     // Resume 3D generations interrupted by a crash or app restart: products
     // stuck with ar3d.status == 'generating' are re-kicked (the state was

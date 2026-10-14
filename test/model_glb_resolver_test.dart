@@ -2,7 +2,9 @@
 // Tripo download, rescaled to the SELLER's declared dimensions and cached.
 // There is no procedural generation and no bundled-catalog fallback, so
 // every failure must surface a specific No3dAvailableException reason
-// (never silently substitute another model).
+// (never silently substitute another model). Reasons are CUSTOMER copy:
+// short, plain sentences via UserFacingException — never "edit the
+// seller's dimensions" / "tap Regenerate in the seller's list".
 //
 // Network is faked with an injected http.Client (package:http/testing);
 // the cache directory is injected too — these tests run fully headless.
@@ -13,6 +15,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:interior_design_recommendation/core/utils/user_errors.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_rescaler.dart';
@@ -127,8 +130,8 @@ void main() {
       );
     });
 
-    test('no seller dimensions at all → refuses with the dimensions '
-        'message', () async {
+    test('no seller dimensions at all → short "size not set" customer copy',
+        () async {
       final resolver = resolverWith(MockClient(
           (_) async => throw StateError('no request may happen without dims')));
       addTearDown(resolver.dispose);
@@ -138,10 +141,11 @@ void main() {
           dimensions: const ProductDimensions(widthM: 0, heightM: 0, depthM: 0),
           ar3d: readyAr3d(),
         )),
-        throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason,
-            'reason',
-            allOf(contains('Width/Height/Depth'), contains('dimensions')))),
+        throwsA(isA<No3dAvailableException>()
+            .having((e) => e.reason, 'reason',
+                contains("size hasn't been set"))
+            .having((e) => e.userMessage, 'userMessage',
+                contains("size hasn't been set"))),
       );
     });
 
@@ -153,11 +157,11 @@ void main() {
         resolver.resolveProductGlb(
             productWith(id: 'prod-nulldims', ar3d: readyAr3d())),
         throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason, 'reason', contains('Width/Height/Depth'))),
+            (e) => e.reason, 'reason', contains("size hasn't been set"))),
       );
     });
 
-    test('ar3d none → tells the seller to generate first', () async {
+    test('ar3d none → short "no 3D view yet" customer copy', () async {
       final resolver = resolverWith(
           MockClient((_) async => throw StateError('nothing to download')));
       addTearDown(resolver.dispose);
@@ -170,7 +174,7 @@ void main() {
         throwsA(isA<No3dAvailableException>().having(
             (e) => e.reason,
             'reason',
-            contains('No 3D model has been generated'))),
+            contains("doesn't have a 3D view yet"))),
       );
     });
 
@@ -187,12 +191,13 @@ void main() {
           ar3d: const Ar3dInfo(
               status: 'generating', taskId: 'task_123', attempts: 1),
         )),
-        throwsA(isA<No3dAvailableException>()
-            .having((e) => e.reason, 'reason', 'generating')),
+        throwsA(isA<No3dAvailableException>().having(
+            (e) => e.reason, 'reason', 'generating')),
       );
     });
 
-    test('failed → the stored reason + Retry (no new charge)', () async {
+    test('failed → short customer copy; seller-side ar3d.error never leaks',
+        () async {
       final resolver = resolverWith(
           MockClient((_) async => throw StateError('nothing to download')));
       addTearDown(resolver.dispose);
@@ -205,15 +210,15 @@ void main() {
               status: 'failed',
               error: 'Tripo is out of credits (HTTP 402)'),
         )),
-        throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason,
-            'reason',
-            allOf(contains('Tripo is out of credits'),
-                contains('no new charge')))),
+        throwsA(isA<No3dAvailableException>()
+            .having((e) => e.reason, 'reason',
+                "This product's 3D view isn't ready yet. Check back later.")
+            .having((e) => e.reason, 'seller error text not leaked',
+                isNot(contains('Tripo is out of credits')))),
       );
     });
 
-    test('ready without a downloadable URL → Regenerate hint', () async {
+    test('ready without a downloadable URL → short not-ready copy', () async {
       final resolver = resolverWith(
           MockClient((_) async => throw StateError('no URL, no request')));
       addTearDown(resolver.dispose);
@@ -225,8 +230,55 @@ void main() {
           ar3d: readyAr3d(url: ''),
         )),
         throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason, 'reason', contains('no downloadable model URL'))),
+            (e) => e.reason, 'reason', contains("isn't ready yet"))),
       );
+    });
+  });
+
+  group('customer-safe copy (UserFacingException contract)', () {
+    /// Every hard-stop a CUSTOMER can hit must be a [UserFacingException]
+    /// whose text never instructs them to edit the seller's fields.
+    Future<void> expectCustomerSafe(Product product) async {
+      final resolver = resolverWith(
+          MockClient((_) async => throw StateError('no network')));
+      addTearDown(resolver.dispose);
+      try {
+        await resolver.resolveProductGlb(product);
+        fail('expected a No3dAvailableException');
+      } on No3dAvailableException catch (e) {
+        expect(e, isA<UserFacingException>());
+        final text = e.userMessage;
+        expect(text, isNot(contains('product form')));
+        expect(text, isNot(contains('seller')));
+        expect(text, isNot(contains('Regenerate')));
+        expect(text, isNot(contains('Width/Height/Depth')));
+        expect(text, isNot(contains('dimensions')));
+      }
+    }
+
+    test('missing dimensions', () async {
+      await expectCustomerSafe(productWith(
+        id: 'copy-nodims',
+        dimensions: const ProductDimensions(widthM: 0, heightM: 0, depthM: 0),
+        ar3d: readyAr3d(),
+      ));
+    });
+
+    test('no ar3d record', () async {
+      await expectCustomerSafe(productWith(
+        id: 'copy-none',
+        dimensions: const ProductDimensions(
+            widthM: 1.0, heightM: 0.75, depthM: 0.6),
+      ));
+    });
+
+    test('failed generation', () async {
+      await expectCustomerSafe(productWith(
+        id: 'copy-failed',
+        dimensions: const ProductDimensions(
+            widthM: 1.0, heightM: 0.75, depthM: 0.6),
+        ar3d: const Ar3dInfo(status: 'failed', error: 'set the dimensions'),
+      ));
     });
   });
 
@@ -383,7 +435,9 @@ void main() {
           ar3d: readyAr3d(),
         )),
         throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason, 'reason', contains('HTTP 500'))),
+            (e) => e.reason,
+            'reason',
+            allOf(contains("Couldn't load"), contains('connection')))),
       );
       expect(cachedGlbs(tempRoot), isEmpty,
           reason: 'a failed download must not leave a model behind');
@@ -402,7 +456,7 @@ void main() {
           ar3d: readyAr3d(),
         )),
         throwsA(isA<No3dAvailableException>().having(
-            (e) => e.reason, 'reason', contains('empty'))),
+            (e) => e.reason, 'reason', contains("couldn't be loaded"))),
       );
       expect(cachedGlbs(tempRoot), isEmpty);
     });

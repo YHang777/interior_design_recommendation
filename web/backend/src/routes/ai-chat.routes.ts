@@ -4,20 +4,23 @@ import { ApiError, asyncHandler } from '../lib/errors';
 import { validateBody } from '../middleware/validate';
 import {
   AiChatException,
+  sanitiseSuggestions,
   type AiChatDeps,
   type ChatMessage,
   type ChatProduct,
+  type ChatReply,
 } from '../services/ai-chat.service';
 
 /**
  * `/api/ai/chat` — the design assistant used by the mobile app.
  *
- *   POST /api/ai/chat   {messages, style?, room?, products?} → {reply}
+ *   POST /api/ai/chat   {messages, style?, room?, products?} → {reply, suggestions}
  *
  * Unlike `/verify-email/send` this is AUTHENTICATED (Firebase ID token) and
  * deliberately so: it is a proxy onto a paid third-party model, and an open
  * one is a bill waiting to happen. The key itself never leaves the server —
- * the app sends a transcript and receives prose.
+ * the app sends a transcript and receives prose plus the catalogue ids to
+ * render as add-to-cart cards.
  */
 
 const messageSchema = z.object({
@@ -26,9 +29,15 @@ const messageSchema = z.object({
 });
 
 const productSchema = z.object({
+  id: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
   name: z.string().trim().min(1).max(200),
   price: z.number().finite().nonnegative().optional(),
   category: z.string().trim().max(120).optional(),
+  designStyle: z.string().trim().max(120).optional(),
+  description: z.string().trim().max(400).optional(),
+  photoLabels: z.array(z.string().trim().max(60)).max(8).optional(),
+  photoSummary: z.string().trim().max(240).optional(),
+  photoMismatch: z.boolean().optional(),
 });
 
 const chatBodySchema = z.object({
@@ -65,9 +74,9 @@ export function createAiChatRouter(deps: AiChatDeps): Router {
         products: parsed.products as ChatProduct[] | undefined,
       };
 
-      let reply: string;
+      let result: ChatReply;
       try {
-        reply = await deps.generate(request);
+        result = await deps.generate(request);
       } catch (err) {
         if (err instanceof AiChatException) {
           deps.log?.(`[ai-chat] ${err.kind}: ${err.message}`);
@@ -76,7 +85,13 @@ export function createAiChatRouter(deps: AiChatDeps): Router {
         throw err;
       }
 
-      res.json({ reply });
+      // The model picks ids from the catalogue; anything it invents never
+      // reaches the app — the card would be a dead tap.
+      const suggestions = sanitiseSuggestions(
+        Array.isArray(result.suggestions) ? result.suggestions : [],
+        parsed.products
+      );
+      res.json({ reply: result.reply, suggestions });
     })
   );
 

@@ -3,6 +3,8 @@ import { authRouter } from './auth.routes';
 import { usersRouter } from './users.routes';
 import { statsRouter } from './stats.routes';
 import { verificationRouter } from './verification.routes';
+import { createProductFlagsRouter } from './product-flags.routes';
+import { defaultProductFlagsDeps } from '../services/product-flags.service';
 import { firebaseConfigured } from '../config/firebase';
 import { verificationEmailConfigured } from '../services/verification-email.service';
 
@@ -23,3 +25,5 @@ apiRouter.use('/users', usersRouter);
 apiRouter.use('/stats', statsRouter);
 // IC + supporting documents — authenticate + requireAdmin applied inside.
 apiRouter.use('/verification', verificationRouter);
+// Photo-vs-claim review queue — authenticate + requireAdmin applied inside.
+apiRouter.use('/products', createProductFlagsRouter(defaultProductFlagsDeps()));
