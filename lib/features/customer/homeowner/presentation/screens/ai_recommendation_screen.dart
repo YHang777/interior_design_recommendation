@@ -14,6 +14,7 @@ import '../../../../../shared/widgets/filter_chip_bar.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import '../../data/chat_product_mapper.dart';
 import '../../data/datasources/chat_datasource.dart';
 import '../providers/design_providers.dart';
 import '../widgets/chat_suggestion_card.dart';
@@ -153,14 +154,19 @@ class _AiRecommendationScreenState
             messages: transcript,
             style: _chipStyle,
             room: _chipRoom,
-            products: _productContext(),
+            products: productsToChatContext(
+              ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
+            ),
           );
       if (!mounted) return;
       historyNotifier.addMessage(
         sessionId,
         role: 'model',
         text: result.reply,
-        suggestions: _hydrateSuggestions(result.suggestions),
+        suggestions: hydrateChatSuggestions(
+          result.suggestions,
+          ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -190,65 +196,6 @@ class _AiRecommendationScreenState
         _scrollCtrl.jumpTo(target);
       }
     });
-  }
-
-  /// A handful of live listings so the assistant can recommend real items
-  /// instead of made-up ones.
-  ///
-  /// Each entry carries the server's photo verdict alongside the seller's
-  /// own words — that is the whole point: the model gets to see what the
-  /// photo shows, not just the description a seller typed. Bounded to the
-  /// proxy's per-field limits so a long listing can never 400 the request.
-  List<ChatProduct> _productContext() {
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    return products
-        .where((p) => p.isActive)
-        .take(12)
-        .map((p) {
-          final vision = p.vision;
-          final verified = vision != null && vision.isOk;
-          return ChatProduct(
-            id: p.id,
-            name: p.name,
-            price: p.price,
-            category: p.category,
-            designStyle: _clip(p.designStyle, 120),
-            description: _clip(p.description, 200),
-            photoLabels:
-                verified ? vision.labels.take(8).toList(growable: false) : const [],
-            photoSummary: verified ? _clip(vision.summary, 240) : null,
-            photoMismatch: verified && vision.mismatchFlagged,
-          );
-        })
-        .toList();
-  }
-
-  static String _clip(String text, int max) =>
-      text.length <= max ? text : text.substring(0, max);
-
-  /// Turns the reply's ids into self-contained card snapshots (name, price,
-  /// photo) taken now, while the catalogue is loaded. Ids with no live
-  /// product are dropped — there is nothing to render or add.
-  List<ChatSuggestionSnapshot> _hydrateSuggestions(
-      List<ChatSuggestionRef> refs) {
-    if (refs.isEmpty) return const [];
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    final byId = {for (final p in products) p.id: p};
-    final out = <ChatSuggestionSnapshot>[];
-    for (final s in refs) {
-      final product = byId[s.productId];
-      if (product == null) continue;
-      out.add(ChatSuggestionSnapshot(
-        productId: s.productId,
-        name: product.name,
-        price: product.price,
-        image: product.image,
-        reason: s.reason,
-      ));
-    }
-    return out;
   }
 
   void _openHistorySheet() {

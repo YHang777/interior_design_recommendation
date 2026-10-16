@@ -19,6 +19,7 @@ import '../../../../../shared/widgets/section_header.dart';
 import '../../../../../shared/widgets/verified_badge.dart';
 
 import '../providers/marketplace_providers.dart';
+import '../widgets/robot_assistant/robot_assistant_host.dart';
 
 /// Full-screen product detail page: hero gallery with animated dots, real
 /// rating/stock state, quantity stepper, seller card with contact actions,
@@ -124,262 +125,266 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Stack(
-        children: [
-          CustomScrollView(
-            slivers: [
-              // ── Gallery ──
-              SliverToBoxAdapter(
-                child: Stack(
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 4 / 3,
-                      child: PageView.builder(
-                        controller: _pageCtrl,
-                        itemCount: images.length,
-                        onPageChanged: (i) => setState(() => _page = i),
-                        itemBuilder: (_, index) {
-                          // Hero lives on the current page only so it pairs
-                          // with the grid card's `product-{id}` tag.
-                          final tag = index == _page
-                              ? 'product-${product.id}'
-                              : 'product-${product.id}-g$index';
-                          return Hero(
-                            tag: tag,
-                            child: ProductImage(
-                              imageUrl: images[index],
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorIconSize: 56,
-                            ),
-                          );
-                        },
+      body: RobotAssistantHost(
+        products: [product],
+        focusProduct: product,
+        child: Stack(
+          children: [
+            CustomScrollView(
+              slivers: [
+                // ── Gallery ──
+                SliverToBoxAdapter(
+                  child: Stack(
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 4 / 3,
+                        child: PageView.builder(
+                          controller: _pageCtrl,
+                          itemCount: images.length,
+                          onPageChanged: (i) => setState(() => _page = i),
+                          itemBuilder: (_, index) {
+                            // Hero lives on the current page only so it pairs
+                            // with the grid card's `product-{id}` tag.
+                            final tag = index == _page
+                                ? 'product-${product.id}'
+                                : 'product-${product.id}-g$index';
+                            return Hero(
+                              tag: tag,
+                              child: ProductImage(
+                                imageUrl: images[index],
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                errorIconSize: 56,
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    // Animated dot indicator — pill-shaped active dot
-                    if (images.length > 1)
-                      Positioned(
-                        bottom: 14,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.15),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (var i = 0; i < images.length; i++)
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 250),
-                                    curve: Curves.easeInOut,
-                                    width: i == _page ? 24 : 8,
-                                    height: 8,
-                                    margin:
-                                        const EdgeInsets.symmetric(horizontal: 2),
-                                    decoration: BoxDecoration(
-                                      color: i == _page
-                                          ? Colors.white
-                                          : Colors.white.withValues(alpha: 0.5),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
+                      // Animated dot indicator — pill-shaped active dot
+                      if (images.length > 1)
+                        Positioned(
+                          bottom: 14,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.15),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
                                   ),
-                              ],
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (var i = 0; i < images.length; i++)
+                                    AnimatedContainer(
+                                      duration: const Duration(milliseconds: 250),
+                                      curve: Curves.easeInOut,
+                                      width: i == _page ? 24 : 8,
+                                      height: 8,
+                                      margin:
+                                          const EdgeInsets.symmetric(horizontal: 2),
+                                      decoration: BoxDecoration(
+                                        color: i == _page
+                                            ? Colors.white
+                                            : Colors.white.withValues(alpha: 0.5),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Info sections ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildBadgeRow(product),
+                        const SizedBox(height: 12),
+                        Text(product.name,
+                            style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 6),
+                        _buildRatingLine(product),
+                        const SizedBox(height: 12),
+                        _buildPriceRow(product),
+                        const SizedBox(height: 8),
+                        _buildStockLine(product),
+                        const SizedBox(height: 8),
+                        _buildShippingLine(product),
+                        if (product.shippingLongDistanceNotice) ...[
+                          const SizedBox(height: 10),
+                          _buildLongDistanceNotice(),
+                        ],
+                        const SizedBox(height: 14),
+                        const Divider(),
+                        const SizedBox(height: 10),
+                        _buildQuantityRow(product),
+                        const SizedBox(height: 4),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Description
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SectionHeader(title: 'About this item'),
+                        Text(
+                          product.description,
+                          maxLines: _descExpanded ? null : 5,
+                          overflow:
+                              _descExpanded ? null : TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              color: AppColors.textSecondary,
+                              height: 1.5),
+                        ),
+                        if (product.description.length > 160)
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _descExpanded = !_descExpanded),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                _descExpanded ? 'Read less' : 'Read more',
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.accent),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Supplier card
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SectionHeader(title: 'Seller'),
+                        _buildSellerCard(product),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Reviews
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _ReviewsSection(productId: product.id),
+                  ),
+                ),
+
+                // Related products
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SectionHeader(title: 'Related Products'),
+                        _buildRelatedRail(product),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SliverPadding(padding: EdgeInsets.only(bottom: 28)),
+              ],
+            ),
+
+            // ── Floating controls ──
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _FloatButton(
+                      icon: Icons.arrow_back,
+                      iconColor: Colors.white,
+                      background: Colors.black.withValues(alpha: 0.35),
+                      tooltip: 'Back',
+                      onTap: () => context.pop(),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _FloatButton(
+                          icon: Icons.view_in_ar,
+                          iconColor: Colors.white,
+                          background: Colors.black.withValues(alpha: 0.35),
+                          tooltip: 'View in AR',
+                          onTap: () => context.pushNamed(
+                            RouteNames.arViewer,
+                            extra: product,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _FloatButton(
+                          icon: isWishlisted
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          iconColor: isWishlisted
+                              ? AppColors.error
+                              : Colors.white,
+                          background: isWishlisted
+                              ? Colors.white
+                              : Colors.black.withValues(alpha: 0.35),
+                          tooltip:
+                              isWishlisted ? 'Remove from wishlist' : 'Wishlist',
+                          onTap: () {
+                            ref
+                                .read(wishlistProvider.notifier)
+                                .toggle(product.id);
+                            showAppSnackbar(
+                              context,
+                              ref
+                                      .read(wishlistProvider)
+                                      .contains(product.id)
+                                  ? 'Added to wishlist'
+                                  : 'Removed from wishlist',
+                              color: AppColors.accent,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
-
-              // ── Info sections ──
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildBadgeRow(product),
-                      const SizedBox(height: 12),
-                      Text(product.name,
-                          style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 6),
-                      _buildRatingLine(product),
-                      const SizedBox(height: 12),
-                      _buildPriceRow(product),
-                      const SizedBox(height: 8),
-                      _buildStockLine(product),
-                      const SizedBox(height: 8),
-                      _buildShippingLine(product),
-                      if (product.shippingLongDistanceNotice) ...[
-                        const SizedBox(height: 10),
-                        _buildLongDistanceNotice(),
-                      ],
-                      const SizedBox(height: 14),
-                      const Divider(),
-                      const SizedBox(height: 10),
-                      _buildQuantityRow(product),
-                      const SizedBox(height: 4),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Description
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SectionHeader(title: 'About this item'),
-                      Text(
-                        product.description,
-                        maxLines: _descExpanded ? null : 5,
-                        overflow:
-                            _descExpanded ? null : TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            color: AppColors.textSecondary,
-                            height: 1.5),
-                      ),
-                      if (product.description.length > 160)
-                        GestureDetector(
-                          onTap: () =>
-                              setState(() => _descExpanded = !_descExpanded),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Text(
-                              _descExpanded ? 'Read less' : 'Read more',
-                              style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.accent),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Supplier card
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SectionHeader(title: 'Seller'),
-                      _buildSellerCard(product),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Reviews
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                  child: _ReviewsSection(productId: product.id),
-                ),
-              ),
-
-              // Related products
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SectionHeader(title: 'Related Products'),
-                      _buildRelatedRail(product),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SliverPadding(padding: EdgeInsets.only(bottom: 28)),
-            ],
-          ),
-
-          // ── Floating controls ──
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _FloatButton(
-                    icon: Icons.arrow_back,
-                    iconColor: Colors.white,
-                    background: Colors.black.withValues(alpha: 0.35),
-                    tooltip: 'Back',
-                    onTap: () => context.pop(),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _FloatButton(
-                        icon: Icons.view_in_ar,
-                        iconColor: Colors.white,
-                        background: Colors.black.withValues(alpha: 0.35),
-                        tooltip: 'View in AR',
-                        onTap: () => context.pushNamed(
-                          RouteNames.arViewer,
-                          extra: product,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _FloatButton(
-                        icon: isWishlisted
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        iconColor: isWishlisted
-                            ? AppColors.error
-                            : Colors.white,
-                        background: isWishlisted
-                            ? Colors.white
-                            : Colors.black.withValues(alpha: 0.35),
-                        tooltip:
-                            isWishlisted ? 'Remove from wishlist' : 'Wishlist',
-                        onTap: () {
-                          ref
-                              .read(wishlistProvider.notifier)
-                              .toggle(product.id);
-                          showAppSnackbar(
-                            context,
-                            ref
-                                    .read(wishlistProvider)
-                                    .contains(product.id)
-                                ? 'Added to wishlist'
-                                : 'Removed from wishlist',
-                            color: AppColors.accent,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       // ── Bottom action bar ──
       bottomNavigationBar: Container(

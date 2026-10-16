@@ -242,8 +242,10 @@ void main() {
     // The id the reply's suggestion cards key on…
     expect(p['id'], 'wall-1');
     expect(p['name'], 'Floral Wallpaper');
-    // …the seller's claim…
-    expect(p['description'], 'Premium vinyl, waterproof.');
+    // …the seller's claim, led by the compact facts line so it survives
+    // the description clip…
+    expect(p['description'],
+        'In stock. Free delivery. Premium vinyl, waterproof.');
     expect(p['designStyle'], 'Floral');
     // …and what the photo analysis actually saw, mismatch included.
     expect(p['photoLabels'], ['living room', 'sofa']);

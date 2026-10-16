@@ -11,10 +11,12 @@ import '../../../../../shared/widgets/filter_chip_bar.dart';
 import '../../../../../shared/widgets/product_card.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
+import '../../../../../shared/widgets/floating_nav_bar.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/skeleton_loader.dart';
 
 import '../providers/marketplace_providers.dart';
+import '../widgets/robot_assistant/robot_assistant_host.dart';
 
 /// Marketplace — browse, search, sort/filter, and shop products.
 ///
@@ -143,142 +145,146 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
     final orderCount = ordersAsync.whenOrNull(data: (o) => o.length) ?? 0;
 
     return GradientScaffold(
-      child: RefreshIndicator(
-        color: AppColors.accent,
-        onRefresh: _refresh,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics()),
-          slivers: [
-            // ── Page heading + search/filters header ──
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    PageHeading(
-                      title: 'Marketplace',
-                      subtitle: 'Furniture & materials for your space',
-                      actions: [
-                        // Wishlist
-                        IconButton(
-                          icon: Badge(
-                            isLabelVisible: wishlistCount > 0,
-                            label: Text('$wishlistCount',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white)),
-                            child: const Icon(Icons.favorite_outline,
-                                color: AppColors.textPrimary),
+      child: RobotAssistantHost(
+        products: filtered,
+        bottomClearance: kFloatingNavBarClearance,
+        child: RefreshIndicator(
+          color: AppColors.accent,
+          onRefresh: _refresh,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics()),
+            slivers: [
+              // ── Page heading + search/filters header ──
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      PageHeading(
+                        title: 'Marketplace',
+                        subtitle: 'Furniture & materials for your space',
+                        actions: [
+                          // Wishlist
+                          IconButton(
+                            icon: Badge(
+                              isLabelVisible: wishlistCount > 0,
+                              label: Text('$wishlistCount',
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.white)),
+                              child: const Icon(Icons.favorite_outline,
+                                  color: AppColors.textPrimary),
+                            ),
+                            onPressed: () =>
+                                context.pushNamed(RouteNames.homeownerWishlist),
                           ),
-                          onPressed: () =>
-                              context.pushNamed(RouteNames.homeownerWishlist),
-                        ),
-                        // Order history
-                        IconButton(
-                          icon: Badge(
-                            isLabelVisible: orderCount > 0,
-                            label: Text('$orderCount',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white)),
-                            child: const Icon(Icons.receipt_long_outlined,
-                                color: AppColors.textPrimary),
+                          // Order history
+                          IconButton(
+                            icon: Badge(
+                              isLabelVisible: orderCount > 0,
+                              label: Text('$orderCount',
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.white)),
+                              child: const Icon(Icons.receipt_long_outlined,
+                                  color: AppColors.textPrimary),
+                            ),
+                            onPressed: () => context
+                                .pushNamed(RouteNames.homeownerOrderHistory),
                           ),
-                          onPressed: () => context
-                              .pushNamed(RouteNames.homeownerOrderHistory),
-                        ),
-                        // Cart
-                        IconButton(
-                          icon: Badge(
-                            isLabelVisible: cartCount > 0,
-                            label: Text(
-                                cartCount > 99 ? '99+' : '$cartCount',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white)),
-                            child: const Icon(Icons.shopping_cart_outlined,
-                                color: AppColors.textPrimary),
+                          // Cart
+                          IconButton(
+                            icon: Badge(
+                              isLabelVisible: cartCount > 0,
+                              label: Text(
+                                  cartCount > 99 ? '99+' : '$cartCount',
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.white)),
+                              child: const Icon(Icons.shopping_cart_outlined,
+                                  color: AppColors.textPrimary),
+                            ),
+                            onPressed: () =>
+                                context.pushNamed(RouteNames.homeownerCart),
                           ),
-                          onPressed: () =>
-                              context.pushNamed(RouteNames.homeownerCart),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildSearchArea(),
-                    const SizedBox(height: 10),
-                    if (_chipRowEntries().isNotEmpty || _sortChipVisible())
-                      _buildActiveChipRow(),
-                    if (_chipRowEntries().isNotEmpty || _sortChipVisible())
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSearchArea(),
+                      const SizedBox(height: 10),
+                      if (_chipRowEntries().isNotEmpty || _sortChipVisible())
+                        _buildActiveChipRow(),
+                      if (_chipRowEntries().isNotEmpty || _sortChipVisible())
+                        const SizedBox(height: 8),
+                      _buildToolbarRow(),
                       const SizedBox(height: 8),
-                    _buildToolbarRow(),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Product grid ──
-            productsAsync.when(
-              skipLoadingOnRefresh: true,
-              loading: () => const SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverToBoxAdapter(child: SkeletonLoader(count: 6)),
-              ),
-              error: (e, _) => SliverFillRemaining(
-                hasScrollBody: false,
-                child: EmptyState(
-                  icon: Icons.error_outline,
-                  title: "Couldn't load products",
-                  subtitle: 'Check your connection and try again',
-                  actionLabel: 'Retry',
-                  onAction: _refresh,
-                ),
-              ),
-              data: (_) {
-                if (filtered.isEmpty) {
-                  return SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _buildEmptyState(),
-                  );
-                }
-                return SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverGrid(
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio: 0.68,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final product = filtered[index];
-                        return ProductCard(
-                          product: product,
-                          isWishlisted: ref
-                              .watch(wishlistProvider)
-                              .contains(product.id),
-                          onTap: () => _openProduct(product),
-                          onArPreview: () => context.pushNamed(
-                            RouteNames.arViewer,
-                            extra: product,
-                          ),
-                          onAddToCart: () => _addToCart(product),
-                          onToggleWishlist: () =>
-                              _toggleWishlist(product),
-                        );
-                      },
-                      childCount: filtered.length,
-                    ),
+                    ],
                   ),
-                );
-              },
-            ),
+                ),
+              ),
 
-            // Bottom padding
-            const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-          ],
+              // ── Product grid ──
+              productsAsync.when(
+                skipLoadingOnRefresh: true,
+                loading: () => const SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  sliver: SliverToBoxAdapter(child: SkeletonLoader(count: 6)),
+                ),
+                error: (e, _) => SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: EmptyState(
+                    icon: Icons.error_outline,
+                    title: "Couldn't load products",
+                    subtitle: 'Check your connection and try again',
+                    actionLabel: 'Retry',
+                    onAction: _refresh,
+                  ),
+                ),
+                data: (_) {
+                  if (filtered.isEmpty) {
+                    return SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _buildEmptyState(),
+                    );
+                  }
+                  return SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    sliver: SliverGrid(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        childAspectRatio: 0.68,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final product = filtered[index];
+                          return ProductCard(
+                            product: product,
+                            isWishlisted: ref
+                                .watch(wishlistProvider)
+                                .contains(product.id),
+                            onTap: () => _openProduct(product),
+                            onArPreview: () => context.pushNamed(
+                              RouteNames.arViewer,
+                              extra: product,
+                            ),
+                            onAddToCart: () => _addToCart(product),
+                            onToggleWishlist: () =>
+                                _toggleWishlist(product),
+                          );
+                        },
+                        childCount: filtered.length,
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              // Bottom padding
+              const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+            ],
+          ),
         ),
       ),
     );
