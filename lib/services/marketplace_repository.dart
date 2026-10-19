@@ -188,7 +188,18 @@ class MarketplaceRepository {
   Future<List<ProductCategory>> fetchCategories() async =>
       List.of(_categoryOptions);
 
-  Future<AppConfigData> fetchConfig() async => _config;
+  Future<AppConfigData> fetchConfig() async {
+    try {
+      final snap = await _db.collection('appConfig').doc('marketplace').get();
+      final rate = snap.data()?['taxRate'];
+      if (rate is num && rate >= 0 && rate <= 1) {
+        return _config.copyWith(taxRate: rate.toDouble());
+      }
+    } catch (_) {
+      // Offline, rules-denied or missing doc → hardcoded defaults.
+    }
+    return _config;
+  }
 
   // ── Orders ──────────────────────────────────────────────────────────────
 

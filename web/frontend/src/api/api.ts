@@ -19,6 +19,7 @@ import type {
   ProductFlagStatusFilter,
   ProductUpdate,
   ReviewDecisionResult,
+  AppSettings,
   VerificationApplication,
   VerificationListResult,
   VerificationResult,
@@ -150,4 +151,10 @@ export const ordersApi = {
   get: (orderId: string) => apiGet<{ order: AdminOrderDetail }>(`/orders/${encodeURIComponent(orderId)}`),
   setStatus: (orderId: string, status: AdminOrderStatus) =>
     apiPatch<{ order: AdminOrderDetail }>(`/orders/${encodeURIComponent(orderId)}`, { status }),
+};
+
+/** Marketplace-wide settings (tax rate), stored in `appConfig/marketplace`. */
+export const settingsApi = {
+  get: () => apiGet<{ settings: AppSettings }>('/settings'),
+  update: (taxRate: number) => apiPatch<{ settings: AppSettings }>('/settings', { taxRate }),
 };

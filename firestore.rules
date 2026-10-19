@@ -142,6 +142,15 @@ service cloud.firestore {
            request.auth.uid in resource.data.supplierIds);
     }
 
+    // ── App config: signed-in read; writes only via the admin backend ──
+    // `appConfig/marketplace` holds the tax rate the admin console edits.
+    // Buyers/sellers read it for checkout pricing; the Admin SDK (backend)
+    // bypasses these rules for writes.
+    match /appConfig/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     // ── Per-user cart (owner only) ──
     match /users/{uid}/cart/{productId} {
       allow read, write: if isOwner(uid);

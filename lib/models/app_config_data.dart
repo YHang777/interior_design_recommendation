@@ -67,6 +67,14 @@ class AppConfigData {
     );
   }
 
+  AppConfigData copyWith({double? taxRate}) => AppConfigData(
+        shippingFee: shippingFee,
+        freeShippingThreshold: freeShippingThreshold,
+        currency: currency,
+        taxRate: taxRate ?? this.taxRate,
+        membershipTiers: membershipTiers,
+      );
+
   Map<String, dynamic> toJson() => {
         'shippingFee': shippingFee,
         'freeShippingThreshold': freeShippingThreshold,

@@ -241,3 +241,18 @@ export const IconInbox = (p: IconProps) => (
     <path d="M4 13.5h4l1.5 2.5h5l1.5-2.5h4" />
   </Svg>
 );
+
+export const IconSettings = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1" />
+  </Svg>
+);
+
+export const IconDownload = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3.5v11" />
+    <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+    <path d="M4.5 17.5v1.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.5" />
+  </Svg>
+);

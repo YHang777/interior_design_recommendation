@@ -9,6 +9,8 @@ import { createProductsRouter } from './products.routes';
 import { defaultProductsDeps } from '../services/products.service';
 import { createOrdersRouter } from './orders.routes';
 import { defaultOrdersDeps } from '../services/orders.service';
+import { createSettingsRouter } from './settings.routes';
+import { defaultSettingsDeps } from '../services/settings.service';
 import { firebaseConfigured } from '../config/firebase';
 import { verificationEmailConfigured } from '../services/verification-email.service';
 
@@ -36,3 +38,5 @@ apiRouter.use('/products', createProductFlagsRouter(defaultProductFlagsDeps()));
 apiRouter.use('/products', createProductsRouter(defaultProductsDeps()));
 // Order list/detail/status — authenticate + requireAdmin applied inside.
 apiRouter.use('/orders', createOrdersRouter(defaultOrdersDeps()));
+// Marketplace-wide settings (tax rate) — authenticate + requireAdmin applied inside.
+apiRouter.use('/settings', createSettingsRouter(defaultSettingsDeps()));

@@ -9,6 +9,7 @@ import { VerificationPage } from './pages/VerificationPage';
 import { ProductFlagsPage } from './pages/ProductFlagsPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 function Shell() {
   const { user, ready } = useAuth();
@@ -36,6 +37,7 @@ function Shell() {
       {page === 'product-flags' && <ProductFlagsPage query={query} />}
       {page === 'products' && <ProductsPage query={query} />}
       {page === 'orders' && <OrdersPage query={query} />}
+      {page === 'settings' && <SettingsPage />}
     </Layout>
   );
 }

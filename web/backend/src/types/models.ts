@@ -316,3 +316,12 @@ export interface ListOrdersResult {
   offset: number;
   items: AdminOrderRow[];
 }
+
+// ── App settings (settings/* routes) ────────────────────────────────────────
+
+export interface AppSettings {
+  /** Marketplace tax rate as a fraction (0..1) — 0.06 = 6%. */
+  taxRate: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}

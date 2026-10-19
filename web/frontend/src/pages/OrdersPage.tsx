@@ -5,7 +5,8 @@ import type { AdminOrderDetail, AdminOrderRow, AdminOrderStatus } from '../api/t
 import { OrderStatusBadge } from '../components/Badge';
 import { DataTable, type Column, type SortState } from '../components/DataTable';
 import { Modal } from '../components/Modal';
-import { IconBag, IconRefresh, IconX } from '../components/icons';
+import { IconBag, IconDownload, IconRefresh, IconX } from '../components/icons';
+import { downloadInvoice } from '../lib/invoicePdf';
 import { useToast } from '../state/ToastContext';
 
 const PAGE_SIZE = 25;
@@ -21,12 +22,18 @@ const STATUS_CHIPS: { value: StatusFilter; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
-const NEXT_LABEL: Record<AdminOrderStatus, string> = {
-  pending: 'Confirm',
-  confirmed: 'Ship',
-  shipped: 'Deliver',
-  delivered: '',
-  cancelled: '',
+const NEXT_LABEL: Partial<Record<AdminOrderStatus, string>> = {
+  confirmed: 'Confirmed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+};
+
+const STATUS_NAME: Record<AdminOrderStatus, string> = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
 };
 
 function formatPrice(price: number): string {
@@ -128,7 +135,7 @@ export function OrdersPage({ query }: { query: string }) {
     try {
       const { order } = await ordersApi.setStatus(selected.orderId, next);
       setSelected(order);
-      push('success', `Order → ${next}.`);
+      push('success', `Order → ${STATUS_NAME[next]}.`);
       refresh();
     } catch (err) {
       push('error', describeOrdersError(err));
@@ -231,6 +238,13 @@ export function OrdersPage({ query }: { query: string }) {
   const to = Math.min(offset + PAGE_SIZE, total);
 
   const isTerminal = selected ? selected.status === 'delivered' || selected.status === 'cancelled' : true;
+
+  const invoiceBtn = selected ? (
+    <button className="btn btn-secondary" onClick={() => downloadInvoice(selected)} disabled={busy !== null}>
+      <IconDownload size={14} />
+      Download invoice
+    </button>
+  ) : null;
 
   return (
     <div className="page">
@@ -426,27 +440,31 @@ export function OrdersPage({ query }: { query: string }) {
               <button className="btn btn-secondary" onClick={() => (setSelected(null), setConfirmCancel(false))} disabled={busy !== null}>
                 Close
               </button>
+              {invoiceBtn}
               <button className="btn btn-danger-outline" onClick={() => setConfirmCancel(true)} disabled={busy !== null}>
                 Cancel order
               </button>
-              {selected.nextStatuses.map((next) => (
-                <button
-                  key={next}
-                  className="btn btn-primary"
-                  onClick={() => void advance(next)}
-                  disabled={busy !== null}
-                  aria-busy={busy === next}
-                >
-                  {busy === next ? (
-                    <>
-                      <span className="spinner spinner-inline" />
-                      Saving…
-                    </>
-                  ) : (
-                    NEXT_LABEL[next] || next
-                  )}
-                </button>
-              ))}
+              {selected.nextStatuses
+                .map((next) => ({ next, label: NEXT_LABEL[next] }))
+                .filter((entry): entry is { next: AdminOrderStatus; label: string } => Boolean(entry.label))
+                .map(({ next, label }) => (
+                  <button
+                    key={next}
+                    className="btn btn-primary"
+                    onClick={() => void advance(next)}
+                    disabled={busy !== null}
+                    aria-busy={busy === next}
+                  >
+                    {busy === next ? (
+                      <>
+                        <span className="spinner spinner-inline" />
+                        Saving…
+                      </>
+                    ) : (
+                      label
+                    )}
+                  </button>
+                ))}
             </div>
           )}
 
@@ -455,6 +473,7 @@ export function OrdersPage({ query }: { query: string }) {
               <span style={{ marginRight: 'auto', color: 'var(--text-muted)' }}>
                 Stock returns to sellers.
               </span>
+              {invoiceBtn}
               <button className="btn btn-secondary" onClick={() => setConfirmCancel(false)} disabled={busy !== null}>
                 Keep order
               </button>
@@ -478,6 +497,7 @@ export function OrdersPage({ query }: { query: string }) {
 
           {isTerminal && (
             <div className="modal-actions">
+              {invoiceBtn}
               <button className="btn btn-secondary" onClick={() => setSelected(null)}>
                 Close
               </button>

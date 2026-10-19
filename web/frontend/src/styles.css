@@ -271,7 +271,9 @@ code,
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-  flex: 1;
+  /* Natural height when there is room; shrinks (and scrolls) only on short
+     viewports — the spacer below absorbs the leftover, not half of it. */
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
