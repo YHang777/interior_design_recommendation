@@ -11,6 +11,7 @@ import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/room_design.dart';
+import '../../../../../shared/widgets/catalog_picker_sheet.dart';
 import '../../../ar/data/furniture_model_library.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -516,6 +517,24 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     );
     item = _clampToWalls(item);
     setState(() => _furniture.add(item));
+  }
+
+  /// Opens the furniture catalogue as a bottom sheet and drops the picked
+  /// item onto the plan. Categories come from `_Cat.category`, which the old
+  /// full-width strip never used — the sheet groups by it so twelve tiles
+  /// stop competing for one 84px row.
+  Future<void> _openFurniturePicker() async {
+    final picked = await showCatalogPickerSheet<_Cat>(
+      context: context,
+      title: 'Add furniture',
+      subtitle: 'Tap an item to place it on the plan',
+      items: _catalog,
+      labelOf: (c) => c.name,
+      categoryOf: (c) => c.category,
+      tileBuilder: (_, cat) => _CatalogThumb(cat: cat),
+    );
+    if (picked == null || !mounted) return;
+    _addFromCatalog(picked);
   }
 
   Future<void> _saveDesign() async {
@@ -1380,10 +1399,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        // Furniture catalog
+        // Furniture picker — one compact pill instead of the old full-width
+        // strip of twelve 60px tiles. The catalog opens in a themed bottom
+        // sheet (category chips + image cards), so the plan canvas keeps its
+        // height and the labels are readable.
         Container(
-          height: 84,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             color: AppColors.surface,
             border:
@@ -1391,55 +1413,26 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           ),
           child: Row(
             children: [
-              Text('Add:',
-                  style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary)),
-              const SizedBox(width: 6),
               Expanded(
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _catalog.length,
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(width: 6),
-                  itemBuilder: (_, i) {
-                    final cat = _catalog[i];
-                    return GestureDetector(
-                      onTap: () => _addFromCatalog(cat),
-                      child: Container(
-                        width: 60,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius:
-                              BorderRadius.circular(8),
-                          border: Border.all(
-                              color: AppColors.border),
-                        ),
-                        child: Column(
-                          mainAxisAlignment:
-                              MainAxisAlignment.center,
-                          children: [
-                            Icon(cat.icon,
-                                size: 20,
-                                color: AppColors.primary),
-                            const SizedBox(height: 2),
-                            Text(cat.name,
-                                textAlign: TextAlign.center,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w500,
-                                    color: AppColors
-                                        .textSecondary)),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                child: OutlinedButton.icon(
+                  onPressed: _openFurniturePicker,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: Text(
+                    _furniture.isEmpty
+                        ? 'Add furniture'
+                        : 'Add furniture · ${_furniture.length} placed',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    side: BorderSide(
+                        color:
+                            AppColors.accent.withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    alignment: Alignment.centerLeft,
+                  ),
                 ),
               ),
             ],
@@ -1843,6 +1836,42 @@ class _Cat {
 
   const _Cat(this.name, this.iconName, this.icon, this.category,
       this.defaultWidth, this.defaultHeight, this.imageAsset);
+}
+
+/// Picker-sheet tile for one catalogue entry. Prefers the furniture photo
+/// (several entries carry an `imageAsset` the old strip ignored) and falls
+/// back to the icon in a tinted circle — same language as the saved-designs
+/// style cards.
+class _CatalogThumb extends StatelessWidget {
+  const _CatalogThumb({required this.cat});
+
+  final _Cat cat;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = cat.imageAsset;
+    if (image != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.asset(
+          image,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _iconFallback(),
+        ),
+      );
+    }
+    return _iconFallback();
+  }
+
+  Widget _iconFallback() => Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.08),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(cat.icon, size: 24, color: AppColors.accent),
+      );
 }
 
 // ─── Room shape (walls) painter ───

@@ -20,6 +20,7 @@ import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
+import '../../../../../shared/widgets/catalog_picker_sheet.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
@@ -260,14 +261,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return ArPlacementPolicy.liveFloorYFromPlanes(_livePlanes);
   }
 
-  /// Bottom panel height (furniture catalog vs Room finish panel). The
+  /// Bottom panel height (furniture picker bar vs Room finish panel). The
   /// floating overlays (delete button, chip, mode switcher, rotation row)
   /// are anchored to it, so they keep clearing the bar in both modes.
-  static const double _furnitureBarHeight = 108;
-  // Room panel content (finish strips + captions + hint) is ~172 px tall at
-  // the default text scale; the panel body scrolls vertically when system
-  // text scaling pushes it beyond this fixed height.
-  static const double _roomBarHeight = 184;
+  ///
+  /// The furniture bar is now one compact selection row — the catalog itself
+  /// lives in a bottom sheet — so it no longer needs the old 108px of
+  /// full-width tiles. More of the camera view stays visible.
+  static const double _furnitureBarHeight = 72;
+  // Room panel content is now six labelled strips (floor type, floor colour,
+  // size, wall type, wall colour) plus two captions and a hint — ~240 px at
+  // the default text scale. The panel body still scrolls vertically when
+  // system text scaling pushes it beyond this fixed height.
+  static const double _roomBarHeight = 248;
   double get _bottomBarHeight =>
       _roomMode ? _roomBarHeight : _furnitureBarHeight;
 
@@ -1706,20 +1712,239 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
       );
 
-  /// The catalog bar shown in Furniture mode — unchanged behavior.
+  /// The catalog bar shown in Furniture mode.
+  ///
+  /// Was a full-width row of every slot at once; now it is one compact
+  /// selection chip (what's active) plus a picker button that opens the
+  /// catalog as a bottom sheet. The AR camera keeps the vertical space the
+  /// old 108px strip used to eat, and the tiles finally have room for their
+  /// labels.
   Widget _buildFurnitureBar() {
+    final selected = _selectedEntry;
     return Container(
       height: _furnitureBarHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: _barDecoration,
-      child: _entries.isEmpty
-          ? const SizedBox.shrink()
-          : ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _entries.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) => _buildCatalogSlot(i),
+      child: Row(
+        children: [
+          Expanded(child: _buildSelectionChip(selected)),
+          const SizedBox(width: 8),
+          _buildOpenPickerButton(),
+        ],
+      ),
+    );
+  }
+
+  /// Readout of the active entry — icon/name for library items, the live
+  /// generation state for products. Tap re-opens the picker on small
+  /// catalogues so switching stays one gesture away.
+  Widget _buildSelectionChip(_BarEntry? entry) {
+    if (entry == null) {
+      return Text(
+        'No furniture to place',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
+      );
+    }
+    final item = entry.item;
+    final product = entry.product;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _entries.length > 1 ? _openFurniturePicker : null,
+      child: Container(
+        height: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.accentLight, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            if (item != null) ...[
+              Icon(item.icon, size: 22, color: Colors.white),
+            ] else if (product != null) ...[
+              Icon(
+                product.hasError
+                    ? Icons.error_outline
+                    : product.isResolved
+                        ? Icons.auto_awesome
+                        : Icons.hourglass_top,
+                size: 20,
+                color: product.hasError
+                    ? AppColors.warning
+                    : Colors.white,
+              ),
+            ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white),
+                  ),
+                  if (product != null)
+                    Text(
+                      product.hasError
+                          ? 'Tap the picker for details'
+                          : product.isResolved
+                              ? product.dimsLabel
+                              : 'Preparing 3D…',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                          fontSize: 9, color: Colors.white70),
+                    ),
+                ],
+              ),
             ),
+            if (_entries.length > 1) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.expand_less, size: 18, color: Colors.white70),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOpenPickerButton() {
+    return Material(
+      color: AppColors.accent,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _entries.isEmpty ? null : _openFurniturePicker,
+        child: SizedBox(
+          height: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.grid_view, size: 18, color: Colors.white),
+                const SizedBox(width: 6),
+                Text(
+                  _entries.length > 1 ? 'Catalog' : 'Details',
+                  style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Opens the slot catalog as a bottom sheet and selects the tapped entry.
+  /// Product slots keep their three states (resolved / generating / failed)
+  /// inside the sheet tiles, so the reason a listing cannot be placed is
+  /// visible while choosing rather than only after the fact.
+  Future<void> _openFurniturePicker() async {
+    if (_entries.isEmpty) return;
+    // Single product slot: still open the sheet so its error / generating
+    // state and dimensions have somewhere to be read.
+    final picked = await showCatalogPickerSheet<int>(
+      context: context,
+      title: widget.product != null ? 'This product' : 'Furniture catalog',
+      subtitle: widget.product != null
+          ? null
+          : 'Tap an item to select it, then tap the floor to place',
+      items: [for (var i = 0; i < _entries.length; i++) i],
+      labelOf: (i) => _entries[i].name,
+      tileBuilder: (_, i) => _buildPickerTile(_entries[i]),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _selectedIndex = picked);
+    final entry = _entries[picked];
+    final product = entry.product;
+    if (product != null && product.hasError && product.productError != null) {
+      _showMessage(product.productError!,
+          color: AppColors.warning, duration: const Duration(seconds: 6));
+    }
+  }
+
+  /// Sheet tile for one slot — library icon, or the product's live state.
+  Widget _buildPickerTile(_BarEntry entry) {
+    final item = entry.item;
+    if (item != null) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppColors.accent.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(item.icon, size: 22, color: AppColors.accent),
+          ),
+        ],
+      );
+    }
+    final product = entry.product!;
+    if (!product.isResolved) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (product.hasError)
+            const Icon(Icons.error_outline, size: 28, color: AppColors.warning)
+          else
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            product.hasError ? 'Unavailable' : 'Generating…',
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: product.hasError
+                    ? AppColors.warning
+                    : AppColors.textSecondary),
+          ),
+        ],
+      );
+    }
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.auto_awesome, size: 16, color: AppColors.accent),
+            const SizedBox(width: 4),
+            _SourceBadge(text: product.badgeText),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          product.dimsLabel,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(
+              fontSize: 9, color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 
@@ -1861,6 +2086,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildFloorTypeRow(),
+            const SizedBox(height: 2),
+            _buildFloorColorRow(),
             _buildTypeCaption(
               '${RoomFinishCatalog.floorLabel(_floorType)} — '
               '${RoomFinishCatalog.floorDescription(_floorType)}',
@@ -1869,6 +2096,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             _buildFloorSizeRow(),
             const SizedBox(height: 4),
             _buildWallTypeRow(),
+            const SizedBox(height: 2),
+            _buildWallColorRow(),
             _buildTypeCaption(
               '${RoomFinishCatalog.wallLabel(_wallType)} — '
               '${RoomFinishCatalog.wallDescription(_wallType)}',
@@ -1899,12 +2128,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// "Floor" row: type chips (Wood/Cement/Ceramic/Parquet) then the swatch
-  /// circles of the selected type — one horizontal scroll strip. The selected
-  /// type's one-line description renders as a caption under the strip (in
-  /// [_buildRoomBar]).
+  /// "Floor" type chips (Wood/Cement/Ceramic/Parquet). Colours live on their
+  /// own row under it — eight controls in one scroll strip was unreadable,
+  /// and the swatches are a second decision from the type, not part of it.
   Widget _buildFloorTypeRow() {
-    final colors = RoomFinishCatalog.colorsForFloor(_floorType);
     return _buildFinishRow(
       label: 'Floor',
       children: [
@@ -1916,6 +2143,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
           const SizedBox(width: 6),
         ],
+      ],
+    );
+  }
+
+  /// Floor colour swatches for the selected type, on their own line.
+  Widget _buildFloorColorRow() {
+    final colors = RoomFinishCatalog.colorsForFloor(_floorType);
+    return _buildFinishRow(
+      label: 'Colour',
+      children: [
         for (final c in colors) ...[
           _buildSwatch(
             c,
@@ -2024,10 +2261,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// "Wall" row: type chips (Paint/Wood Panel/Brick) + swatches, with the
-  /// Place wall action pinned at the row's end (outside the scroll strip).
+  /// "Wall" type chips (Paint/Wood Panel/Brick), with the Place wall action
+  /// pinned at the row's end. Colours move to their own line, matching the
+  /// floor section.
   Widget _buildWallTypeRow() {
-    final colors = RoomFinishCatalog.colorsForWall(_wallType);
     return _buildFinishRow(
       label: 'Wall',
       children: [
@@ -2039,6 +2276,22 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
           const SizedBox(width: 6),
         ],
+      ],
+      trailing: _buildPlaceAction(
+        label: 'Place wall',
+        icon: Icons.view_agenda_outlined,
+        busy: _arming,
+        onTap: _armWallPlacement,
+      ),
+    );
+  }
+
+  /// Wall colour swatches for the selected type, on their own line.
+  Widget _buildWallColorRow() {
+    final colors = RoomFinishCatalog.colorsForWall(_wallType);
+    return _buildFinishRow(
+      label: 'Colour',
+      children: [
         for (final c in colors) ...[
           _buildSwatch(
             c,
@@ -2049,12 +2302,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           const SizedBox(width: 6),
         ],
       ],
-      trailing: _buildPlaceAction(
-        label: 'Place wall',
-        icon: Icons.view_agenda_outlined,
-        busy: _arming,
-        onTap: _armWallPlacement,
-      ),
     );
   }
 
@@ -2305,173 +2552,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  // ─── Catalog bar slots ───
-
-  Widget _buildCatalogSlot(int index) {
-    final entry = _entries[index];
-    final selected = index == _selectedIndex;
-    return GestureDetector(
-      onTap: () {
-        setState(() => _selectedIndex = index);
-        // Selecting a failed product slot surfaces WHY it cannot place.
-        final p = entry.product;
-        if (p != null && p.hasError) {
-          _showMessage(p.productError!, color: AppColors.warning,
-              duration: const Duration(seconds: 6));
-        }
-      },
-      child: Container(
-        width: entry.isProduct ? 96 : 76,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        decoration: BoxDecoration(
-          color:
-              selected ? AppColors.accent : Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(12),
-          border: selected
-              ? Border.all(color: AppColors.accentLight, width: 2)
-              : Border.all(color: Colors.white24),
-        ),
-        child: entry.isProduct
-            ? _buildProductSlot(entry.product!)
-            : _buildLibrarySlot(entry.item!),
-      ),
-    );
-  }
-
-  /// Bundled library tile — unchanged visual language (icon + name).
-  Widget _buildLibrarySlot(ArFurnitureItem item) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(item.icon, size: 26, color: Colors.white),
-        const SizedBox(height: 3),
-        Text(
-          item.name,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.poppins(
-              fontSize: 9,
-              fontWeight: FontWeight.w500,
-              color: Colors.white),
-        ),
-      ],
-    );
-  }
-
-  /// Product tile in three states:
-  ///  * resolved — AI badge + name + dimensions (placeable);
-  ///  * generating — spinner + "Generating 3D model…" + elapsed seconds
-  ///    (progress, not an error);
-  ///  * failed — an error icon + name + "Tap for details"; the specific
-  ///    reason is surfaced by the snackbar on tap / place attempt.
-  Widget _buildProductSlot(ArProductEntry entry) {
-    if (!entry.isResolved) {
-      if (entry.hasError) {
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 18,
-                color: AppColors.warning),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                entry.name,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 1),
-            Text(
-              'Tap for details',
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                  fontSize: 7.5,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.warning),
-            ),
-          ],
-        );
-      }
-      final generating = _productGenerating;
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-                strokeWidth: 2, color: Colors.white70),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            generating
-                ? 'Generating… $_generationElapsed'
-                : 'Preparing 3D…',
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-                fontSize: 7.5,
-                fontWeight: FontWeight.w500,
-                color: Colors.white70),
-          ),
-        ],
-      );
-    }
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.auto_awesome, size: 14, color: Colors.white),
-            const SizedBox(width: 4),
-            _SourceBadge(text: entry.badgeText),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            entry.name,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: Colors.white),
-          ),
-        ),
-        const SizedBox(height: 1),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: SizedBox(
-            width: double.infinity,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                entry.dimsLabel,
-                maxLines: 1,
-                style: GoogleFonts.poppins(
-                    fontSize: 7, color: Colors.white70),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 

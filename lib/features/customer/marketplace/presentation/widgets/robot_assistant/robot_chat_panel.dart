@@ -147,6 +147,11 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
 
     try {
       final home = _householdSession();
+      // The panel's list is the buyer's filtered browse on the marketplace
+      // and the single focused listing on a product page. That scope is
+      // deliberate — the filter is what the buyer asked to see — so the
+      // mapper's newest-first window is what surfaces a new listing that
+      // matches, rather than splicing in things the filter ruled out.
       final result = await ref.read(chatDatasourceProvider).send(
             messages: transcript,
             style: home?.style,
@@ -154,6 +159,8 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
             products: productsToChatContext(widget.products),
           );
       if (!mounted) return;
+      // Re-read after the await: suggestions hydrate against the freshest
+      // catalogue, not the snapshot the request was built from.
       final live =
           ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
       widget.messages.add(ChatMessage(

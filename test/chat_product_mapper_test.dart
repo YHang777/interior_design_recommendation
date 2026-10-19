@@ -24,6 +24,7 @@ Product _product({
   bool shippingLongDistanceNotice = false,
   ProductDimensions? dimensions,
   ProductVision? vision,
+  DateTime? createdAt,
   Supplier supplier = const Supplier(
       id: 's1', name: 'Seller', phone: '', address: '', email: ''),
 }) =>
@@ -45,6 +46,7 @@ Product _product({
       shippingLongDistanceNotice: shippingLongDistanceNotice,
       dimensions: dimensions,
       vision: vision,
+      createdAt: createdAt,
     );
 
 void main() {
@@ -176,15 +178,60 @@ void main() {
   });
 
   group('productsToChatContext', () {
-    test('drops inactive listings and caps at 12', () {
+    test('drops inactive listings and caps at the window size', () {
       final products = [
-        for (var i = 0; i < 15; i++) _product(id: 'p$i'),
+        for (var i = 0; i < 30; i++) _product(id: 'p$i'),
         _product(id: 'dead', isActive: false),
       ];
       final ctx = productsToChatContext(products);
       expect(ctx, hasLength(kChatProductLimit));
       expect(ctx.map((p) => p.id), isNot(contains('dead')));
-      expect(ctx.map((p) => p.id), containsAll(['p0', 'p11']));
+    });
+
+    test('newest listing wins a slot even against a price-sorted input', () {
+      // As if the buyer sorted cheap-first: the brand-new piece sits at the
+      // end of the list, which is exactly where the old take(limit) dropped
+      // it and made "what's new?" unanswerable.
+      final cheapFirst = [
+        _product(id: 'old-a', price: 10, createdAt: DateTime(2026, 1, 1)),
+        _product(id: 'old-b', price: 20, createdAt: DateTime(2026, 1, 2)),
+        _product(id: 'new', price: 999, createdAt: DateTime(2026, 10, 17)),
+      ];
+      final ctx = productsToChatContext(cheapFirst);
+      expect(ctx.first.id, 'new',
+          reason: 'a just-published product must lead the catalogue window');
+    });
+
+    test('listings without createdAt fall behind dated ones', () {
+      final mixed = [
+        _product(id: 'legacy'),
+        _product(id: 'fresh', createdAt: DateTime(2026, 10, 1)),
+      ];
+      final ctx = productsToChatContext(mixed);
+      expect(ctx.map((p) => p.id), ['fresh', 'legacy']);
+    });
+
+    test('a new listing inside a filtered browse is still suggested', () {
+      // The robot sends the buyer's filtered view. A product that matches
+      // the filter and was published today must lead the window even though
+      // the list also holds older matches.
+      final filteredBrowsed = [
+        _product(id: 'sofa-old', createdAt: DateTime(2026, 8, 1)),
+        _product(id: 'sofa-new', createdAt: DateTime(2026, 10, 17)),
+        _product(id: 'sofa-mid', createdAt: DateTime(2026, 9, 1)),
+      ];
+      final ctx = productsToChatContext(filteredBrowsed);
+      expect(ctx.first.id, 'sofa-new');
+      expect(ctx.map((p) => p.id),
+          ['sofa-new', 'sofa-mid', 'sofa-old']);
+    });
+
+    test('never invents a product the caller did not pass', () {
+      // Scope is the caller's list. A filter that rules a listing out is
+      // doing its job — the mapper must not widen the scope on its own.
+      final filteredBrowsed = [_product(id: 'sofa')];
+      final ctx = productsToChatContext(filteredBrowsed);
+      expect(ctx.map((p) => p.id), ['sofa']);
     });
   });
 

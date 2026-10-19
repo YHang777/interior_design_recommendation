@@ -9,7 +9,13 @@ const int kChatStyleClip = 120;
 const int kChatDescriptionClip = 200;
 const int kChatLabelLimit = 8;
 const int kChatSummaryClip = 240;
-const int kChatProductLimit = 12;
+
+/// Catalogue window size. Matches the proxy's own `MAX_PRODUCTS` cap —
+/// anything above 20 is silently dropped server-side, so sending more only
+/// wastes bytes. Wide enough that a supplier's new listing survives a
+/// non-default sort, and that a filtered browse still shows the model enough
+/// to recommend from.
+const int kChatProductLimit = 20;
 
 String _clip(String text, int max) =>
     text.length <= max ? text : text.substring(0, max);
@@ -78,13 +84,37 @@ ChatProduct productToChatProduct(Product product) {
   );
 }
 
-/// Active listings only, first [limit], mapped — the catalogue context the
-/// assistant sees when recommending real items instead of made-up ones.
+/// Active listings only, newest-first, first [limit], mapped — the catalogue
+/// context the assistant sees when recommending real items instead of
+/// made-up ones.
+///
+/// Newest-first is deliberate. A listing published a minute ago has to win a
+/// slot in the window even when the caller hands over a price-sorted or
+/// top-rated list; otherwise "what's new?" is unanswerable and the assistant
+/// only ever rehashes whatever happened to sort first. Listings with no
+/// `createdAt` (legacy seed rows) keep their relative order and sort to the
+/// end, where they still fill whatever slots remain.
+///
+/// The caller's list is the whole scope: the AI tab passes the full live
+/// catalogue, the marketplace robot passes the buyer's current filtered
+/// browse. A product outside that list is deliberately out of scope — the
+/// filter is doing its job, and a new listing that matches the filter is
+/// already in the live stream, so this sort is what surfaces it.
 List<ChatProduct> productsToChatContext(
   Iterable<Product> products, {
   int limit = kChatProductLimit,
-}) =>
-    products.where((p) => p.isActive).take(limit).map(productToChatProduct).toList();
+}) {
+  final active = products.where((p) => p.isActive).toList();
+  active.sort((a, b) {
+    final at = a.createdAt;
+    final bt = b.createdAt;
+    if (at == null && bt == null) return 0;
+    if (at == null) return 1;
+    if (bt == null) return -1;
+    return bt.compareTo(at);
+  });
+  return active.take(limit).map(productToChatProduct).toList();
+}
 
 /// Turns the reply's ids into self-contained card snapshots (name, price,
 /// photo) taken now, while the catalogue is loaded. Ids with no live
