@@ -13,6 +13,11 @@ test('row → a full flagged doc maps every column', () => {
     category: 'Wallpaper',
     price: 30,
     supplierId: 'seller-1',
+    supplier: {
+      id: 'seller-1',
+      name: 'Wallpaper Co',
+      email: 'sales@wallpaper.co',
+    },
     image: 'https://cdn.example/wall.jpg',
     description: 'Premium vinyl, waterproof.',
     vision: {
@@ -37,6 +42,8 @@ test('row → a full flagged doc maps every column', () => {
   assert.equal(row.name, 'Floral Wallpaper');
   assert.equal(row.price, 30);
   assert.equal(row.supplierId, 'seller-1');
+  assert.equal(row.supplierName, 'Wallpaper Co');
+  assert.equal(row.supplierEmail, 'sales@wallpaper.co');
   assert.equal(row.vision.summary, 'A living room with a grey sofa.');
   assert.equal(row.vision.mismatch.flagged, true);
   assert.equal(row.vision.mismatch.reason, 'Photo shows a room, not wallpaper.');
@@ -52,6 +59,8 @@ test('row → no vision at all: empty defaults, review null (queue treats it as 
   assert.equal(row.name, 'Old Rug');
   assert.equal(row.price, 0);
   assert.equal(row.supplierId, '');
+  assert.equal(row.supplierName, '');
+  assert.equal(row.supplierEmail, '');
   assert.equal(row.image, '');
   assert.equal(row.vision.status, '');
   assert.deepEqual(row.vision.labels, []);
@@ -84,6 +93,8 @@ test('row → wrong-typed fields coerce instead of crashing', () => {
   assert.equal(row.category, '');
   assert.equal(row.price, 0);
   assert.equal(row.supplierId, '');
+  assert.equal(row.supplierName, '');
+  assert.equal(row.supplierEmail, '');
   assert.equal(row.image, '');
   assert.equal(row.description, '');
   assert.equal(row.vision.status, '');

@@ -123,12 +123,17 @@ export function toFlagRow(
         }
       : null;
 
+  const supplier = (data.supplier ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
   return {
     productId,
     name: typeof data.name === 'string' ? data.name : '',
     category: typeof data.category === 'string' ? data.category : '',
     price: typeof data.price === 'number' ? data.price : 0,
-    supplierId: typeof data.supplierId === 'string' ? data.supplierId : '',
+    supplierId: str(data.supplierId) || str(supplier.id),
+    supplierName: str(supplier.name) || str(data.supplierName),
+    supplierEmail: str(supplier.email) || str(data.supplierEmail),
     image: typeof data.image === 'string' ? data.image : '',
     description: typeof data.description === 'string' ? data.description : '',
     vision: {

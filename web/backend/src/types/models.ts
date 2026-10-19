@@ -154,6 +154,8 @@ export interface ProductFlagRow {
   category: string;
   price: number;
   supplierId: string;
+  supplierName: string;
+  supplierEmail: string;
   image: string;
   /** Seller-written copy — what the photo allegedly contradicts. */
   description: string;

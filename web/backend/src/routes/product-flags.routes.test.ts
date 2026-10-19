@@ -30,6 +30,8 @@ const flagRow: ProductFlagRow = {
   category: 'Wallpaper',
   price: 30,
   supplierId: 'seller-1',
+  supplierName: 'Wallpaper Co',
+  supplierEmail: 'sales@wallpaper.co',
   image: 'https://cdn.example/wall.jpg',
   description: 'Premium vinyl, waterproof.',
   vision: {

@@ -493,7 +493,7 @@ export function ProductsPage({ query }: { query: string }) {
             </div>
             <div className="review-meta-row">
               <span className="review-meta-label">Supplier</span>
-              <span>{editing.supplierName || '—'} <small className="mono">{editing.supplierId}</small></span>
+              <span>{editing.supplierName || '—'} <small className="mono">{editing.supplierEmail || editing.supplierId}</small></span>
             </div>
             <div className="review-meta-row">
               <span className="review-meta-label">3D model</span>

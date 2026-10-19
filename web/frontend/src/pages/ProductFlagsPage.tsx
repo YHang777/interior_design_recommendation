@@ -196,7 +196,7 @@ export function ProductFlagsPage({ query = '' }: Props) {
         render: (r) => (
           <div className="cell-primary">
             <span className="flag-clip">{r.description || '—'}</span>
-            <small className="mono">{r.supplierId}</small>
+            <small className="mono">{r.supplierEmail || r.supplierId}</small>
           </div>
         ),
       },
@@ -336,7 +336,10 @@ export function ProductFlagsPage({ query = '' }: Props) {
             </div>
             <div className="review-meta-row">
               <span className="review-meta-label">Supplier</span>
-              <span className="mono">{selected.supplierId || '—'}</span>
+              <span>
+                {selected.supplierName || '—'}{' '}
+                <small className="mono">{selected.supplierEmail || selected.supplierId}</small>
+              </span>
             </div>
             <div className="review-meta-row">
               <span className="review-meta-label">Analyzed</span>

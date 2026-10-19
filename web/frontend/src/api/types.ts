@@ -178,6 +178,8 @@ export interface ProductFlagRow {
   category: string;
   price: number;
   supplierId: string;
+  supplierName: string;
+  supplierEmail: string;
   image: string;
   description: string;
   vision: ProductFlagVision;
