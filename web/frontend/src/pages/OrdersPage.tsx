@@ -240,9 +240,9 @@ export function OrdersPage({ query }: { query: string }) {
   const isTerminal = selected ? selected.status === 'delivered' || selected.status === 'cancelled' : true;
 
   const invoiceBtn = selected ? (
-    <button className="btn btn-secondary" onClick={() => downloadInvoice(selected)} disabled={busy !== null}>
+    <button className="btn btn-secondary btn-sm" onClick={() => downloadInvoice(selected)} disabled={busy !== null}>
       <IconDownload size={14} />
-      Download invoice
+      Invoice PDF
     </button>
   ) : null;
 
@@ -328,6 +328,7 @@ export function OrdersPage({ query }: { query: string }) {
           title={selected.orderNumber || selected.orderId}
           onClose={() => !busy && (setSelected(null), setConfirmCancel(false))}
           headerIcon={<IconBag size={18} />}
+          headerActions={invoiceBtn}
           width={640}
         >
           <div className="review-meta">
@@ -440,7 +441,6 @@ export function OrdersPage({ query }: { query: string }) {
               <button className="btn btn-secondary" onClick={() => (setSelected(null), setConfirmCancel(false))} disabled={busy !== null}>
                 Close
               </button>
-              {invoiceBtn}
               <button className="btn btn-danger-outline" onClick={() => setConfirmCancel(true)} disabled={busy !== null}>
                 Cancel order
               </button>
@@ -473,7 +473,6 @@ export function OrdersPage({ query }: { query: string }) {
               <span style={{ marginRight: 'auto', color: 'var(--text-muted)' }}>
                 Stock returns to sellers.
               </span>
-              {invoiceBtn}
               <button className="btn btn-secondary" onClick={() => setConfirmCancel(false)} disabled={busy !== null}>
                 Keep order
               </button>
@@ -497,7 +496,6 @@ export function OrdersPage({ query }: { query: string }) {
 
           {isTerminal && (
             <div className="modal-actions">
-              {invoiceBtn}
               <button className="btn btn-secondary" onClick={() => setSelected(null)}>
                 Close
               </button>

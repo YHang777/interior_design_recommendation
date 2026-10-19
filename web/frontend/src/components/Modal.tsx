@@ -9,6 +9,8 @@ interface ModalProps {
   /** Destructive dialogs get a danger-tinted header icon. */
   tone?: 'default' | 'danger';
   headerIcon?: ReactNode;
+  /** Rendered in the title bar, left of the close button. */
+  headerActions?: ReactNode;
 }
 
 const FOCUSABLE =
@@ -20,7 +22,7 @@ const FOCUSABLE =
  *   destructive button) and returns to the opener on close.
  * - Tab / Shift+Tab cycle within the dialog; Escape closes.
  */
-export function Modal({ title, onClose, children, width = 480, tone = 'default', headerIcon }: ModalProps) {
+export function Modal({ title, onClose, children, width = 480, tone = 'default', headerIcon, headerActions }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Keep the latest onClose without re-running the focus effect on every
   // parent render (which would yank focus back to the dialog surface).
@@ -86,9 +88,12 @@ export function Modal({ title, onClose, children, width = 480, tone = 'default',
             )}
             <h2 id="modal-title">{title}</h2>
           </div>
-          <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
-            <IconX size={16} />
-          </button>
+          <div className="modal-header-actions">
+            {headerActions}
+            <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
+              <IconX size={16} />
+            </button>
+          </div>
         </div>
         <div className="modal-body">{children}</div>
       </div>

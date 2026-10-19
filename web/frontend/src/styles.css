@@ -1221,6 +1221,13 @@ code,
   min-width: 0;
 }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .modal-header h2 {
   margin: 0;
   font-size: var(--text-md);
