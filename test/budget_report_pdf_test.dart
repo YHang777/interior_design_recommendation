@@ -1,10 +1,3 @@
-// Tests for the Budget Planner's PDF export — the document the customer
-// shares or prints from the action bar.
-//
-// `BudgetReportPdf.bytes` is pure (no IO, no plugins), so the document build
-// can be exercised headless. The share/print actions wrap the `printing`
-// plugin and are not covered here.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_estimates.dart';
 import 'package:interior_design_recommendation/services/invoice/budget_report_pdf.dart';
@@ -22,7 +15,6 @@ List<EstimateLine> _unpricedLines() => const [
       EstimateLine(label: 'Flooring', price: null, matches: 0),
     ];
 
-/// PDF files start with the magic `%PDF-` and are not empty stubs.
 void expectValidPdf(List<int> bytes, {int minBytes = 500}) {
   expect(bytes.length, greaterThan(minBytes),
       reason: 'PDF should be a real document, not an empty stub');

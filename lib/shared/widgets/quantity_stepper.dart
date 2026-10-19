@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Compact rounded −/+ stepper with a zero-padded counter (e.g. '03').
-/// Values are clamped to [min]/[max]; [onChanged] fires only when the value
-/// actually changes and the target is in range.
 class QuantityStepper extends StatelessWidget {
   const QuantityStepper({
     super.key,
@@ -22,12 +19,9 @@ class QuantityStepper extends StatelessWidget {
   final int min;
   final int max;
 
-  /// Optional caption rendered beside the counter (e.g. 'stock').
   final String? label;
   final bool compact;
 
-  /// Fired when −/+ is pressed while already at the [min]/[max] edge —
-  /// lets parents explain why the step was ignored (e.g. "max reached").
   final VoidCallback? onBlockedTap;
 
   bool get _canDecrement => value > min;
@@ -51,7 +45,6 @@ class QuantityStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Larger touch targets: 36dp compact, 40dp normal (meets 48dp with padding)
     final buttonSize = compact ? 36.0 : 40.0;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -115,8 +108,6 @@ class _StepperButton extends StatelessWidget {
   final IconData icon;
   final double size;
 
-  /// Whether the step is actually possible. Edge taps still fire [onTap]
-  /// (so parents can explain why via `onBlockedTap`) but render dimmed.
   final bool enabled;
 
   final VoidCallback onTap;

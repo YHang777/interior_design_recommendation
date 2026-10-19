@@ -1,16 +1,18 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { verificationApi } from '../api/api';
 import { useAuth } from '../state/AuthContext';
-import { IconGrid, IconLogout, IconSearch, IconShield, IconStore, IconUsers, IconCamera } from './icons';
+import { IconGrid, IconLogout, IconSearch, IconShield, IconStore, IconUsers, IconCamera, IconBox, IconBag } from './icons';
 
-export type PageKey = 'overview' | 'users' | 'suppliers' | 'verification' | 'product-flags';
+export type PageKey = 'overview' | 'users' | 'suppliers' | 'verification' | 'product-flags' | 'products' | 'orders';
 
 export const PAGE_META: Record<PageKey, { title: string; breadcrumb: string }> = {
-  overview: { title: 'Overview', breadcrumb: 'Marketplace health' },
-  users: { title: 'Users', breadcrumb: 'Directory · all accounts' },
-  suppliers: { title: 'Suppliers', breadcrumb: 'Directory · sellers' },
-  verification: { title: 'Verification', breadcrumb: 'Directory · IC review queue' },
-  'product-flags': { title: 'Photo flags', breadcrumb: 'Monitor · photo-vs-claim queue' },
+  overview: { title: 'Overview', breadcrumb: 'Health' },
+  users: { title: 'Users', breadcrumb: 'All users' },
+  suppliers: { title: 'Suppliers', breadcrumb: 'Sellers' },
+  verification: { title: 'Verification', breadcrumb: 'IC queue' },
+  'product-flags': { title: 'Photo flags', breadcrumb: 'Photo flags' },
+  products: { title: 'Products', breadcrumb: 'Catalog' },
+  orders: { title: 'Orders', breadcrumb: 'Catalog' },
 };
 
 interface Props {
@@ -61,6 +63,21 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         key: 'verification',
         label: 'Verification',
         icon: <IconShield size={17} />,
+      },
+    ],
+  },
+  {
+    label: 'Catalog',
+    items: [
+      {
+        key: 'products',
+        label: 'Products',
+        icon: <IconBox size={17} />,
+      },
+      {
+        key: 'orders',
+        label: 'Orders',
+        icon: <IconBag size={17} />,
       },
     ],
   },

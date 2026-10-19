@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 
-/// Modern styled text field for auth screens.
-/// Features focus shadow, rounded 12px borders, and animated error shake.
 class AuthTextField extends StatefulWidget {
   const AuthTextField({
     super.key,
@@ -150,7 +148,6 @@ class _AuthTextFieldState extends State<AuthTextField>
   }
 }
 
-/// Custom curve that produces a left-right-left shake pattern.
 class _ShakeCurve extends Curve {
   @override
   double transformInternal(double t) {

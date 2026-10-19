@@ -1,8 +1,3 @@
-// Tests for the customer Design Report's pure synthesis — item categories,
-// median price estimation, expense percentages, and the derived style.
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/design_report.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -73,7 +68,6 @@ void main() {
     });
 
     test('falls back to the icon name, then to Furniture', () {
-      // Renamed placement whose icon still identifies it.
       expect(
         displayCategoryFor(_place(name: 'Lounge Seat', iconName: 'sofa')),
         'Furniture',
@@ -82,7 +76,6 @@ void main() {
         displayCategoryFor(_place(name: 'Glow', iconName: 'floor_lamp')),
         'Lighting',
       );
-      // Neither known → honest default, never a crash.
       expect(
         displayCategoryFor(_place(name: 'Mystery', iconName: 'mystery')),
         'Furniture',
@@ -195,7 +188,6 @@ void main() {
       final report = buildDesignReport(
         _design(furniture: [
           _place(name: 'Sofa'),
-          // Lighting item, but the catalogue has no lighting listing.
           _place(name: 'Floor Lamp', iconName: 'floor_lamp'),
         ]),
         [_product(name: 'Sofa XL', price: 1000)],

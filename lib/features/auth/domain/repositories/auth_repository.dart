@@ -2,21 +2,11 @@ import '../../../../core/utils/user_errors.dart';
 import '../../data/datasources/account_deletion_datasource.dart';
 import '../../data/models/app_user.dart';
 
-/// Abstract contract for authentication operations.
-///
-/// Implementations:
-/// - [MockAuthRepository] — for development without Firebase
-/// - [AuthRepositoryImpl] — production Firebase Auth + Firestore
 abstract class IAuthRepository {
-  /// Stream of auth state changes. Emits null when signed out.
   Stream<AppUser?> authStateChanges();
 
-  /// Sign in with email and password.
-  /// Throws [AuthException] on failure.
   Future<AppUser> login(String email, String password);
 
-  /// Create a new account. Role defaults to [UserRole.homeowner] for
-  /// standard registration.
   Future<AppUser> register({
     required String email,
     required String password,
@@ -26,9 +16,6 @@ abstract class IAuthRepository {
     String? address,
   });
 
-  /// Updates the signed-in user's public profile in Firestore and returns
-  /// the refreshed [AppUser]. Suppliers pass `businessName`/`businessPhone`/
-  /// `businessAddress` so their storefront identity stays in sync.
   Future<AppUser> updateProfile({
     required String name,
     String? phone,
@@ -38,45 +25,27 @@ abstract class IAuthRepository {
     String? businessAddress,
   });
 
-  /// Sign out the current user.
   Future<void> logout();
 
-  /// Send a password reset email.
   Future<void> sendPasswordResetEmail(String email);
 
-  /// Get the currently signed-in user, or null.
   Future<AppUser?> getCurrentUser();
 
-  /// Resend the verification email for [email]/[uid] through the app's
-  /// middleware (works while signed out — the post-register flow is).
   Future<void> resendVerificationEmail({
     required String email,
     required String uid,
   });
 
-  /// Check if the current user's email is verified.
   Future<bool> isEmailVerified();
 
-  /// Starts account deletion: the backend emails a confirmation link
-  /// (valid 24h) and returns `pending_email`. The user stays signed in —
-  /// the 7-day grace window starts only when the link is opened.
-  ///
-  /// Throws [UserFacingException]-compatible errors on failure
-  /// (e.g. confirm-email mismatch, request already active).
   Future<DeletionStatus> requestAccountDeletion(String confirmEmail);
 
-  /// Cancels an active deletion request (pending or grace) and restores
-  /// the account. Throws when there is nothing to cancel.
   Future<DeletionStatus> cancelAccountDeletion();
 
-  /// The signed-in user's current deletion status; `status: 'none'` when
-  /// there is no active request.
   Future<DeletionStatus> fetchDeletionStatus();
 }
 
-/// Custom exception for auth errors with user-friendly messages.
 class AuthException implements Exception, UserFacingException {
-  /// Short, plain-language text — safe to show as is.
   final String message;
   final String? code;
 

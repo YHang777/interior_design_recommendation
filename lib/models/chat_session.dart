@@ -1,10 +1,5 @@
 import 'dart:math';
 
-/// A product the assistant suggested, snapshotted at reply time.
-///
-/// Not just an id: the card must still render name/price/photo after the
-/// listing is edited or deleted. The id is what a tap acts on — the Add
-/// handler re-checks the live catalogue before anything enters the cart.
 class ChatSuggestionSnapshot {
   const ChatSuggestionSnapshot({
     required this.productId,
@@ -19,7 +14,6 @@ class ChatSuggestionSnapshot {
   final int price;
   final String image;
 
-  /// The model's one-line why.
   final String reason;
 
   Map<String, dynamic> toJson() => {
@@ -40,10 +34,6 @@ class ChatSuggestionSnapshot {
       );
 }
 
-/// One message in a saved design chat.
-///
-/// [role] matches the proxy's transcript roles: `'user'` for the person,
-/// `'model'` for the assistant — so building a send request is a straight map.
 class ChatMessage {
   ChatMessage({
     required this.role,
@@ -56,8 +46,6 @@ class ChatMessage {
   final String text;
   final DateTime createdAt;
 
-  /// Product cards attached to an assistant reply; null/empty for the
-  /// plain prose bubbles older saved chats hold.
   final List<ChatSuggestionSnapshot>? suggestions;
 
   Map<String, dynamic> toJson() => {
@@ -86,7 +74,6 @@ class ChatMessage {
   }
 }
 
-/// A saved design conversation, kept on-device (see `ChatHistoryStore`).
 class ChatSession {
   ChatSession({
     required this.id,
@@ -100,11 +87,9 @@ class ChatSession {
 
   final String id;
 
-  /// Shown in the history list; set from the first user message.
   final String title;
   final List<ChatMessage> messages;
 
-  /// Last-tapped quick-shortcut context — enriches the system prompt.
   final String? style;
   final String? room;
   final DateTime createdAt;
@@ -112,7 +97,6 @@ class ChatSession {
 
   static final Random _rng = Random();
 
-  /// Same spirit as `MarketplaceRepository._newId` — no uuid dependency.
   static String newId() =>
       '${DateTime.now().microsecondsSinceEpoch}${_rng.nextInt(99999)}';
 

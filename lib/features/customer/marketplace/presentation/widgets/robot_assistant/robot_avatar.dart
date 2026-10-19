@@ -4,13 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../../../../../core/constants/app_colors.dart';
 
-/// Cute theme-colored robot drawn in Flutter (CustomPaint) — no image
-/// assets, crisp at any size.
-///
-/// One controller drives a gentle idle loop: a ±3px vertical bob plus a
-/// periodic blink. Animations stop entirely when the OS reports reduced
-/// motion ([MediaQuery.disableAnimationsOf]) — the robot stays a static,
-/// still-tappable pose.
 class RobotAvatar extends StatefulWidget {
   const RobotAvatar({super.key, this.size = 64});
 
@@ -36,8 +29,6 @@ class _RobotAvatarState extends State<RobotAvatar>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reduced motion → hold the static pose. Idempotent, so re-runs on
-    // dependency changes are harmless.
     if (MediaQuery.disableAnimationsOf(context)) {
       _ctrl.stop();
       _ctrl.value = 0;
@@ -60,8 +51,6 @@ class _RobotAvatarState extends State<RobotAvatar>
         final t = _ctrl.value;
         final animating = _ctrl.isAnimating;
         final bob = animating ? math.sin(t * 2 * math.pi) * 3.0 : 0.0;
-        // Eyes close for the last ~8% of each cycle — a blink that reads
-        // as one beat without a second controller.
         final blinking = animating && t > 0.92;
         return CustomPaint(
           size: Size.square(widget.size),
@@ -80,7 +69,6 @@ class _RobotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Design on a 64×64 grid, scaled to the actual size.
     final s = size.width / 64;
     canvas.save();
     canvas.scale(s);
@@ -89,8 +77,6 @@ class _RobotPainter extends CustomPainter {
     final accentLight = AppColors.accentLight;
     final ink = AppColors.primary;
 
-    // Grounded shadow — stays put while the body bobs, and tightens as
-    // the robot rises (reads as lift).
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.18 + (bobOffset / 3) * 0.06);
     canvas.drawOval(
@@ -111,7 +97,6 @@ class _RobotPainter extends CustomPainter {
       end: Alignment.bottomRight,
     );
 
-    // Antenna (drawn first so the head tucks its base).
     final antennaPaint = Paint()
       ..color = ink
       ..strokeWidth = 2
@@ -119,12 +104,10 @@ class _RobotPainter extends CustomPainter {
     canvas.drawLine(const Offset(32, 15), const Offset(32, 7), antennaPaint);
     canvas.drawCircle(const Offset(32, 5.5), 3, Paint()..color = accentLight);
 
-    // Arms.
     final armPaint = Paint()..color = accent;
     canvas.drawCircle(const Offset(9, 47), 4.5, armPaint);
     canvas.drawCircle(const Offset(55, 47), 4.5, armPaint);
 
-    // Body with nameplate stripe.
     final bodyRect = RRect.fromRectAndRadius(
       const Rect.fromLTWH(13, 38, 38, 20),
       const Radius.circular(10),
@@ -138,14 +121,12 @@ class _RobotPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: 0.85),
     );
 
-    // Head.
     final headRect = RRect.fromRectAndRadius(
       const Rect.fromLTWH(14, 14, 36, 27),
       const Radius.circular(12),
     );
     canvas.drawRRect(headRect, Paint()..shader = bodyGradient.createShader(headRect.outerRect));
 
-    // Face panel.
     final faceRect = RRect.fromRectAndRadius(
       const Rect.fromLTWH(18, 17, 28, 21),
       const Radius.circular(8),
@@ -155,12 +136,10 @@ class _RobotPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: 0.93),
     );
 
-    // Blush.
     final blush = Paint()..color = accent.withValues(alpha: 0.25);
     canvas.drawCircle(const Offset(22, 32), 2, blush);
     canvas.drawCircle(const Offset(42, 32), 2, blush);
 
-    // Eyes — open circles, or short closed lines while blinking.
     final eyePaint = Paint()..color = ink;
     if (blinking) {
       final eyeLine = Paint()
@@ -174,7 +153,6 @@ class _RobotPainter extends CustomPainter {
       canvas.drawCircle(const Offset(37, 25), 3, eyePaint);
     }
 
-    // Smile.
     final smilePaint = Paint()
       ..color = ink
       ..style = PaintingStyle.stroke

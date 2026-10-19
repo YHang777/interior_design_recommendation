@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../constants/app_colors.dart';
 
-/// Modern Minimal theme — clean, premium, functional.
 class AppTheme {
   AppTheme._();
 
@@ -23,9 +22,6 @@ class AppTheme {
       ),
       scaffoldBackgroundColor: AppColors.background,
 
-      // AppBar — light safety net only. Screens use in-body `PageHeading`
-      // instead of an AppBar; this keeps any stray AppBar from painting a
-      // dark band across the top.
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
@@ -43,13 +39,11 @@ class AppTheme {
         ),
       ),
 
-      // Text — Poppins across the board
       textTheme: GoogleFonts.poppinsTextTheme().apply(
         bodyColor: AppColors.textPrimary,
         displayColor: AppColors.textPrimary,
       ),
 
-      // Cards — elevated surface, subtle shadow, 14px corners
       cardTheme: CardThemeData(
         color: AppColors.surfaceElevated,
         elevation: 1,
@@ -60,7 +54,6 @@ class AppTheme {
         margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 0),
       ),
 
-      // Elevated buttons — forest green, full-width 52px
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.accent,
@@ -78,7 +71,6 @@ class AppTheme {
         ),
       ),
 
-      // Outlined buttons
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.primary,
@@ -91,7 +83,6 @@ class AppTheme {
         ),
       ),
 
-      // Input fields — modern, filled, 12px radius
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surfaceContainer,
@@ -128,7 +119,6 @@ class AppTheme {
         prefixIconColor: AppColors.textSecondary,
       ),
 
-      // Bottom nav
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: AppColors.surface,
         selectedItemColor: AppColors.accent,
@@ -142,7 +132,6 @@ class AppTheme {
         unselectedLabelStyle: GoogleFonts.poppins(fontSize: 11),
       ),
 
-      // Navigation Bar (Material 3) — matches the floating pill
       navigationBarTheme: NavigationBarThemeData(
         height: 64,
         indicatorColor: AppColors.accent.withValues(alpha: 0.12),
@@ -160,21 +149,18 @@ class AppTheme {
         }),
       ),
 
-      // Floating action button
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: AppColors.accent,
         foregroundColor: AppColors.textOnDark,
         elevation: 2,
       ),
 
-      // Dividers
       dividerTheme: const DividerThemeData(
         color: AppColors.divider,
         thickness: 1,
         space: 1,
       ),
 
-      // Dialog — 20px rounded corners, elevated
       dialogTheme: DialogThemeData(
         backgroundColor: AppColors.surface,
         elevation: 8,
@@ -193,7 +179,6 @@ class AppTheme {
         ),
       ),
 
-      // Bottom sheet — 24px top corners, elevated
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: AppColors.surface,
         elevation: 8,
@@ -206,7 +191,6 @@ class AppTheme {
         dragHandleColor: AppColors.border,
       ),
 
-      // SnackBar — floating, 12px rounded
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.primary,
@@ -220,7 +204,6 @@ class AppTheme {
         actionTextColor: AppColors.accentLight,
       ),
 
-      // Chip — rounded 20px
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.surfaceContainer,
         selectedColor: AppColors.accent,
@@ -242,7 +225,6 @@ class AppTheme {
         showCheckmark: false,
       ),
 
-      // Page transitions — Cupertino-style slide
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),

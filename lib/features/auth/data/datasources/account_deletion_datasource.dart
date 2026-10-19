@@ -8,11 +8,6 @@ import 'package:http/http.dart' as http;
 import '../../../../config/app_config.dart';
 import '../../../../core/utils/user_errors.dart';
 
-/// One account-deletion status as the backend reports it.
-///
-/// `status` is one of `none | pending_email | grace | cancelled | purged`.
-/// [graceUntil] / [purgeAt] are only present once the emailed link has been
-/// confirmed (status `grace`).
 class DeletionStatus {
   const DeletionStatus({required this.status, this.graceUntil, this.purgeAt});
 
@@ -20,9 +15,6 @@ class DeletionStatus {
   final DateTime? graceUntil;
   final DateTime? purgeAt;
 
-  /// Parses a `{status, graceUntil?, purgeAt?}` body. Unknown or missing
-  /// `status` degrades to `'none'`; bad date strings become null rather than
-  /// throwing — a banner with no date is better than a crashed fetch.
   factory DeletionStatus.fromJson(Map<String, dynamic> json) {
     return DeletionStatus(
       status: json['status'] is String ? (json['status'] as String) : 'none',
@@ -33,8 +25,6 @@ class DeletionStatus {
 
   static DateTime? _parseDate(Object? value) {
     if (value is! String || value.trim().isEmpty) return null;
-    // Compare/display in the device's local time — the ISO text from the
-    // server carries a `Z` (UTC) suffix.
     return DateTime.tryParse(value)?.toLocal();
   }
 
@@ -43,8 +33,6 @@ class DeletionStatus {
       'DeletionStatus($status, graceUntil: $graceUntil, purgeAt: $purgeAt)';
 }
 
-/// A deletion-flow failure already phrased for the person waiting on it:
-/// short, plain, and free of SDK/stack jargon. UI code may show it as is.
 class AccountDeletionException implements Exception, UserFacingException {
   const AccountDeletionException(this.message);
 
@@ -57,11 +45,6 @@ class AccountDeletionException implements Exception, UserFacingException {
   String toString() => 'AccountDeletionException: $message';
 }
 
-/// Talks to the backend's account-deletion endpoints
-/// (`{verificationApiUrl}/api/account/...`).
-///
-/// Authenticated with the signed-in user's Firebase ID token — the only
-/// credential this client ever holds. No third-party key lives in the app.
 class AccountDeletionDatasource {
   AccountDeletionDatasource({
     http.Client? client,
@@ -80,12 +63,6 @@ class AccountDeletionDatasource {
     return user.getIdToken();
   }
 
-  /// Asks the backend to start deletion. On success the server emails the
-  /// user a confirmation link (valid 24h); the account enters the 7-day
-  /// grace window only after that link is opened.
-  ///
-  /// Throws [AccountDeletionException] — e.g. 400 when [confirmEmail] does
-  /// not match the account, 409 when a request is already active.
   Future<DeletionStatus> requestDeletion({required String confirmEmail}) {
     return _send(
       method: 'POST',
@@ -95,8 +72,6 @@ class AccountDeletionDatasource {
     );
   }
 
-  /// Cancels an active deletion request (pending or grace) and restores
-  /// the account — for suppliers, deactivated listings come back too.
   Future<DeletionStatus> cancelDeletion() {
     return _send(
       method: 'POST',
@@ -106,7 +81,6 @@ class AccountDeletionDatasource {
     );
   }
 
-  /// The signed-in user's current deletion status.
   Future<DeletionStatus> fetchDeletionStatus() {
     return _send(
       method: 'GET',
@@ -126,8 +100,6 @@ class AccountDeletionDatasource {
       throw const AccountDeletionException(
           'Account deletion is not available in this build.');
     }
-    // Fail fast without a token: an unauthenticated call would only earn
-    // a 401 from the server.
     final token = await _idTokenProvider();
     if (token == null || token.isEmpty) {
       throw const AccountDeletionException('Please sign in first.');
@@ -155,8 +127,6 @@ class AccountDeletionDatasource {
     }
 
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      // Server sentences are user-ready by contract ({error: string});
-      // log the body either way so 409s/502s stay diagnosable.
       debugPrint('[deletion] rejected HTTP ${resp.statusCode}: ${resp.body}');
       throw AccountDeletionException(
           _serverMessage(resp) ?? _messageForStatus(resp.statusCode, fallback));
@@ -171,8 +141,6 @@ class AccountDeletionDatasource {
     throw AccountDeletionException(fallback);
   }
 
-  /// The backend's `{error: '...'}` sentence, if the body carries one.
-  /// The 400/409/502/503 responses all ship one that is safe to show.
   String? _serverMessage(http.Response resp) {
     try {
       final decoded = jsonDecode(resp.body);
@@ -181,7 +149,6 @@ class AccountDeletionDatasource {
         if (error is String && error.trim().isNotEmpty) return error.trim();
       }
     } on FormatException {
-      // Not JSON — fall through to the status-based sentence.
     }
     return null;
   }

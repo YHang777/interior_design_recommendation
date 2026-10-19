@@ -2,14 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/shared/widgets/floating_nav_bar.dart';
 
-/// The user's complaint: *"there is no much spacing for the first and last
-/// tab and makes the highlight feels out of the box which looks weird."*
-///
-/// The selected indicator is up to 64dp wide while a 6-tab slot is only
-/// ~51dp, so on the first/last tab it extended past the pill's 28px rounded
-/// ends and read as clipped / sitting outside the box. The fix insets the
-/// destinations; this test pins the resulting clearance so it cannot
-/// silently regress.
 void main() {
   const destinations = [
     NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
@@ -47,7 +39,6 @@ void main() {
     );
   }
 
-  /// The selected indicator is at most 64dp wide and centred on its slot.
   double indicatorHalfWidth(WidgetTester tester, int index) {
     final slot = tester.getRect(
       find.descendant(
@@ -55,15 +46,9 @@ void main() {
         matching: find.byType(NavigationDestination).at(index),
       ),
     );
-    // Flutter caps the indicator at 64dp; it cannot be wider than its slot.
     return (slot.width < 64 ? slot.width : 64) / 2;
   }
 
-  /// The *visible* rounded pill, not the outer [Container] box — Container
-  /// with a `margin` is a Padding>DecoratedBox, and `getRect` on it includes
-  /// that 16px margin. Measuring the margin box overstates clearance by 16dp
-  /// at each end, so use the DecoratedBox that actually carries the 28px
-  /// radius the user sees.
   Rect pillRect(WidgetTester tester) => tester.getRect(
         find
             .descendant(
@@ -93,25 +78,17 @@ void main() {
       final indicatorLeft = slot.center.dx - half;
       final indicatorRight = slot.center.dx + half;
 
-      // Report the real numbers — the clearance is the whole point of the
-      // fix and a bare boolean would hide a near-miss.
       debugPrint('[nav] pill=$pill slot=$slot '
           'indicator=${indicatorLeft.toStringAsFixed(1)}→'
           '${indicatorRight.toStringAsFixed(1)} '
           'clearL=${(indicatorLeft - pill.left).toStringAsFixed(1)} '
           'clearR=${(pill.right - indicatorRight).toStringAsFixed(1)}');
 
-      // The highlight must sit INSIDE the pill with visible clearance on
-      // the rounded end it faces. A negative value is the "out of the box"
-      // look the user reported.
       expect(indicatorLeft, greaterThanOrEqualTo(pill.left),
           reason: 'highlight overruns the pill\'s left rounded end');
       expect(indicatorRight, lessThanOrEqualTo(pill.right),
           reason: 'highlight overruns the pill\'s right rounded end');
 
-      // And it must not be flush against the end either — the user asked
-      // for "some spacing", not merely non-clipping. The inset is 10dp;
-      // 8dp is the floor so a future tweak cannot quietly eat the gap.
       if (selected == 0) {
         expect(indicatorLeft - pill.left, greaterThanOrEqualTo(8.0),
             reason: 'first tab highlight is flush against the pill edge');
@@ -129,7 +106,6 @@ void main() {
     expect(find.byType(NavigationDestination), findsNWidgets(6));
     expect(tester.takeException(), isNull);
 
-    // No horizontal overflow of the pill's contents.
     final pill = pillRect(tester);
     for (var i = 0; i < 6; i++) {
       final slot = tester.getRect(find

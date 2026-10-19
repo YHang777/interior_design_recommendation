@@ -7,14 +7,9 @@ import 'package:printing/printing.dart';
 import '../../core/utils/formatters.dart';
 import '../../features/customer/homeowner/data/design_report.dart';
 
-/// Renders a customer Design Report as a PDF and hands it to the OS.
-///
-/// [bytes] is pure document generation (no IO, no plugins) so it can be
-/// unit-tested headless; [share] and [print] wrap the `printing` plugin.
 class DesignReportPdf {
   const DesignReportPdf._();
 
-  /// Renders [report] as PDF bytes. Pure — no IO, no plugins.
   static Future<Uint8List> bytes(DesignReportData report) async {
     final doc = pw.Document();
     doc.addPage(
@@ -22,8 +17,6 @@ class DesignReportPdf {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(40),
         build: (context) => _body(report),
-        // Long item lists spill onto a second page; the running footer ties
-        // every page back to one report.
         footer: (context) => pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
@@ -37,8 +30,6 @@ class DesignReportPdf {
     return doc.save();
   }
 
-  /// Opens the system share sheet for the report as
-  /// `design-report-<name>-<date>.pdf`.
   static Future<void> share(DesignReportData report) async {
     await Printing.sharePdf(
       bytes: await bytes(report),
@@ -46,7 +37,6 @@ class DesignReportPdf {
     );
   }
 
-  /// Opens the OS print dialog for [report].
   static Future<void> print(DesignReportData report) async {
     await Printing.layoutPdf(
       name: _filename(report),
@@ -55,8 +45,6 @@ class DesignReportPdf {
   }
 }
 
-// Column flexes for the items table: the item name gets the room, category
-// and price stay wide enough for "Lighting" / "RM 1,250" without wrapping.
 const List<int> _itemFlex = [6, 2, 2];
 
 final pw.TextStyle _cell =
@@ -140,8 +128,6 @@ pw.Widget _overview(DesignReportData report) {
         'Total expenses',
         report.expenses.hasData
             ? Formatters.myr(report.expenses.total!)
-            // Helvetica (the default PDF font) cannot draw an em dash —
-            // an ASCII placeholder renders instead of silently vanishing.
             : '-',
       ),
       pw.SizedBox(height: 4),
@@ -286,8 +272,6 @@ pw.Widget _totalLine(String label, String value, {bool strong = false}) {
   );
 }
 
-/// The honesty footnote — every number in the report is an estimate, and
-/// the document says so in the same words the app uses.
 pw.Widget _footnote() {
   return pw.Text(
     'Prices are estimated from current marketplace listings (median). '
@@ -324,8 +308,6 @@ pw.Widget _label(String text, {pw.TextAlign align = pw.TextAlign.left}) {
 pw.TextStyle _muted(double size) =>
     pw.TextStyle(fontSize: size, color: PdfColors.grey600);
 
-/// `design-report-<slug>-<yyyy-mm-dd>.pdf` — the design name slugified so
-/// an odd character can never produce an unusable filename.
 String _filename(DesignReportData report) {
   final slug = report.design.name
       .trim()

@@ -9,7 +9,6 @@ import '../datasources/firestore_user_datasource.dart';
 import '../datasources/verification_email_datasource.dart';
 import '../models/app_user.dart';
 
-/// Production auth repository using Firebase Auth + Firestore.
 class AuthRepositoryImpl implements IAuthRepository {
   final FirebaseAuthDatasource _authDatasource;
   final FirestoreUserDatasource _firestoreDatasource;
@@ -26,7 +25,6 @@ class AuthRepositoryImpl implements IAuthRepository {
         _verificationDatasource = verificationDatasource,
         _deletionDatasource = deletionDatasource ?? AccountDeletionDatasource();
 
-  /// In-flight profile fetch, keyed by uid — see [_buildAppUser].
   String? _profileFetchUid;
   Future<AppUser>? _profileFetch;
 
@@ -37,11 +35,6 @@ class AuthRepositoryImpl implements IAuthRepository {
         await BootTrace.log('authState: signed out');
         return null;
       }
-      // Unverified sign-ins are treated as signed out. This matches the
-      // login() gate below AND fixes the post-register bounce race: the late
-      // `User` emission from createUserWithEmailAndPassword (which lands
-      // after register() has already signed out) would otherwise flip the
-      // router away from the Verify-Email screen seconds after arrival.
       if (!fbUser.emailVerified) {
         await BootTrace.log('authState: user present but email unverified');
         return null;
@@ -70,8 +63,6 @@ class AuthRepositoryImpl implements IAuthRepository {
   Future<AppUser> login(String email, String password) async {
     try {
       await BootTrace.log('login: signInWithEmailAndPassword begin');
-      // Bound the auth round trip — without a timeout a stalled network
-      // leaves the Sign In button spinning forever with no feedback.
       final credential = await _authDatasource
           .signInWithEmailAndPassword(email, password)
           .timeout(const Duration(seconds: 25));
@@ -122,18 +113,8 @@ class AuthRepositoryImpl implements IAuthRepository {
 
       final isSupplier = role == UserRole.supplier;
 
-      // New accounts start UNVERIFIED. A supplier's "Verified" badge is an
-      // admin decision — it is granted only after they upload their IC and
-      // supporting documents and an admin approves them. Writing 'verified'
-      // here would make the badge meaningless.
-      //
-      // This is also a hard requirement of `firestore.rules`: the `users`
-      // rule refuses any client write of `verificationStatus: 'verified'`,
-      // so stamping it at signup would deny every registration outright.
-      // Only the admin backend (Admin SDK, bypasses rules) may set it.
       const verificationStatus = 'none';
 
-      // Create Firestore document.
       await _firestoreDatasource.createUser(
         uid: fbUser.uid,
         data: {
@@ -150,9 +131,6 @@ class AuthRepositoryImpl implements IAuthRepository {
         },
       );
 
-      // Custom verification flow: the middleware emails a confirmation link
-      // (Brevo). Best-effort — a failure here must NOT fail registration;
-      // the Verify screen's Resend button is the retry path.
       try {
         await _verificationDatasource.sendVerificationEmail(
           email: email,
@@ -162,9 +140,6 @@ class AuthRepositoryImpl implements IAuthRepository {
         debugPrint('[verify] initial send failed (Resend can retry): $e');
       }
 
-      // The user must verify before their first login: sign out now so the
-      // Verify-Email screen stays reachable (the router redirects signed-in
-      // users off auth routes).
       await _authDatasource.signOut();
 
       final user = AppUser(
@@ -209,8 +184,6 @@ class AuthRepositoryImpl implements IAuthRepository {
       'businessPhone': businessPhone ?? '',
       'businessAddress': businessAddress ?? '',
     });
-    // Deliberately bypasses the [_buildAppUser] memo: this read must observe
-    // the write above, never a profile fetch that was already in flight.
     return _fetchAppUser(fbUser);
   }
 
@@ -258,19 +231,6 @@ class AuthRepositoryImpl implements IAuthRepository {
     return _deletionDatasource.fetchDeletionStatus();
   }
 
-  /// Builds the [AppUser] for [fbUser], de-duplicating concurrent calls.
-  ///
-  /// `login()` and the `authStateChanges()` stream both resolve a profile for
-  /// the same uid within the same event-loop turn: sign-in makes Firebase Auth
-  /// emit on its stream while `login()` carries on to its own lookup. Each
-  /// used to issue a separate `users/{uid}` read, so one sign-in paid for two
-  /// concurrent network round trips — and the stream's copy was then discarded
-  /// by the notifier's suspension guard, making it pure waste on the exact
-  /// critical path the splash screen waits on.
-  ///
-  /// Concurrent callers for the same uid now share one read. The memo lives
-  /// only until that shared future settles, so a later call — or a different
-  /// uid — always starts fresh and no stale profile can be observed.
   Future<AppUser> _buildAppUser(fb.User fbUser) {
     final inFlight = _profileFetch;
     if (inFlight != null && _profileFetchUid == fbUser.uid) {
@@ -279,8 +239,6 @@ class AuthRepositoryImpl implements IAuthRepository {
     final fetch = _fetchAppUser(fbUser);
     _profileFetchUid = fbUser.uid;
     _profileFetch = fetch;
-    // Clear on both outcomes. This `onError` consumes the error for the
-    // derived future only — callers still receive it from `fetch` itself.
     unawaited(fetch.then(
       (_) => _clearProfileFetch(fetch),
       onError: (_) => _clearProfileFetch(fetch),
@@ -295,7 +253,6 @@ class AuthRepositoryImpl implements IAuthRepository {
     }
   }
 
-  /// Reads `users/{uid}` and maps it to an [AppUser]. Always hits Firestore.
   Future<AppUser> _fetchAppUser(fb.User fbUser) async {
     await BootTrace.log('profile: users/${fbUser.uid} get()');
     final doc = await _firestoreDatasource.getUser(fbUser.uid);
@@ -315,14 +272,10 @@ class AuthRepositoryImpl implements IAuthRepository {
     );
   }
 
-  /// Which sign-in form produced the failure — the same Firebase code means
-  /// different things per screen ("Email or password is incorrect." at login,
-  /// "No account found with this email." at password reset).
   AuthException _mapFirebaseError(
     fb.FirebaseAuthException e, {
     required _AuthOp op,
   }) {
-    // Codes that only ever mean "this connection is broken".
     if (e.code == 'network-request-failed' || e.code == 'network-error') {
       return const AuthException(
         'No internet connection. Check your network and try again.',
@@ -356,10 +309,6 @@ class AuthRepositoryImpl implements IAuthRepository {
 
     switch (op) {
       case _AuthOp.signIn:
-        // Firebase folds wrong-password / user-not-found into
-        // invalid-credential (anti-enumeration), so one message covers all
-        // three. Never echo `e.message` here — that is the long
-        // "incorrect, malformed or has expired" sentence users were shown.
         if (e.code == 'invalid-credential' ||
             e.code == 'wrong-password' ||
             e.code == 'user-not-found' ||
@@ -399,8 +348,6 @@ class AuthRepositoryImpl implements IAuthRepository {
         }
 
       case _AuthOp.passwordReset:
-        // A reset link cannot be sent to an address that has no account, and
-        // here saying so is helpful rather than a privacy leak.
         if (e.code == 'user-not-found' ||
             e.code == 'invalid-credential' ||
             e.code == 'INVALID_LOGIN_CREDENTIALS') {
@@ -417,5 +364,4 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 }
 
-/// See [AuthRepositoryImpl._mapFirebaseError].
 enum _AuthOp { signIn, register, passwordReset }

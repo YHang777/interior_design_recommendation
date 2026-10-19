@@ -9,22 +9,11 @@ import '../../features/auth/data/datasources/account_deletion_datasource.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import 'app_feedback.dart';
 
-/// Shows the signed-in user's account-deletion state at the top of the
-/// profile screens:
-///
-/// * `grace` — a warning card with the purge date and **Recover account**;
-/// * `pending_email` — a small "check your email" row with **Cancel request****;
-/// * `none` / `cancelled` / `purged` — nothing.
-///
-/// Fetch errors and loading also render nothing: this banner informs, it
-/// never blocks. Recovering invalidates [deletionStatusProvider] so the
-/// card disappears without a pull-to-refresh.
 class DeletionPendingBanner extends ConsumerWidget {
   const DeletionPendingBanner({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // valueOrNull: loading (null) and fetch errors (null) both fail silent.
     final status = ref.watch(deletionStatusProvider).valueOrNull;
     if (status == null) return const SizedBox.shrink();
 
@@ -39,7 +28,6 @@ class DeletionPendingBanner extends ConsumerWidget {
   }
 }
 
-/// `grace`: the emailed link was confirmed — 7 days to recover.
 class _GraceCard extends StatelessWidget {
   const _GraceCard({required this.status, required this.ref});
 
@@ -115,7 +103,6 @@ class _GraceCard extends StatelessWidget {
   }
 }
 
-/// `pending_email`: the confirmation email is out — offer an early out.
 class _PendingEmailRow extends StatelessWidget {
   const _PendingEmailRow({required this.ref});
 
@@ -171,12 +158,6 @@ class _PendingEmailRow extends StatelessWidget {
   }
 }
 
-/// Shared cancel/recover handler: restore the account, tell the person,
-/// then re-fetch the status so the banner clears.
-///
-/// Errors are shown, never thrown — the banner must not crash the screen
-/// that hosts it. The status is re-fetched on failure too: a 404 means the
-/// request vanished server-side, and a stale card is the worst outcome.
 Future<void> _cancel(
   BuildContext context,
   WidgetRef ref, {

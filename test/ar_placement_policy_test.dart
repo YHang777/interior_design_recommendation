@@ -1,19 +1,3 @@
-// Unit tests for ArPlacementPolicy — the pure plane-hit selection and wall
-// anchor math that decide where furniture may be anchored. No widgets, no
-// platform channels: every case is a hit list the way ARCore would hand it
-// to the viewer, plus the live plane telemetry the session streams.
-//
-// Regressions these encode:
-//  * a sofa was placed on a refrigerator because the old policy took the
-//    FIRST (closest) horizontal plane of any size;
-//  * a FIRST tap on a dining table both placed furniture on the table AND
-//    seeded the floor estimate at table height — the floor now comes from
-//    continuous telemetry, not the tap, so a table ~0.5 m up is rejected
-//    even when it is the only plane the user has tapped;
-//  * wall panels rendered edge-on ("popping out" of the wall) because the
-//    anchor yaw read the plane's +Z as the normal — ARCore vertical planes
-//    carry the normal on the pose's local +Y.
-
 import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
@@ -23,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/placement_policy.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-/// A horizontal plane at world height [y], polygon [x] × [z] meters.
 ARHitTestResult horizontalPlane({
   required double x,
   required double y,
@@ -42,9 +25,6 @@ ARHitTestResult horizontalPlane({
   );
 }
 
-/// A vertical (wall) plane whose surface normal is derived from [rotation]'s
-/// Y-axis (column 1) — the way ARCore reports wall hits. Defaults to a wall
-/// facing −X (rotationZ(π/2) → column 1 = (−1, 0, 0)).
 ARHitTestResult verticalPlane({
   required double x,
   double y = 1.0,
@@ -66,7 +46,6 @@ ARHitTestResult verticalPlane({
   );
 }
 
-/// A feature-point hit (not a plane) at [y].
 ARHitTestResult featurePoint({required double y}) {
   return ARHitTestResult(
     ARHitTestResultType.point,
@@ -75,7 +54,6 @@ ARHitTestResult featurePoint({required double y}) {
   );
 }
 
-/// A TRACKING plane from the live telemetry stream.
 ARPlaneInfo planeInfo({
   required int type,
   required double cy,
@@ -97,9 +75,6 @@ ARPlaneInfo planeInfo({
 void main() {
   group('ArPlacementPolicy.liveFloorYFromPlanes (Bug 2: live floor)', () {
     test('table-top-only plane list → NO live floor', () {
-      // Only a ~0.9 × 0.55 side table is in view: it fails the both-axes
-      // extent gate, so there is no trustworthy floor yet — the caller must
-      // refuse placement and prompt a scan, never guess a height.
       final planes = [
         planeInfo(type: 1, cy: 0.55, ex: 0.9, ez: 0.55),
       ];
@@ -114,8 +89,6 @@ void main() {
     });
 
     test('floor + table → the FLOOR height wins (lowest qualifying plane)', () {
-      // A real 4×4 floor at y=0 plus a 1.2×0.8 dining table at y=0.75; both
-      // clear the extent gate, so the LOWEST is taken as the live floor.
       final planes = [
         planeInfo(type: 1, cy: 0.75, ex: 1.2, ez: 0.8),
         planeInfo(type: 1, cy: 0.0, ex: 4.0, ez: 4.0),
@@ -172,9 +145,6 @@ void main() {
 
     test('first-tap-on-table with a KNOWN live floor → REJECTED (0.5 m up)',
         () {
-      // The exact confirmed bug: the user's FIRST tap is a 1.2 × 0.8 dining
-      // table at y = 0.5. It clears the extent gate, but the live floor (from
-      // telemetry) is at 0 — so the table is 0.5 m above it and is refused.
       final table = horizontalPlane(
           x: 0, y: 0.5, z: 1.5, extentX: 1.2, extentZ: 0.8, distance: 1.5);
       final chosen = ArPlacementPolicy.chooseFloorHit([table], liveFloorY: 0.0);
@@ -183,9 +153,6 @@ void main() {
     });
 
     test('floor + table in one hit list → the FLOOR wins', () {
-      // Closest-first ordering: the table is hit first; the real floor is
-      // behind it. The floor is within tolerance of liveFloorY, the table
-      // is not.
       final table = horizontalPlane(
           x: 0, y: 0.75, z: 1.5, extentX: 1.2, extentZ: 0.8, distance: 1.5);
       final floor = horizontalPlane(
@@ -197,8 +164,6 @@ void main() {
     });
 
     test('prefers the lowest world-Y among valid candidates', () {
-      // Both within tolerance of the live floor (a slightly-tilted plane vs
-      // the floor); the lower one wins.
       final raised = horizontalPlane(
           x: 0, y: 0.15, z: 1.5, extentX: 1.6, extentZ: 0.9, distance: 1.5);
       final floor = horizontalPlane(
@@ -219,7 +184,6 @@ void main() {
     });
 
     test('accepts a candidate within tolerance of the live floor', () {
-      // ± a few cm of plane noise around the live floor is fine.
       final floor = horizontalPlane(
           x: 0, y: 0.05, z: 2.0, extentX: 3.0, extentZ: 3.0);
       final chosen =
@@ -228,12 +192,10 @@ void main() {
     });
 
     test('honors a custom maxAboveLiveFloorM tolerance', () {
-      // A 0.4 m-raised plane is rejected at the default 0.25 m tolerance…
       final raised = horizontalPlane(
           x: 0, y: 0.4, z: 2.0, extentX: 3.0, extentZ: 3.0);
       expect(ArPlacementPolicy.chooseFloorHit([raised], liveFloorY: 0.0),
           isNull);
-      // …but accepted when the caller widens the tolerance.
       expect(
         ArPlacementPolicy.chooseFloorHit([raised],
             liveFloorY: 0.0, maxAboveLiveFloorM: 0.5),
@@ -264,8 +226,6 @@ void main() {
 
   group('ArPlacementPolicy.chooseWallHit (Bug 2: strengthened)', () {
     test('picks the LARGEST qualifying wall (not the closest)', () {
-      // A small wall (1.0 × 1.0) is closest; a big wall (3.0 × 2.5) is
-      // farther. The strengthened policy prefers the largest.
       final small = verticalPlane(
           x: 0, z: 1.5, extentX: 1.0, extentZ: 1.0, distance: 1.5);
       final large = verticalPlane(
@@ -288,15 +248,12 @@ void main() {
     });
 
     test('rejects a wall below the 0.8 m both-axes gate', () {
-      // 1.2 × 0.6 (a fridge side): one axis clears, the other does not.
       final sliver =
           verticalPlane(x: 0, z: 2.0, extentX: 1.2, extentZ: 0.6);
       expect(ArPlacementPolicy.chooseWallHit([sliver]), isNull);
     });
 
     test('rejects a tilted normal (|y| > 0.25)', () {
-      // rotationX(60°) → column 1 = (0, 0.5, 0.866): normalY = 0.5, far too
-      // steep for an upright wall — a misdetection, so it is refused.
       final tilted = verticalPlane(
         x: 0,
         z: 2.0,
@@ -308,8 +265,6 @@ void main() {
     });
 
     test('accepts a level normal (|y| ≤ 0.25)', () {
-      // rotationZ(90°) → column 1 = (−1, 0, 0): a perfectly level wall
-      // normal pointing out along −X.
       final wall = verticalPlane(
           x: 0, z: 2.0, extentX: 2.0, extentZ: 2.0);
       expect(ArPlacementPolicy.chooseWallHit([wall]), same(wall));
@@ -328,16 +283,12 @@ void main() {
   });
 
   group('ArPlacementPolicy.wallAnchorTransform (Bug 1: orientation)', () {
-    /// Extracts a column's xyz as a Vector3 for orientation assertions.
     Vector3 axis(Matrix4 m, int col) {
       final c = m.getColumn(col);
       return Vector3(c.x, c.y, c.z);
     }
 
     test('wall normal (−1, 0, 0): model +Z points out, +Y stays up', () {
-      // A wall facing −X. rotationZ(90°) → column 1 (the ARCore normal) is
-      // (−1, 0, 0). The model's pattern face (+Z) must end up along that
-      // normal so the panel faces INTO the room, not edge-on.
       final hit = verticalPlane(
         x: 1.0,
         y: 1.5,
@@ -358,8 +309,6 @@ void main() {
       expect(modelY.y, closeTo(1, 1e-6));
       expect(modelY.z, closeTo(0, 1e-6));
 
-      // Offset OUT along the normal by half the panel depth (0.025 m), so
-      // the back face is flush instead of half-buried.
       final t = m.getTranslation();
       expect(t.x, closeTo(1.0 - 0.025, 1e-6));
       expect(t.y, closeTo(1.5, 1e-6));
@@ -367,7 +316,6 @@ void main() {
     });
 
     test('wall normal (0, 0, 1): model +Z points out, +Y stays up', () {
-      // A wall facing +Z. rotationX(90°) → column 1 = (0, 0, 1).
       final hit = verticalPlane(
         x: 0.0,
         y: 1.0,
@@ -386,7 +334,6 @@ void main() {
       final modelY = axis(m, 1);
       expect(modelY.y, closeTo(1, 1e-6), reason: 'model +Y stays world-up');
 
-      // Offset OUT along +Z by half the panel depth.
       final t = m.getTranslation();
       expect(t.z, closeTo(3.0 + 0.025, 1e-6));
       expect(t.x, closeTo(0.0, 1e-6));
@@ -394,11 +341,9 @@ void main() {
     });
 
     test('wallAnchorYaw maps a normal to the yaw that turns +Z onto it', () {
-      // For (−1, 0, 0) the yaw is −90°, and rotateY(−90°) sends +Z → (−1,0,0).
       final yaw = ArPlacementPolicy.wallAnchorYaw(Vector3(-1, 0, 0));
       expect(yaw, closeTo(-math.pi / 2, 1e-9));
 
-      // For (0, 0, 1) the yaw is 0 — no turn needed.
       expect(ArPlacementPolicy.wallAnchorYaw(Vector3(0, 0, 1)), closeTo(0, 1e-9));
     });
   });

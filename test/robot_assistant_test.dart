@@ -1,16 +1,3 @@
-// Floating robot assistant: drag repositions without opening the chat or
-// hitting the network, tap opens the compact panel, chips fill the input
-// without auto-sending, requests carry the live product context, failures
-// land as a friendly bubble (never raw SDK text), the detail framing
-// applies for a focus product, and the transcript survives reopening the
-// sheet.
-//
-// Pumped at phone width (393×852). The robot's idle loop repeats forever,
-// so the harness reports disableAnimations via a MediaQuery over the home
-// content — RobotAvatar honors MediaQuery.disableAnimationsOf and stays
-// static, otherwise pumpAndSettle would never settle. The datasource talks
-// to the real ChatDatasource over a MockClient — no network is touched.
-
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -46,9 +33,6 @@ MockClient _client(_ChatCapture capture, {int status = 200}) =>
       );
     });
 
-/// A live listing. Empty image on purpose: a network URL would pull
-/// CachedNetworkImage's cache manager (path_provider), which a widget test
-/// cannot host. Stock 4 is low stock — the facts line leads with it.
 Product _product() => Product.fromJson({
       'id': 'sofa-1',
       'name': 'Nordic Sofa',
@@ -84,8 +68,6 @@ Future<void> _pumpHost(
       child: MaterialApp(
         home: Builder(
           builder: (context) => MediaQuery(
-            // Freezes the robot's idle bob/blink — a repeating ticker
-            // would make every pumpAndSettle below hang forever.
             data: MediaQuery.of(context).copyWith(disableAnimations: true),
             child: Scaffold(
               body: RobotAssistantHost(
@@ -125,8 +107,6 @@ Future<void> _send(WidgetTester tester, String text) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  // The panel watches chat history for the buyer's saved style/room; an
-  // empty store keeps every existing test's request free of style/room.
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -136,8 +116,6 @@ void main() {
     final capture = _ChatCapture();
     await _pumpHost(tester, capture);
 
-    // Left and down: the robot starts parked at the right edge, so a
-    // rightward drag would clamp against its own starting column.
     final start = tester.getCenter(_robot());
     final gesture = await tester.startGesture(start);
     await gesture.moveBy(const Offset(-80, 50));
@@ -172,9 +150,6 @@ void main() {
     final capture = _ChatCapture();
     await _pumpHost(tester, capture);
 
-    // Each move is sized so that a SINGLE applied update already passes
-    // the edge — the gesture arena's accepting event dispatches only a
-    // pan start, so exactly one of the two moves carries a delta.
     var gesture = await tester.startGesture(tester.getCenter(_robot()));
     await gesture.moveBy(const Offset(-800, -800));
     await tester.pump();
@@ -187,7 +162,6 @@ void main() {
     expect(topLeft.dx, inInclusiveRange(43, 45));
     expect(topLeft.dy, inInclusiveRange(43, 45));
 
-    // And again past the bottom-right corner.
     gesture = await tester.startGesture(topLeft);
     await gesture.moveBy(const Offset(800, 800));
     await tester.pump();
@@ -206,11 +180,6 @@ void main() {
     await _pumpHost(tester, capture);
     await _openChat(tester);
 
-    // A draft in the box is replaced by the chip's phrase, not appended
-    // to — and nothing goes out over the wire. The fit chip leads the
-    // row, so it's the one guaranteed on-screen at phone width (test-font
-    // chip metrics push the rest past the edge; the fill handler is the
-    // same for every chip).
     await tester.enterText(
         find.byKey(const ValueKey('robot-chat-input')), 'half-typed draft');
     await tester.pump();
@@ -244,7 +213,6 @@ void main() {
     final products = (body['products'] as List).cast<Map<String, dynamic>>();
     expect(products, hasLength(1));
     expect(products.single['id'], 'sofa-1');
-    // The mapper's facts line leads the description the proxy sees.
     expect(
         products.single['description'], startsWith('Only 4 left. Free delivery.'));
   });
@@ -274,8 +242,6 @@ void main() {
     expect(find.text('Nordic Sofa'), findsOneWidget);
     expect(find.text('RM 1,299'), findsOneWidget);
     expect(find.text('Ask me anything about this product.'), findsOneWidget);
-    // The fit chip leads, then the product chips (the row lazily builds
-    // the rest — test-font metrics are ~2× production widths).
     expect(find.widgetWithText(ChoiceChip, kFitHomeQuestion), findsOneWidget);
     expect(find.widgetWithText(ChoiceChip, 'Is it in stock?'), findsOneWidget);
   });
@@ -300,9 +266,6 @@ void main() {
 
   testWidgets('the buyer saved household design rides along with the request',
       (tester) async {
-    // A saved AI-tab session — the on-device signal for how their home is
-    // styled. The proxy folds style/room into the system prompt, which is
-    // what lets fit questions be judged against the real household.
     SharedPreferences.setMockInitialValues({
       'ai_chat_history': jsonEncode([
         {

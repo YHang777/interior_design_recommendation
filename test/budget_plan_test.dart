@@ -1,5 +1,3 @@
-// Tests for the persisted BudgetPlan model (users/{uid}.budgetPlan).
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_plan.dart';
 
@@ -24,7 +22,6 @@ void main() {
       expect(plan.budgetRm, 0);
       expect(plan.room, defaultBudgetRoom);
       expect(plan.ecoFriendly, isFalse);
-      // Unknown timestamp reads as epoch, never "now".
       expect(plan.updatedAt, DateTime.fromMillisecondsSinceEpoch(0));
     });
 
@@ -52,10 +49,6 @@ void main() {
     });
 
     test('toJson emits exactly the schema watchBudget parses back', () {
-      // BudgetRepository.watchBudget only accepts the field when it comes
-      // back as a map and BudgetPlan.fromJson understands every key — so
-      // the written schema is a contract: adding/removing/renaming a key
-      // here silently breaks persistence round-trips in production.
       final plan = BudgetPlan(
         budgetRm: 4300,
         room: 'Living Room',
@@ -80,9 +73,7 @@ void main() {
     });
 
     test('updatedAt is written as UTC ISO-8601 with a Z suffix', () {
-      // A local-time DateTime would serialise without the timezone
-      // context and drift the instant; toUtc() must be applied on write.
-      final local = DateTime(2026, 9, 28, 14, 30); // local wall time
+      final local = DateTime(2026, 9, 28, 14, 30);
       final plan = BudgetPlan(
         budgetRm: 100,
         room: defaultBudgetRoom,
@@ -91,7 +82,6 @@ void main() {
       );
       final written = plan.toJson()['updatedAt'] as String;
       expect(written, endsWith('Z'));
-      // Round-trip keeps the same instant regardless of the host zone.
       expect(
         BudgetPlan.fromJson(plan.toJson()).updatedAt.toUtc(),
         local.toUtc(),
@@ -107,8 +97,8 @@ void main() {
         updatedAt: DateTime.utc(2026, 1, 1),
       );
       final restored = BudgetPlan.fromJson(plan.toJson());
-      expect(restored.budgetRm, 0); // never re-seeded to 5000
-      expect(restored.ecoFriendly, isFalse); // never flipped to true
+      expect(restored.budgetRm, 0);
+      expect(restored.ecoFriendly, isFalse);
       expect(restored.room, 'Bathroom');
     });
   });

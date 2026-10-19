@@ -9,7 +9,6 @@ export 'firebase_admin_client.dart';
 export 'verification_mailer.dart';
 export 'verification_token.dart';
 
-/// Bundles the email-verification collaborators (constructed once at boot).
 class VerificationService {
   VerificationService({
     required this.tokenSecret,
@@ -21,19 +20,12 @@ class VerificationService {
   final VerificationMailer mailer;
   final FirebaseAdminClient admin;
 
-  /// Enough config to SEND verification emails (HMAC secret + Brevo).
   bool get isConfigured =>
       tokenSecret.trim().isNotEmpty && mailer.isConfigured;
 
-  /// Whether the Firebase admin half (service-account file) is present.
   bool get adminConfigured => admin.isConfigured;
 }
 
-/// POST /verify-email/send  {email, uid} → {sent: true}
-///
-/// NOTE: intentionally unauthenticated (demo-grade — it is effectively an
-/// open relay against the Brevo quota). The verification token itself is
-/// unforgeable without the server secret, so the confirm step is safe.
 Future<void> handleVerifySend(
     HttpRequest req, VerificationService service) async {
   if (!service.isConfigured) {
@@ -58,12 +50,7 @@ Future<void> handleVerifySend(
   final token = createVerificationToken(
       uid: uid, email: email, secret: service.tokenSecret);
 
-  // Derive the public base URL from the request itself so the email link
-  // always points at the server that actually handled the request, even when
-  // PUBLIC_BASE_URL is missing or stale on the host (Render, etc.).
   final host = req.headers.value('host');
-  // Behind a reverse proxy (Render's load balancer), the original scheme is
-  // forwarded in X-Forwarded-Proto; fall back to https for production hosts.
   final forwardedProto = req.headers.value('x-forwarded-proto');
   final scheme = (forwardedProto != null && forwardedProto.isNotEmpty)
       ? forwardedProto
@@ -88,11 +75,6 @@ Future<void> handleVerifySend(
   await _json(req, {'sent': true});
 }
 
-/// GET /verify-email/confirm?token=… → styled HTML page ("our website").
-///
-/// The token is stateless: a valid link is idempotent and can be retried;
-/// an invalid/expired one never reaches Firebase. Never interpolate server
-/// exception text into the HTML — only into stderr.
 Future<void> handleVerifyConfirm(
     HttpRequest req, VerificationService service) async {
   final token = req.uri.queryParameters['token'];

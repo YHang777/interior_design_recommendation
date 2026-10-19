@@ -1,10 +1,3 @@
-// Tests for the sales report PDF renderer — the document a supplier shares
-// or prints from the Sales Report screen.
-//
-// `SalesReportPdf.bytes` is pure (no IO, no plugins), so the document build
-// can be exercised headless. The share/print actions wrap the `printing`
-// plugin and are not covered here.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/services/invoice/sales_report_pdf.dart';
 
@@ -46,7 +39,6 @@ SalesReportData _data({
   );
 }
 
-/// PDF files start with the magic `%PDF-` and are not empty stubs.
 void expectValidPdf(List<int> bytes, {int minBytes = 500}) {
   expect(bytes.length, greaterThan(minBytes),
       reason: 'PDF should be a real document, not an empty stub');

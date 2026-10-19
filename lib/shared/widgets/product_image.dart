@@ -5,13 +5,6 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../models/product.dart';
 
-/// Renders a product image from a network URL (http/https), an absolute
-/// local file path (starting with `/`, e.g. an image_picker result shown in
-/// the seller's live preview) or a bundled asset. Network images load via
-/// [CachedNetworkImage] with a neutral placeholder and a grey error box;
-/// the other sources degrade gracefully too.
-///
-/// Pass either [product] (primary image + gallery-aware) or a raw [imageUrl].
 class ProductImage extends StatelessWidget {
   const ProductImage({
     super.key,
@@ -39,7 +32,6 @@ class ProductImage extends StatelessWidget {
 
   bool get _isNetwork => _url.startsWith('http');
 
-  /// Absolute local file path (image_picker results) vs a bundled asset.
   bool get _isLocalFile => _url.startsWith('/');
 
   @override
@@ -74,7 +66,6 @@ class ProductImage extends StatelessWidget {
     );
   }
 
-  /// Light shimmer-like placeholder shown while a network image streams in.
   Widget _placeholderBox() {
     return Container(
       width: width,

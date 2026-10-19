@@ -6,16 +6,13 @@ import 'package:printing/printing.dart';
 
 import '../../core/utils/formatters.dart';
 
-/// One calendar month's revenue in the report's monthly series.
 class SalesReportMonth {
   const SalesReportMonth({required this.month, required this.revenue});
 
-  /// First day of the calendar month.
   final DateTime month;
   final int revenue;
 }
 
-/// One row of the top-products table.
 class SalesReportProduct {
   const SalesReportProduct({
     required this.name,
@@ -28,11 +25,6 @@ class SalesReportProduct {
   final int revenue;
 }
 
-/// Everything the sales report PDF needs — a small self-contained snapshot
-/// built by the screen, so [SalesReportPdf.bytes] stays pure (no Riverpod,
-/// no IO) and unit-testable headless.
-///
-/// Money is whole-ringgit RM; rates are 0–1 doubles (`null` prints as '—').
 class SalesReportData {
   const SalesReportData({
     required this.sellerName,
@@ -53,16 +45,12 @@ class SalesReportData {
   final String sellerName;
   final DateTime generatedAt;
 
-  /// Items + shipping; cancelled excluded.
   final int totalSales;
 
-  /// Sold orders (cancelled excluded).
   final int totalOrders;
 
-  /// ratingCount-weighted across listings — null when unrated.
   final double? averageRating;
 
-  /// Delivered ÷ all orders involving the supplier — null when none.
   final double? conversionRate;
 
   final List<SalesReportMonth> monthly;
@@ -75,14 +63,9 @@ class SalesReportData {
   final double? repeatPurchaseRate;
 }
 
-/// Renders a supplier sales report as a PDF and hands it to the OS.
-///
-/// [bytes] is pure document generation; [share] and [print] wrap the
-/// `printing` plugin (same triad as [InvoicePdf]).
 class SalesReportPdf {
   const SalesReportPdf._();
 
-  /// Renders [data] as PDF bytes. Pure — no IO, no plugins.
   static Future<Uint8List> bytes(SalesReportData data) async {
     final doc = pw.Document();
     doc.addPage(
@@ -102,7 +85,6 @@ class SalesReportPdf {
     return doc.save();
   }
 
-  /// Opens the system share sheet as `sales-report-<yyyy-mm-dd>.pdf`.
   static Future<void> share(SalesReportData data) async {
     await Printing.sharePdf(
       bytes: await bytes(data),
@@ -110,7 +92,6 @@ class SalesReportPdf {
     );
   }
 
-  /// Opens the OS print dialog for [data].
   static Future<void> print(SalesReportData data) async {
     await Printing.layoutPdf(
       name: 'Sales Report',
@@ -127,15 +108,10 @@ class SalesReportPdf {
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
 
-/// 0–1 rate as a whole-percent string; null prints a dash so an
-/// unmeasurable figure is never shown as 0%. Plain '-' rather than '—':
-/// the PDF's built-in Helvetica cannot draw U+2014 (it drops the glyph).
 String _percent(double? rate) => rate == null ? '-' : '${(rate * 100).round()}%';
 
 String _rating(double? rating) => rating == null ? '-' : rating.toStringAsFixed(1);
 
-// Column flexes per table: labels/products take the room, numbers stay wide
-// enough for "RM 12,345" without wrapping.
 const List<int> _flex2 = [3, 1];
 const List<int> _flex3 = [4, 1, 2];
 
@@ -333,8 +309,6 @@ pw.Widget _insightsTable(SalesReportData data) {
   );
 }
 
-/// Definitions printed with every report so the numbers can't be
-/// misread as an ad/click funnel or as including refunds.
 pw.Widget _footerNote() {
   return pw.Text(
     'Conversion rate = delivered ÷ all orders. Customer metrics derived '

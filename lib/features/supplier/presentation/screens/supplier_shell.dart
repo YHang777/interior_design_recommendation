@@ -3,8 +3,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../shared/widgets/floating_nav_bar.dart';
 
-/// Supplier shell with a 5-tab floating pill nav bar.
-/// Only accessible to users with role = 'supplier' (admin-created accounts).
 class SupplierShell extends StatelessWidget {
   const SupplierShell({super.key, required this.navigationShell});
 

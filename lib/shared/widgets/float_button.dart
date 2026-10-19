@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Round circular overlay button used for floating controls (back / AR /
-/// wishlist). Promoted from `product_detail_screen.dart`'s private `_FloatButton`.
 class FloatButton extends StatelessWidget {
   const FloatButton({
     super.key,
@@ -53,10 +51,6 @@ class FloatButton extends StatelessWidget {
   }
 }
 
-/// iOS-style floating back control for header-less pushed screens.
-///
-/// Defaults to a solid white circle with a dark arrow so it stays readable over
-/// light page content. Dark/photo pages pass [background]/[iconColor] to match.
 class FloatingBackButton extends StatelessWidget {
   const FloatingBackButton({
     super.key,
@@ -66,8 +60,6 @@ class FloatingBackButton extends StatelessWidget {
     this.tooltip = 'Back',
   });
 
-  /// Defaults to `context.pop()`. Pass a custom callback when the screen can be
-  /// deep-linked without pop history.
   final VoidCallback? onTap;
   final Color? background;
   final Color? iconColor;

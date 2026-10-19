@@ -6,14 +6,6 @@ import 'package:http/http.dart' as http;
 import '../../../../../config/app_config.dart';
 import '../../../../../models/room_design.dart';
 
-/// Supabase PostgREST-backed datasource for room_designs.
-///
-/// Uses plain HTTP (no Supabase SDK) — same pattern as [SupabaseMediaStore].
-/// Requires a `room_designs` table in Supabase with columns matching
-/// [RoomDesign.toJson()].
-///
-/// Real-time: polls every [pollInterval] to simulate Firestore's snapshots().
-/// For production, consider Supabase Realtime or WebSockets.
 class SupabaseRoomDesignDatasource {
   SupabaseRoomDesignDatasource({http.Client? client})
       : _client = client ?? http.Client();
@@ -66,7 +58,6 @@ class SupabaseRoomDesignDatasource {
     await _delete(designId);
   }
 
-  /// Fetches all designs for a user (one-shot).
   Future<List<RoomDesign>> getDesigns(String userId) async {
     final url = Uri.parse(
         '$_baseUrl/rest/v1/$_table?user_id=eq.$userId&order=updated_at.desc');
@@ -81,9 +72,7 @@ class SupabaseRoomDesignDatasource {
     }).toList();
   }
 
-  /// Watches a user's designs via polling (simulates Firestore snapshots).
   Stream<List<RoomDesign>> watchDesigns(String userId) async* {
-    // Emit immediately, then poll.
     yield await getDesigns(userId);
     await for (final _
         in Stream.periodic(pollInterval).asyncExpand((_) async* {
@@ -93,7 +82,6 @@ class SupabaseRoomDesignDatasource {
     }
   }
 
-  /// Fetches a single design by id.
   Future<RoomDesign?> getDesign(String designId) async {
     final url = Uri.parse('$_baseUrl/rest/v1/$_table?id=eq.$designId&limit=1');
     final resp = await _client
@@ -167,7 +155,6 @@ class SupabaseRoomDesignDatasource {
     }
   }
 
-  /// Converts a Supabase row (snake_case) to a RoomDesign JSON map (camelCase).
   Map<String, dynamic> _fromRow(Map<String, dynamic> row) {
     return {
       'id': row['id']?.toString() ?? '',

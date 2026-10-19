@@ -1,34 +1,16 @@
-// Finish catalog for the AR viewer's "Room" mode: every floor / wall finish
-// type the user can place, with its display labels, short descriptions,
-// selectable colors and floor size options.
-//
-// ALL data lives in the [RoomFinishCatalog] tables below — the Room panel in
-// ar_viewer_screen.dart renders generic rows straight from these maps, so
-// adding a type (or a color to a type's palette) is a pure data edit here.
-//
-// Pure Dart (no Flutter / AR-plugin imports) so the catalog is unit-testable
-// headlessly. The enums themselves ([FloorFinishType], [WallFinishType]) come
-// from glb_generator.dart — the generator that turns these specs into the
-// vertex-colored GLB meshes placed in AR.
-
 import 'glb_generator.dart' show FloorFinishType, WallFinishType;
 
-/// One selectable finish color. [argb] is a fully opaque 0xFFrrggbb int that
-/// is passed straight into the vertex-color palette of the generated GLB.
 class FinishColor {
   const FinishColor(this.name, this.argb);
 
-  /// Display name ("Oak", "Charcoal", …).
   final String name;
 
-  /// Fully opaque ARGB color value (0xFF prefix).
   final int argb;
 
   @override
   String toString() => '$name (#${argb.toRadixString(16).padLeft(8, '0')})';
 }
 
-/// Display + data bundle for one [FloorFinishType] catalog entry.
 class FloorTypeSpec {
   const FloorTypeSpec({
     required this.label,
@@ -36,17 +18,13 @@ class FloorTypeSpec {
     required this.colors,
   });
 
-  /// Short chip label shown in the Room panel ("Wood", "Cement", …).
   final String label;
 
-  /// One-line description of the pattern shown in the panel.
   final String description;
 
-  /// Selectable colors, first entry being that type's default color.
   final List<FinishColor> colors;
 }
 
-/// Display + data bundle for one [WallFinishType] catalog entry.
 class WallTypeSpec {
   const WallTypeSpec({
     required this.label,
@@ -60,7 +38,6 @@ class WallTypeSpec {
 }
 
 // ─── Shared color instances ──────────────────────────────────────────────────
-// One literal per tone so a value is never duplicated across palettes.
 
 const FinishColor _oak = FinishColor('Oak', 0xFFB08D6B);
 const FinishColor _walnut = FinishColor('Walnut', 0xFF6B4A32);
@@ -93,11 +70,6 @@ const FinishColor _orangeBrick = FinishColor('Orange Brick', 0xFFBC6A41);
 const FinishColor _whitePainted =
     FinishColor('White Painted', 0xFFE0D8CD);
 
-/// The single source of truth for AR room finishes.
-///
-/// Map keys are iterated in declaration order by the Room panel to build the
-/// type chips, so keep each type's entry in the order it should appear in the
-/// UI (wood → cement → ceramic → parquet, paint → wood → brick).
 class RoomFinishCatalog {
   RoomFinishCatalog._();
 
@@ -106,19 +78,12 @@ class RoomFinishCatalog {
   static const FloorFinishType defaultFloorType = FloorFinishType.woodPlanks;
   static const WallFinishType defaultWallType = WallFinishType.paint;
 
-  /// Default floor color = the first color of the default floor type (Oak).
   static const int defaultFloorColorArgb = 0xFFB08D6B;
   static const int defaultWallColorArgb = 0xFFF5F3EE;
 
-  /// Floor side-length choices offered in the Room panel (meters).
-  /// Includes a sentinel value (-1) for "Custom" which opens a text input.
   static const List<double> floorSizeOptionsM = [2.0, 3.0, 4.0, -1.0];
   static const double defaultFloorSizeM = 3.0;
 
-  /// Generated wall panels are [wallWidthM] wide × [wallHeightM] high — the
-  /// max extent (and therefore the plugin scale-to-unit-cube) is the height.
-  /// generateWallGlb() reads these (its signature defaults reference them),
-  /// so the dimension constants live HERE only.
   static const double wallWidthM = 2.4;
   static const double wallHeightM = 2.7;
 
@@ -167,11 +132,9 @@ class RoomFinishCatalog {
 
   // ─── Helpers (UI reads the catalog through these) ──────────────────────────
 
-  /// Palette of selectable colors for a floor type (first = default).
   static List<FinishColor> colorsForFloor(FloorFinishType type) =>
       floorTypes[type]!.colors;
 
-  /// Palette of selectable colors for a wall type (first = default).
   static List<FinishColor> colorsForWall(WallFinishType type) =>
       wallTypes[type]!.colors;
 
@@ -185,15 +148,12 @@ class RoomFinishCatalog {
   static String wallDescription(WallFinishType type) =>
       wallTypes[type]!.description;
 
-  /// Default color (ARGB) of a floor type — always a member of its palette.
   static int defaultArgbForFloor(FloorFinishType type) =>
       colorsForFloor(type).first.argb;
 
   static int defaultArgbForWall(WallFinishType type) =>
       colorsForWall(type).first.argb;
 
-  /// Display name of [argb] inside [palette]; 'Custom' when the int does not
-  /// come from the palette (defensive — the panel only offers palette colors).
   static String colorName(int argb, List<FinishColor> palette) {
     for (final c in palette) {
       if (c.argb == argb) return c.name;
@@ -202,20 +162,6 @@ class RoomFinishCatalog {
   }
 }
 
-/// The full finish selection state of the Room panel: one floor finish and
-/// one wall finish, mirroring the pieces the generator consumes
-/// ([FloorFinish]/[WallFinish] carry the pattern + size for a single file).
-///
-/// Immutable value class: every transition method (selectFloorType / …)
-/// returns a NEW selection, so the panel just swaps its one field inside a
-/// setState and the transitions are unit-testable.
-///
-/// Per-type color memory: the color the seller last picked for each finish
-/// TYPE is kept inside the selection (two small maps threaded through every
-/// transition). Switching floor wood → cement → wood restores the Oak color
-/// the seller had picked before switching away. The maps are state, not
-/// value: they do NOT participate in == / hashCode (two selections with the
-/// same 5 visible fields are interchangeable in the UI).
 class FinishSelection {
   const FinishSelection({
     this.floorType = RoomFinishCatalog.defaultFloorType,
@@ -234,8 +180,6 @@ class FinishSelection {
   final WallFinishType wallType;
   final int wallColorArgb;
 
-  /// Last color chosen per floor type (invisible history used only when the
-  /// seller switches back to a type they already tuned).
   final Map<FloorFinishType, int>? _floorColorsByType;
   final Map<WallFinishType, int>? _wallColorsByType;
 
@@ -247,9 +191,6 @@ class FinishSelection {
     return _wallColorsByType ?? const {};
   }
 
-  /// Selects another floor type, remembering the current color under the
-  /// CURRENT type and restoring the type's remembered (or palette-default)
-  /// color. Returns `this` when nothing changes.
   FinishSelection selectFloorType(FloorFinishType type) {
     if (type == floorType) return this;
     final memory = Map<FloorFinishType, int>.of(_floorMemory)
@@ -265,8 +206,6 @@ class FinishSelection {
     );
   }
 
-  /// Picks the floor color for the CURRENT type. Returns `this` when the
-  /// color is already selected (so callers can skip pointless work).
   FinishSelection selectFloorColor(int colorArgb) {
     if (colorArgb == floorColorArgb) return this;
     final memory = Map<FloorFinishType, int>.of(_floorMemory)
@@ -295,8 +234,6 @@ class FinishSelection {
     );
   }
 
-  /// Selects another wall type (same color-memory semantics as
-  /// [selectFloorType]).
   FinishSelection selectWallType(WallFinishType type) {
     if (type == wallType) return this;
     final memory = Map<WallFinishType, int>.of(_wallMemory)

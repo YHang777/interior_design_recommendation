@@ -1,6 +1,3 @@
-// Verifies the AR furniture library stays consistent with the bundled
-// model files in assets/models/ (tests run from the project root).
-
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -18,19 +15,16 @@ void main() {
             'missing from assets/models/',
       );
     }
-    // The catalog must actually reference bundled models (not be empty).
     expect(files, isNotEmpty);
   });
 
   test('catalog lookups (icon-based) resolve to existing model files', () {
-    // The category lookup (forCategory) went away with the product bundled
-    // catalog — the library now serves only icon-name lookups.
     final items = <ArFurnitureItem>{
       ArFurnitureLibrary.forIconName('sofa'),
       ArFurnitureLibrary.forIconName('bookshelf'),
       ArFurnitureLibrary.forIconName('floor_lamp'),
       ArFurnitureLibrary.forIconName('unknown-thing'),
-      ArFurnitureLibrary.forIconName('plant'), // placeholder model
+      ArFurnitureLibrary.forIconName('plant'),
       ArFurnitureLibrary.forIconName('rug'),
       ...ArFurnitureLibrary.fromIconNames(
           ['sofa', 'armchair', 'coffee_table', 'dining_table', 'bed']),
@@ -45,25 +39,13 @@ void main() {
   });
 
   // ─── Regression guards for the AR plugin's asset-key contract ───
-  //
-  // ArView.kt feeds ArFurnitureItem.uri to Flutter's getLookupKeyForAsset
-  // (NodeType.localGLTF2), which expects the FULL pubspec-relative key,
-  // e.g. 'assets/models/sofa.glb'. A URI missing the leading 'assets/'
-  // resolves to flutter_assets/models/… inside the APK — a path that does
-  // not exist — loadModelInstance returns null, addNode fails, and the
-  // viewer shows "could not load the 3D model". This broke every bundled
-  // model when the GLBs moved from android/app/.../assets to Flutter
-  // assets (commit 5d16aa3), and the old tests missed it because they
-  // only checked that the FILES exist, never the URI.
 
   test('every ArFurnitureItem.uri is the full pubspec asset key on disk',
       () {
     final items = <ArFurnitureItem>{
       ...ArFurnitureLibrary.all,
-      // Fallbacks (unknown/absent icon names).
       ArFurnitureLibrary.forIconName(null),
       ArFurnitureLibrary.forIconName('unknown-thing'),
-      // Lookup-map entries beyond `all`.
       ArFurnitureLibrary.forIconName('plant'),
       ArFurnitureLibrary.forIconName('rug'),
       ArFurnitureLibrary.forIconName('tv_stand'),

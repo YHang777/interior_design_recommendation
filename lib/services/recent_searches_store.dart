@@ -1,11 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Persists the buyer's recent marketplace search terms on-device.
-///
-/// Storage is a single `StringList` under [prefsKey]; terms are kept
-/// most-recent-first and capped at [maxEntries] (10). The store is a dumb
-/// IO service — the in-memory state and record/remove/clear semantics live
-/// in `RecentSearchesNotifier` (marketplace_providers.dart).
 class RecentSearchesStore {
   static const String prefsKey = 'marketplace_recent_searches';
   static const int maxEntries = 10;

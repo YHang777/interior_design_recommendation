@@ -1,10 +1,3 @@
-// Tests for the invoice PDF renderer — the document a supplier prints and
-// tapes to the parcel.
-//
-// `InvoicePdf.bytes` is pure (no IO, no plugins), so the document build can
-// be exercised headless. The share/print actions wrap the `printing` plugin
-// and are not covered here.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/order.dart';
 import 'package:interior_design_recommendation/services/invoice/invoice_pdf.dart';
@@ -62,7 +55,6 @@ OrderInvoice _invoice({
   );
 }
 
-/// PDF files start with the magic `%PDF-` and are not empty stubs.
 void expectValidPdf(List<int> bytes, {int minBytes = 500}) {
   expect(bytes.length, greaterThan(minBytes),
       reason: 'PDF should be a real document, not an empty stub');
@@ -104,10 +96,8 @@ void main() {
     });
 
     test('carries order-level discount/tax without touching the total', () async {
-      // These are reference-only on the invoice. The builder must render them
-      // (when non-zero) and must not fold them into "Total for this shipment".
       final inv = _invoice(orderDiscount: 10, orderTax: 6);
-      expect(inv.total, 215); // 200 + 15, discount/tax excluded
+      expect(inv.total, 215);
 
       final bytes = await InvoicePdf.bytes(inv);
 

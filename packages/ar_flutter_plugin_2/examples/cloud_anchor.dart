@@ -1,12 +1,8 @@
-// Automatic FlutterFlow imports
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'index.dart'; // Imports other custom widgets
+import 'index.dart';
 import 'package:flutter/material.dart';
-// Begin custom widget code
-// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-//AR Flutter plugin
 import 'package:ar_flutter_plugin_2/ar_flutter_plugin.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
@@ -19,7 +15,6 @@ import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 
-//Other custom imports
 import 'dart:convert';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -42,7 +37,6 @@ class CloudAnchor extends StatefulWidget {
 }
 
 class _CloudAnchorState extends State<CloudAnchor> {
-  // Firebase stuff
   bool _initialized = false;
   bool _error = false;
   FirebaseManager firebaseManager = FirebaseManager();
@@ -78,7 +72,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
 
   @override
   Widget build(BuildContext context) {
-    // Show error message if initialization failed
     if (_error) {
       return Scaffold(
           appBar: AppBar(
@@ -95,7 +88,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
           ))));
     }
 
-    // Show a loader until FlutterFire is initialized
     if (!_initialized) {
       return Scaffold(
           appBar: AppBar(
@@ -278,7 +270,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
       bool? didAddAnchor = await this.arAnchorManager!.addAnchor(newAnchor);
       if (didAddAnchor ?? false) {
         this.anchors.add(newAnchor);
-        // Add note to anchor
         var newNode = ARNode(
             type: NodeType.webGLB,
             uri:
@@ -318,10 +309,8 @@ class _CloudAnchorState extends State<CloudAnchor> {
   }
 
   onAnchorUploaded(ARAnchor anchor) {
-    // Upload anchor information to firebase
     firebaseManager.uploadAnchor(anchor,
         currentLocation: this.arLocationManager!.currentLocation);
-    // Upload child nodes to firebase
     if (anchor is ARPlaneAnchor) {
       anchor.childNodes.forEach((nodeName) => firebaseManager.uploadObject(
           nodes.firstWhere((element) => element.name == nodeName)));
@@ -343,7 +332,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
     anchorsInDownloadProgress.remove(anchor.cloudanchorid);
     this.anchors.add(anchor);
 
-    // Download nodes attached to this anchor
     firebaseManager.getObjectsFromAnchor(anchor, (snapshot) {
       snapshot.docs.forEach((objectDoc) {
         ARNode object =
@@ -377,7 +365,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
 
   void showAlertDialog(BuildContext context, String title, String content,
       String buttonText, Function buttonFunction, String cancelButtonText) {
-    // set up the buttons
     Widget cancelButton = ElevatedButton(
       child: Text(cancelButtonText),
       onPressed: () {
@@ -392,7 +379,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
       },
     );
 
-    // set up the AlertDialog
     AlertDialog alert = AlertDialog(
       title: Text(title),
       content: Text(content),
@@ -402,7 +388,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
       ],
     );
 
-    // show the dialog
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -412,7 +397,6 @@ class _CloudAnchorState extends State<CloudAnchor> {
   }
 }
 
-// Class for managing interaction with Firebase (in your own app, this can be put in a separate file to keep everything clean and tidy)
 typedef FirebaseListener = void Function(QuerySnapshot snapshot);
 typedef FirebaseDocumentStreamListener = void Function(
     DocumentSnapshot snapshot);
@@ -423,10 +407,8 @@ class FirebaseManager {
   CollectionReference? anchorCollection;
   CollectionReference? objectCollection;
 
-  // Firebase initialization function
   Future<bool> initializeFlutterFire() async {
     try {
-      // Wait for Firebase to initialize
       await Firebase.initializeApp();
       geo = GeoFlutterFire();
       firestore = FirebaseFirestore.instance;
@@ -445,7 +427,6 @@ class FirebaseManager {
     var expirationTime = DateTime.now().millisecondsSinceEpoch / 1000 +
         serializedAnchor["ttl"] * 24 * 60 * 60;
     serializedAnchor["expirationTime"] = expirationTime;
-    // Add location
     if (currentLocation != null) {
       GeoFirePoint myLocation = geo!.point(
           latitude: currentLocation.latitude,
@@ -515,13 +496,11 @@ class FirebaseManager {
             isLessThan: DateTime.now().millisecondsSinceEpoch / 1000)
         .get()
         .then((anchorSnapshot) => anchorSnapshot.docs.forEach((anchorDoc) {
-              // Delete all objects attached to the expired anchor
               objectCollection!
                   .where("name", arrayContainsAny: anchorDoc.get("childNodes"))
                   .get()
                   .then((objectSnapshot) => objectSnapshot.docs.forEach(
                       (objectDoc) => batch.delete(objectDoc.reference)));
-              // Delete the expired anchor
               batch.delete(anchorDoc.reference);
             }));
     batch.commit();

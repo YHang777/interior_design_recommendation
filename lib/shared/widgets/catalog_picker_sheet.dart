@@ -4,14 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import 'filter_chip_bar.dart';
 
-/// Opens a bottom-sheet catalogue picker: optional category chips over a
-/// card grid, themed like the rest of the app (24px top radius + drag handle
-/// come from `bottomSheetTheme`).
-///
-/// Returns the picked item, or null when the sheet is dismissed. [T] is
-/// opaque to the sheet — callers supply the labels and the tile, so the same
-/// picker serves the scanner's furniture catalog and the AR viewer's model
-/// slots without either one leaking its own model in here.
 Future<T?> showCatalogPickerSheet<T>({
   required BuildContext context,
   required String title,
@@ -57,7 +49,6 @@ class _CatalogPickerSheet<T> extends StatefulWidget {
 }
 
 class _CatalogPickerSheetState<T> extends State<_CatalogPickerSheet<T>> {
-  /// Null means "All" — every item, in the caller's order.
   String? _category;
 
   static const String _allLabel = 'All';
@@ -85,8 +76,6 @@ class _CatalogPickerSheetState<T> extends State<_CatalogPickerSheet<T>> {
   Widget build(BuildContext context) {
     final categories = _categories;
     final visible = _visible;
-    // Tall enough for a 3-column grid of a dozen cards, but never taller than
-    // the screen — a long catalogue scrolls inside the grid, not the sheet.
     final height = MediaQuery.sizeOf(context).height * 0.62;
 
     return SizedBox(
@@ -126,8 +115,6 @@ class _CatalogPickerSheetState<T> extends State<_CatalogPickerSheet<T>> {
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              // The sheet already owns the drag handle and the scrim, so the
-              // grid's own scroll is the only one that should move.
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 crossAxisSpacing: 10,
@@ -151,8 +138,6 @@ class _CatalogPickerSheetState<T> extends State<_CatalogPickerSheet<T>> {
   }
 }
 
-/// The shared card shell: bordered surface, 14px radius, content on top and
-/// a single-line label underneath. Matches the saved-designs style cards.
 class _PickerCard extends StatelessWidget {
   const _PickerCard({
     required this.label,
@@ -182,8 +167,6 @@ class _PickerCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // The tile owns the flexible middle so a caller's extra state
-              // (spinner, badge, error) can never push the label out.
               Expanded(child: Center(child: child)),
               const SizedBox(height: 4),
               Text(label,

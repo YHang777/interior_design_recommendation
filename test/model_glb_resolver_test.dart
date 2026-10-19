@@ -1,14 +1,3 @@
-// Tests for ModelGlbResolver — the app's ONE product-model path: a ready
-// Tripo download, rescaled to the SELLER's declared dimensions and cached.
-// There is no procedural generation and no bundled-catalog fallback, so
-// every failure must surface a specific No3dAvailableException reason
-// (never silently substitute another model). Reasons are CUSTOMER copy:
-// short, plain sentences via UserFacingException — never "edit the
-// seller's dimensions" / "tap Regenerate in the seller's list".
-//
-// Network is faked with an injected http.Client (package:http/testing);
-// the cache directory is injected too — these tests run fully headless.
-
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -53,8 +42,6 @@ Product productWith({
   );
 }
 
-/// A "Tripo-like" mesh at a known arbitrary scale: 0.6 × 0.7 × 0.4 m —
-/// the 0.70 m height of the spec's 0.70 m → 0.50 m example.
 Uint8List meshAt070Height() => rescaleGlbToDimensions(
       generateWallGlb(
           finish: const WallFinish(
@@ -79,8 +66,6 @@ void expectNear(double actual, double expected, double tolerance,
       reason: reason ?? 'expected ≈ $expected, got $actual');
 }
 
-/// Cached GLB files under the injected cache root (the resolver stores them
-/// in an `ar_models/` subfolder).
 List<File> cachedGlbs(Directory root) {
   final cacheDir = Directory(
       '${root.path}${Platform.pathSeparator}${ModelGlbResolver.cacheDirName}');
@@ -103,7 +88,6 @@ void main() {
     try {
       tempRoot.deleteSync(recursive: true);
     } catch (_) {
-      // Best-effort cleanup.
     }
   });
 
@@ -236,8 +220,6 @@ void main() {
   });
 
   group('customer-safe copy (UserFacingException contract)', () {
-    /// Every hard-stop a CUSTOMER can hit must be a [UserFacingException]
-    /// whose text never instructs them to edit the seller's fields.
     Future<void> expectCustomerSafe(Product product) async {
       final resolver = resolverWith(
           MockClient((_) async => throw StateError('no network')));
@@ -303,7 +285,6 @@ void main() {
       expect(resolved.file.existsSync(), isTrue);
       final bounds = GlbBounds.fromGlbBytes(resolved.file.readAsBytesSync());
       expectNear(bounds.heightM, 0.50, 0.005, 'seller height 0.50 m');
-      // Uniform scale (5/7): proportions of the 0.6 × 0.7 × 0.4 mesh hold.
       expectNear(bounds.widthM, 0.6 * 5 / 7, 0.005, 'width scaled uniformly');
       expectNear(bounds.depthM, 0.4 * 5 / 7, 0.005, 'depth scaled uniformly');
       expectNear(bounds.minY, 0.0, 1e-6, 'grounded at y = 0');

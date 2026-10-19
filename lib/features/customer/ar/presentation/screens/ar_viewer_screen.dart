@@ -31,19 +31,14 @@ import '../../data/glb_file_saver.dart';
 import '../../data/glb_generator.dart';
 import '../../data/room_finishes.dart';
 
-/// A furniture item placed in the AR scene, tracked for cleanup/removal.
 class _PlacedItem {
   const _PlacedItem(this.label, this.node, this.anchor);
 
-  /// Display name of the placed model (product name or library item name).
   final String label;
   final ARNode node;
   final ARAnchor anchor;
 }
 
-/// A floor / wall finish armed for placement (Room mode): the GLB is
-/// generated and saved the moment the user presses "Place floor/wall", so
-/// every following surface tap can place it instantly without regenerating.
 class _PendingFinish {
   const _PendingFinish({
     required this.kindWord,
@@ -53,28 +48,17 @@ class _PendingFinish {
     required this.scaleMeters,
   });
 
-  /// Lower-case surface word for hints: 'floor' or 'wall'.
   final String kindWord;
 
-  /// Display label, e.g. 'Oak Wood Floor' or 'Navy Paint Wall'.
   final String label;
 
-  /// ARNode name ('floor_typecolor' shape, e.g. floor_woodplanks_ffb08d6b),
-  /// used by tap-to-remove matching.
   final String nodeName;
 
-  /// Absolute path of the generated finish GLB (already on disk).
   final String filePath;
 
-  /// Plugin scale-to-unit-cube: the model's MAX extent in meters (floor side
-  /// length for floors, panel height 2.7 for walls) so the mesh renders 1:1.
   final double scaleMeters;
 }
 
-/// One slot of the catalog bar: either a bundled library model or — when
-/// the screen was opened for a [Product] — that product's true-size 3D
-/// model. A product slot's [ArProductEntry] starts without a file and gains
-/// one once background resolution materializes the GLB on disk.
 class _BarEntry {
   _BarEntry.library(this.item) : product = null;
 
@@ -82,40 +66,15 @@ class _BarEntry {
 
   final ArFurnitureItem? item;
 
-  /// Null while the entry is a plain library model; the product entry's
-  /// [ArProductEntry.resolvedFile] appears once its GLB is ready.
   ArProductEntry? product;
 
   bool get isProduct => product != null;
 
   String get name => isProduct ? product!.name : item!.name;
 
-  /// Whether this slot can currently be placed: library models always can;
-  /// a product slot only once its true-size GLB has been resolved.
   bool get placeable => !isProduct || product!.isResolved;
 }
 
-/// Real AR furniture viewer.
-///
-/// Renders the live camera feed with ARCore (SceneView/Filament on Android),
-/// detects surfaces, and lets the user tap to place 3D furniture models.
-/// Placed models can be dragged (pan), rotated (two-finger twist) and
-/// removed. The catalog bar at the bottom lists the models for the design /
-/// product this screen was opened from.
-///
-/// Two entry modes:
-///  * [product] mode (marketplace) — the catalog holds ONLY the product's
-///    own slot, resolved via [ModelGlbResolver] (a ready Tripo download,
-///    rescaled to the seller's declared W×H×D). There is no substitution:
-///    while the model generates the slot shows progress, and any failure
-///    shows the resolver's specific reason — a bundled library model never
-///    stands in for a product.
-///  * [items] / plain mode (room plans, scanner) — the bundled library
-///    models, exactly as before.
-///
-/// Before showing the AR view, the screen checks that Google Play Services
-/// for AR (ARCore) is installed on the device — otherwise the user gets a
-/// helpful install screen instead of a frozen camera image.
 class ArViewerScreen extends StatefulWidget {
   const ArViewerScreen({
     super.key,
@@ -124,12 +83,8 @@ class ArViewerScreen extends StatefulWidget {
     this.title = 'AR Preview',
   });
 
-  /// Furniture catalog to offer. When null or empty, the full library is
-  /// shown (a [product] slot, when present, is prepended).
   final List<ArFurnitureItem>? items;
 
-  /// Optional product whose own true-size 3D model this viewer was opened
-  /// for. When present its slot leads the catalog bar.
   final Product? product;
 
   final String title;
@@ -148,20 +103,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   ARObjectManager? _objects;
   ARAnchorManager? _anchors;
 
-  /// Catalog bar entries, front to back. Built once in [initState]; the
-  /// product slot (when present, and the ONLY slot in product mode) is
-  /// updated in place as its resolution progresses — resolved file,
-  /// generation progress, or a specific failure reason.
   late final List<_BarEntry> _entries = _buildCatalog();
 
-  /// True while the product's Tripo generation is still running — the slot
-  /// and the hint show progress ("Generating 3D model… 40s"), not an error.
   bool _productGenerating = false;
 
-  /// When the visible generation was submitted (elapsed copy anchor).
   DateTime? _generationStartedAt;
 
-  /// 1 s ticker re-rendering the elapsed generation copy.
   Timer? _generationTicker;
 
   int _selectedIndex = 0;
@@ -172,87 +119,45 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   bool _planesFound = false;
   bool _busy = false;
 
-  /// true while checking whether ARCore is installed on this device.
   bool _checking = true;
   bool _arCoreAvailable = false;
 
-  /// Set when the AR view stays silent for too long (no planes, no error) —
-  /// typical for devices blocked by Google's ARCore whitelist.
   bool _arUnresponsive = false;
   Timer? _watchdog;
 
-  /// True while the true-size product / finish chip floats above the bottom
-  /// bar (shown after a product model or a finish is placed; auto-dismissed
-  /// after 8 s).
   bool _showPlacedChip = false;
   Timer? _chipTimer;
 
-  /// Text shown in that chip. Null after a product placement (the product
-  /// chip is then derived from the widget's product); non-null after a
-  /// finish placement ('Placed …').
   String? _finishChipText;
 
-  /// True once the AR session demonstrably RAN (planes detected, a node
-  /// placed or tapped). Splits the AR-error overlay between "the session
-  /// STOPPED — offer Close" and "AR never came up — offer the install CTA".
   bool _sessionWasLive = false;
 
   // ─── Room mode (floor / wall finishes) ───
 
-  /// True when the bottom panel shows the Room (finish) panel instead of
-  /// the furniture catalog.
   bool _roomMode = false;
 
-  /// The full finish selection — the single Room state field. Every change
-  /// flows through a [FinishSelection] select* transition (immutable value
-  /// semantics, per-type color memory inside the model), and ANY change
-  /// clears an armed [_pendingFinish] whose GLB would no longer match what
-  /// the user has just picked.
   FinishSelection _selection = const FinishSelection();
 
-  // Read-throughs so the panel rows read the selection uniformly.
   FloorFinishType get _floorType => _selection.floorType;
   WallFinishType get _wallType => _selection.wallType;
   double get _floorSizeM => _selection.floorSizeM;
   int get _floorColorArgb => _selection.floorColorArgb;
   int get _wallColorArgb => _selection.wallColorArgb;
 
-  /// Finish armed for placement ('Place floor/wall' pressed). While set, the
-  /// next surface tap places it; it stays active so the user can place
-  /// several copies of the same finish, until the panel's Done (✕) clears it.
   _PendingFinish? _pendingFinish;
 
-  /// True while a pressed Place action is generating + saving its GLB — ONE
-  /// flag for floor and wall: only one finish can be armed at a time, and
-  /// the two buttons never run concurrently.
   bool _arming = false;
 
-  /// Moment the last "choose a finish first" snackbar was shown — surface
-  /// taps repeat while nothing is armed, so the hint is throttled.
   DateTime? _lastNoFinishHintAt;
 
-  /// Moment the last "point at the floor/wall" placement hint was shown —
-  /// rejected taps repeat, so the hint is throttled like the one above.
   DateTime? _lastPlacementHintAt;
 
-  /// Latest TRACKING-plane telemetry streamed by the platform
-  /// ("onPlanesUpdate"). Stored WITHOUT setState — placement reads it on
-  /// tap — and only refreshed while the screen is mounted.
   List<ARPlaneInfo> _livePlanes = const [];
 
-  /// Moment the last plane-telemetry batch arrived. Floor placement
-  /// requires a qualifying plane within [_liveFloorFreshFor] of now.
   DateTime? _livePlanesAt;
 
-  /// How recent a plane-telemetry batch must be for the floor to count as
-  /// "seen". Stale telemetry (session paused, camera away) never gates a
-  /// placement on an old floor height.
   static const Duration _liveFloorFreshFor = Duration(seconds: 2);
 
-  /// The live floor's world-Y from recent plane telemetry, or null when the
-  /// floor has not been seen recently (no telemetry, it went stale, or only
-  /// elevated surfaces are in view). Null means floor placement must be
-  /// refused with a scan hint, never guessed.
   double? get _currentLiveFloorY {
     final at = _livePlanesAt;
     if (at == null || DateTime.now().difference(at) > _liveFloorFreshFor) {
@@ -261,27 +166,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return ArPlacementPolicy.liveFloorYFromPlanes(_livePlanes);
   }
 
-  /// Bottom panel height (furniture picker bar vs Room finish panel). The
-  /// floating overlays (delete button, chip, mode switcher, rotation row)
-  /// are anchored to it, so they keep clearing the bar in both modes.
-  ///
-  /// The furniture bar is now one compact selection row — the catalog itself
-  /// lives in a bottom sheet — so it no longer needs the old 108px of
-  /// full-width tiles. More of the camera view stays visible.
   static const double _furnitureBarHeight = 72;
-  // Room panel content is now six labelled strips (floor type, floor colour,
-  // size, wall type, wall colour) plus two captions and a hint — ~240 px at
-  // the default text scale. The panel body still scrolls vertically when
-  // system text scaling pushes it beyond this fixed height.
   static const double _roomBarHeight = 248;
   double get _bottomBarHeight =>
       _roomMode ? _roomBarHeight : _furnitureBarHeight;
 
-  /// The bar itself sits inside a SafeArea, so its VISUAL top edge is
-  /// [ MediaQuery.viewPadding ].bottom higher than [_bottomBarHeight].
-  /// Overlays anchored with the raw bar height alone therefore landed on
-  /// top of the bar (and each other) on phones with a gesture-nav inset —
-  /// every overlay bottom offset must add this.
   double get _barOverlayInset => MediaQuery.viewPaddingOf(context).bottom;
 
   _BarEntry? get _selectedEntry => (_entries.isEmpty ||
@@ -289,13 +178,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       ? null
       : _entries[_selectedIndex];
 
-  /// Catalog to offer.
-  ///
-  /// Product mode holds ONLY the product's own slot — Tripo is the single
-  /// model source for products, so a bundled library model must never be
-  /// listed next to it as something the user could place instead. Scanner /
-  /// room-plan mode ([ArViewerScreen.product] null) is unchanged: explicit
-  /// [ArViewerScreen.items], or the full library when none were passed.
   List<_BarEntry> _buildCatalog() {
     final product = widget.product;
     if (product != null) {
@@ -324,10 +206,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     super.dispose();
   }
 
-  /// Starts a watchdog: if nothing AR-ish happens within 12 s, the device
-  /// is likely blocked (unsupported hardware / whitelist) and the camera
-  /// would just stay frozen — surface that instead of leaving the user
-  /// staring at a static image.
   void _startWatchdog() {
     _watchdog?.cancel();
     _watchdog = Timer(const Duration(seconds: 12), () {
@@ -339,17 +217,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   // ─── Product true-size mode ───
 
-  /// Resolves the opened product's true-size GLB in the background (download
-  /// + rescale to the seller's dimensions, or a cache hit) and swaps it into
-  /// the product slot once ready.
-  ///
-  /// There is exactly one outcome per state — no substitution:
-  ///  * resolved → the slot becomes placeable;
-  ///  * `generating` sentinel → progress UI (elapsed seconds from
-  ///    `ar3d.submittedAt`, ticked every second), NOT an error;
-  ///  * [No3dAvailableException] with any other reason → the slot records
-  ///    that specific reason and the user sees it — a bundled model is never
-  ///    shown in its place.
   Future<void> _resolveProductModel() async {
     final product = widget.product;
     if (product == null) return;
@@ -360,8 +227,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     try {
       resolved = await resolver.resolveProductGlb(product);
     } on No3dAvailableException catch (e) {
-      // 'generating' is a control signal (progress UI below); everything
-      // else is short customer copy via userMessage — never a raw reason.
       failure = e.reason == No3dAvailableException.generatingSentinel
           ? No3dAvailableException.generatingSentinel
           : userMessage(e,
@@ -392,7 +257,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
 
     if (failure == No3dAvailableException.generatingSentinel) {
-      // Progress, not an error: "Generating 3D model… 40s".
       setState(() {
         _productGenerating = true;
         _generationStartedAt =
@@ -405,13 +269,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           timer.cancel();
           return;
         }
-        setState(() {}); // re-render the elapsed copy only
+        setState(() {});
       });
       return;
     }
 
-    // Hard stop with the specific reason — recorded on the slot so the
-    // hint/tap surfaces it verbatim. No catalog substitution exists.
     setState(() {
       _productGenerating = false;
       _generationTicker?.cancel();
@@ -430,7 +292,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// "40s" / "1m 05s" — elapsed time of the visible generation.
   String get _generationElapsed {
     final since = _generationStartedAt;
     if (since == null) return '';
@@ -440,8 +301,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return '${total ~/ 60}m ${(total % 60).toString().padLeft(2, '0')}s';
   }
 
-  /// Floats the "placed at true size" / "placed finish" chip above the
-  /// bottom bar for 8 s (dismissible by tapping it).
   void _showProductChip() {
     _chipTimer?.cancel();
     if (!mounted) return;
@@ -456,9 +315,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (mounted) setState(() => _showPlacedChip = false);
   }
 
-  /// Chip copy: a placed finish's "Placed …" text, or — in product mode —
-  /// "Product Name · W 1.0 × H 1.5 × D 0.6 m" (name only when the product
-  /// carries no dimensions). Null when there is nothing chip-worthy.
   String? get _placedChipText {
     if (_finishChipText != null) return _finishChipText;
     final product = widget.product;
@@ -475,8 +331,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       available = await _channel.invokeMethod<bool>('isArCoreAvailable') ??
           false;
     } catch (_) {
-      // Channel missing (e.g. non-Android) — fall through and let the AR
-      // view itself surface any error.
       available = true;
     }
     if (!mounted) return;
@@ -508,8 +362,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _objects = objects;
     _anchors = anchors;
 
-    // Planes shown so the user can see detected surfaces; taps are handled by
-    // us (onPlaneOrPointTap); pans/rotations use the built-in node gestures.
     _session!.onInitialize(
       showAnimatedGuide: false,
       showFeaturePoints: false,
@@ -530,8 +382,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         });
       }
     };
-    // Live plane telemetry (~every 3rd frame on Android; never on iOS).
-    // Stored without setState — floor placement reads it on tap.
     _session!.onPlanesUpdate = (planes) {
       if (!mounted) return;
       _livePlanes = planes;
@@ -545,31 +395,20 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _startWatchdog();
   }
 
-  /// Places the selected furniture — or the armed finish, when one is
-  /// pending (Room mode) — where the user tapped.
-  /// Prefers a hit on a detected plane; falls back to a feature-point hit so
-  /// furniture can still be placed while surface detection is warming up.
   Future<void> _onPlaneOrPointTap(List<ARHitTestResult> hits) async {
     if (_busy || hits.isEmpty) return;
 
-    // With the AR session stopped the taps can never resolve to a real
-    // surface — say so instead of silently doing nothing.
     if (_arError != null) {
       _showMessage('AR session stopped — close and reopen the viewer.',
           color: AppColors.warning);
       return;
     }
 
-    // Room mode with an armed finish: the tap places that finish. Kept
-    // active afterwards so multiple copies can be placed from one press.
     final pending = _pendingFinish;
     if (pending != null) {
       await _placePendingFinish(pending, hits);
       return;
     }
-    // Room mode without an armed finish: nothing to place — the catalog
-    // behind the panel is not what the user is interacting with. Say what
-    // to do (throttled: surface taps repeat while nothing is armed).
     if (_roomMode) {
       final now = DateTime.now();
       if (_lastNoFinishHintAt == null ||
@@ -588,7 +427,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (!entry.placeable) {
       final p = entry.product;
       if (p != null && p.hasError) {
-        // The resolver's specific, actionable reason — never "no model".
         _showMessage(p.productError!, color: AppColors.warning,
             duration: const Duration(seconds: 6));
       } else if (p != null && _productGenerating) {
@@ -608,7 +446,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     try {
       final node = _buildNode(entry);
       final placement = entry.isProduct
-          ? PlacementType.floor // products default to floor
+          ? PlacementType.floor
           : entry.item!.placement;
       final placed = await _placeNodeAtTap(
         hits,
@@ -622,8 +460,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       setState(() {
         _placed.add(placed);
         _sessionWasLive = true;
-        // The last placed thing names the chip: a product placement (or
-        // another furniture item) supersedes an earlier finish chip.
         _finishChipText = null;
       });
       if (entry.isProduct) _showProductChip();
@@ -632,16 +468,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// The anchor transform that keeps the model glued to the tapped plane:
-  ///  * floor → the FULL hit pose (position + plane-aligned rotation), so
-  ///    the model's base lies exactly on the plane even when the plane is
-  ///    slightly tilted;
-  ///  * wall → [ArPlacementPolicy.wallAnchorTransform]: the hit position,
-  ///    yawed so the panel's +Z (pattern face) points OUT of the wall along
-  ///    the plane normal (ARCore vertical planes carry the normal on the
-  ///    pose's local +Y, NOT +Z — the old code read column 2 and left every
-  ///    panel edge-on), and pushed out half the panel depth so its back
-  ///    face sits flush.
   static Matrix4 _anchorTransformFor(
       ARHitTestResult hit, PlacementType placement) {
     if (placement == PlacementType.wall) {
@@ -650,29 +476,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return Matrix4.copy(hit.worldTransform);
   }
 
-  /// SHARED anchor + node placement for every flow (furniture and finishes):
-  /// runs [ArPlacementPolicy] over the tap's hits, creates the plane-aligned
-  /// anchor, adds the node and cleans up on failure. Returns the placed
-  /// item — the caller records it in its own (mounted-guarded) setState,
-  /// since only the caller knows the chip/label semantics.
-  ///
-  /// [requiredPlacement] selects the policy:
-  /// - [PlacementType.floor] → [ArPlacementPolicy.chooseFloorHit]: requires
-  ///   a LIVE floor (recent plane telemetry) first — without one we refuse
-  ///   and prompt a scan — then large reported horizontal planes within
-  ///   [ArPlacementPolicy.maxAboveLiveFloorM] of that floor, lowest-Y
-  ///   preferred. Elevated surfaces (tables, fridge tops) are rejected even
-  ///   on the first tap, because the floor height comes from telemetry, not
-  ///   from the tap.
-  /// - [PlacementType.wall] → [ArPlacementPolicy.chooseWallHit]: large
-  ///   vertical planes (both extents ≥ 0.8 m) with a near-horizontal
-  ///   normal, largest-first.
-  /// - [PlacementType.any] → [ArPlacementPolicy.chooseAnyHit].
-  ///
-  /// There is NO wrong-surface fallback: tapping a wall while arming a
-  /// floor item (or vice versa) shows a throttled hint and places nothing —
-  /// gluing furniture to the wrong surface was how sofas ended up in
-  /// mid-air or on walls.
   Future<_PlacedItem?> _placeNodeAtTap(
     List<ARHitTestResult> hits,
     ARNode node,
@@ -683,9 +486,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final ARHitTestResult? hit;
     switch (requiredPlacement) {
       case PlacementType.floor:
-        // A floor placement needs a RECENTLY-seen real floor. Without one
-        // (only a table-top in view, or telemetry went stale) we refuse
-        // and tell the user to scan the floor — never guess a height.
         final liveFloorY = _currentLiveFloorY;
         if (liveFloorY == null) {
           _showLiveFloorScanHint();
@@ -722,9 +522,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return _PlacedItem(label, node, anchor);
   }
 
-  /// Throttled hint shown when a floor placement is attempted before a real
-  /// floor has been seen in the plane telemetry (e.g. only a table-top is
-  /// in view). Plain short sentence, throttled like the placement hint.
   void _showLiveFloorScanHint() {
     final now = DateTime.now();
     if (_lastPlacementHintAt != null &&
@@ -736,7 +533,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         color: AppColors.warning, duration: const Duration(seconds: 2));
   }
 
-  /// Throttled "point at the floor/wall" hint for rejected placement taps.
   void _showPlacementHint(PlacementType requiredPlacement) {
     final now = DateTime.now();
     if (_lastPlacementHintAt != null &&
@@ -756,22 +552,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         color: AppColors.warning, duration: const Duration(seconds: 2));
   }
 
-  /// Builds the [ARNode] for [entry] honoring the plugin's scale contract:
-  /// `node.scale.x` is read as the scene's scale-to-unit-cube — the model's
-  /// MAX extent is normalized to scale.x meters.
-  ///
-  ///  * Bundled library models are authored in arbitrary units — their
-  ///    catalog `widthMeters` is passed as today.
-  ///  * Product GLBs are authored/rescaled IN METERS with their max extent
-  ///    equal to max(W,H,D) — passing that value as the scale makes the
-  ///    internal factor 1.0, i.e. the model renders at its TRUE size.
-  ///
-  /// Geometry is pre-scaled and grounded (base on the tapped plane) — never
-  /// per-axis scale or offsets here.
-  ///
-  /// Floor furniture carries `horizontalOnly: true` in its node data: the
-  /// Android side then restricts drag re-hit-tests to horizontal planes, so
-  /// a dragged sofa can never climb a wall or ride up into the air.
   ARNode _buildNode(_BarEntry entry) {
     final position = Vector3(0.0, 0.0, 0.0);
     final rotation = Vector4(1.0, 0.0, 0.0, 0.0);
@@ -800,8 +580,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // ─── Room mode: floor / wall finish placement ───
 
   // ── FinishSelection behavior methods (fix 24): every selection change
-  //    runs through the model's immutable select* transition, and any change
-  //    invalidates an armed [_pendingFinish] — its GLB was generated for the
   //    OLD selection (fix 13). ────────────────────────────────────────────
 
   void _selectFloorType(FloorFinishType type) {
@@ -848,8 +626,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (room == _roomMode) return;
     setState(() {
       _roomMode = room;
-      // A pending finish belongs to the Room panel; leaving it while armed
-      // would place finishes on later furniture taps.
       if (!room) _pendingFinish = null;
     });
   }
@@ -859,28 +635,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     setState(() => _pendingFinish = null);
   }
 
-  /// 'Place floor' — generates + saves the selected floor finish's GLB and
-  /// arms it so the next surface tap places it.
   Future<void> _armFloorPlacement() =>
       _prepareFinishPlacement(isFloor: true);
 
-  /// 'Place wall' — counterpart for the selected wall finish.
   Future<void> _armWallPlacement() => _prepareFinishPlacement(isFloor: false);
 
-  /// Generates the GLB for the CURRENT finish selection (deterministic — the
-  /// file name encodes type + color + size, so repeats overwrite the same
-  /// cache file), saves it under app documents and arms [_pendingFinish].
-  ///
-  /// Generation + save happen here (on the button press) rather than on the
-  /// AR tap, so placing several copies later is instant. Failures surface as
-  /// a snackbar and nothing gets armed. ONE [_arming] flag covers floor and
-  /// wall — the two Place buttons never run concurrently.
-  ///
-  /// Arming is GUARDED on completion (fix 9/10): the async save may outlive
-  /// its context — if the screen was popped, the user left Room mode, or the
-  /// selection changed while the file was being written, nothing is armed
-  /// (later furniture taps must never place a finish the user no longer sees
-  /// selected).
   Future<void> _prepareFinishPlacement({required bool isFloor}) async {
     if (_arming) return;
     final selection = _selection;
@@ -911,10 +670,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               '${_hexColor(colorArgb)}.glb';
       final path = await saveGlbToAppDocuments(bytes, fileName: fileName);
 
-      // Scale contract: node scale.x = the mesh's MAX extent in meters. The
-      // generator authors floors to sizeM and walls to wallHeightM, so the
-      // parsed bounds equal those — parse to be robust, fall back to the
-      // authored nominal value if parsing ever fails.
       final scaleMeters = _maxExtentMeters(bytes) ??
           (isFloor ? selection.floorSizeM : RoomFinishCatalog.wallHeightM);
 
@@ -948,9 +703,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// Parses [bytes] and returns the mesh's max extent in meters, or null
-  /// when the file cannot be parsed (bytes come from our own generator, so
-  /// null is a defensive fallback only).
   double? _maxExtentMeters(Uint8List bytes) {
     try {
       final b = GlbBounds.fromGlbBytes(bytes);
@@ -961,18 +713,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// 'ffb08d6b'-style hex of [argb] for file/node names.
   static String _hexColor(int argb) => argb.toRadixString(16).padLeft(8, '0');
 
-  /// '2' / '3' / '4' style size token (options are whole meters today).
   static String _sizeToken(double meters) =>
       meters == meters.roundToDouble()
           ? '${meters.round()}'
           : meters.toStringAsFixed(1);
 
-  /// Places the armed finish at the tapped surface — through the shared
-  /// [_placeNodeAtTap]. [_pendingFinish] stays active afterwards so several
-  /// copies of the same finish can be placed; Done (✕) clears it.
   Future<void> _placePendingFinish(
       _PendingFinish pending, List<ARHitTestResult> hits) async {
     _busy = true;
@@ -982,11 +729,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         uri: Uri.file(pending.filePath).toString(),
         scale: Vector3.all(pending.scaleMeters),
         name: pending.nodeName,
-        // Floor finishes are horizontal-only when dragged, like furniture;
-        // wall finishes stay free (they live on vertical planes).
         data: {'horizontalOnly': pending.kindWord == 'floor'},
       );
-      // Floor finishes must go on horizontal surfaces, wall finishes on vertical.
       final requiredPlacement = pending.kindWord == 'floor'
           ? PlacementType.floor
           : PlacementType.wall;
@@ -1012,22 +756,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   void _onNodeTap(List<String> nodeNames) {
     if (nodeNames.isEmpty) return;
-    _stopRotateHold(); // a new selection never inherits a running turn
+    _stopRotateHold();
     setState(() {
       _selectedNodeName = nodeNames.first;
       _sessionWasLive = true;
     });
   }
 
-  /// Radians per tap of the ↺/↻ buttons — 15°.
   static const double _rotateStepRad = 15.0 * math.pi / 180.0;
 
-  /// Rotates the selected item's MODEL by [deltaYawRad] around the world's
-  /// up axis via the plugin's yaw-only `rotateNode` channel. The tap
-  /// reports the ANCHOR name (the Android side walks the hit node up to
-  /// its anchor), so the placed item is correlated the same way
-  /// [_deleteNode] does, and the MODEL's own name is what the channel
-  /// expects.
   Future<void> _rotateSelected(double deltaYawRad) async {
     final selected = _selectedNodeName;
     if (selected == null) return;
@@ -1042,26 +779,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     try {
       await _objects?.rotateNodeY(entry.node.name, deltaYawRad);
     } catch (_) {
-      // Older plugin build without the channel — ignore; the two-finger
-      // twist still rotates.
     }
   }
 
-  /// Press-and-HOLD slow rotation. A short tap steps 15°; holding a button
-  /// spins the selection continuously at ~15°/s (0.75° every 50 ms) for a
-  /// slow, controlled turn. Cancelled on pointer-up, on dispose, and whenever
-  /// the selection changes so a held turn never keeps spinning a deselected
-  /// model.
   Timer? _rotateHoldTimer;
 
-  /// Radians applied per hold tick (50 ms) — 0.75°, i.e. ≈15°/s.
   static const double _rotateHoldStepRad = 0.75 * math.pi / 180.0;
 
-  /// Hold tick period. 50 ms keeps the turn smooth without hammering the
-  /// channel.
   static const Duration _rotateHoldTick = Duration(milliseconds: 50);
 
-  /// Starts the slow continuous turn in [dirSign] (+1 left ↺, −1 right ↻).
   void _beginRotateHold(double dirSign) {
     _rotateHoldTimer?.cancel();
     _rotateHoldTimer = Timer.periodic(_rotateHoldTick, (_) {
@@ -1069,17 +795,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     });
   }
 
-  /// Stops the slow continuous turn (pointer-up / deselect / dispose).
   void _stopRotateHold() {
     _rotateHoldTimer?.cancel();
     _rotateHoldTimer = null;
   }
 
   Future<void> _deleteNode(String name) async {
-    // Correlate the tapped name with a placed item. The plugin's Android
-    // side reports the tapped node's ANCHOR name (it walks the hit node up
-    // to its anchor); the node's own name is kept for symmetry — finishes
-    // carry explicit names, anchors are auto-generated UniqueKeys.
     _PlacedItem? entry;
     for (final p in _placed) {
       if (p.node.name == name || p.anchor.name == name) {
@@ -1104,9 +825,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// Opens the placed-items sheet: every item with a per-item Remove. The AR
-  /// scene stays live behind the sheet, so removals apply instantly and the
-  /// sheet refreshes in place.
   void _showPlacedSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -1215,8 +933,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Removes one placed item from the AR scene and the list; refreshes the
-  /// open sheet so the row disappears in place.
   Future<void> _removePlaced(
       _PlacedItem item, BuildContext sheetContext, StateSetter refreshSheet) {
     return _deletePlaced(item).then((_) {
@@ -1224,7 +940,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     });
   }
 
-  /// Core node+anchor removal shared by tap-to-delete and the sheet.
   Future<void> _deletePlaced(_PlacedItem item) async {
     await _objects?.removeNode(item.node);
     await _anchors?.removeAnchor(item.anchor);
@@ -1276,8 +991,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Shown when Google Play Services for AR is not installed — without it the
-  /// AR view would just show a frozen image, so we explain instead.
   Widget _buildArCoreMissing() {
     return SafeArea(
       child: Padding(
@@ -1335,13 +1048,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// AR-error overlay, split by whether the session ever RAN (fix 21):
-  ///  - the session demonstrably ran (planes detected / a node placed or
-  ///    tapped) then errored → "AR session stopped" with a CLOSE action (an
-  ///    install CTA would be nonsense — ARCore worked);
-  ///  - it never came up → the install CTA.
-  /// While the overlay is shown, surface taps are answered with a snackbar
-  /// (see [_onPlaneOrPointTap]) instead of silently doing nothing.
   Widget _buildArErrorOverlay() {
     final wasLive = _sessionWasLive;
     return Positioned(
@@ -1414,13 +1120,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // The AR camera view — plane detection + tap handling.
         ARView(
           onARViewCreated: _onArViewCreated,
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
 
-        // Top bar — anchored to the top of the Stack
         Positioned(
           top: 0,
           left: 0,
@@ -1447,8 +1151,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                           color: Colors.white),
                     ),
                   ),
-                  // "N placed" counter — tapping it lists the placed items
-                  // with per-item Remove (fix 20).
                   Semantics(
                     button: true,
                     label: _placed.isEmpty
@@ -1493,7 +1195,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
         ),
 
-        // Hint banner
         Positioned(
           top: 0,
           left: 0,
@@ -1521,11 +1222,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
         ),
 
-        // AR error overlay (e.g. session failed to start / stopped mid-run)
         if (_arError != null) _buildArErrorOverlay(),
 
-        // Unresponsive watchdog overlay — camera stays frozen when the
-        // device is blocked by Google's ARCore whitelist.
         if (_arUnresponsive && _arError == null)
           Positioned(
             left: 24,
@@ -1578,9 +1276,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                         icon: const Icon(Icons.close, size: 16),
                         label: const Text('Close'),
                         style: ElevatedButton.styleFrom(
-                          // The theme makes ElevatedButton full-width
-                          // (minimumSize infinite) — inside a Row that
-                          // forces an infinite-width constraint.
                           minimumSize: const Size(0, 48),
                           backgroundColor: AppColors.error,
                           foregroundColor: Colors.white,
@@ -1595,9 +1290,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
           ),
 
-        // Delete control for the tapped node (furniture or finish). The
-        // rotate buttons moved to a centered row ABOVE the bottom panel —
-        // see [_buildRotateControls] below.
         if (_selectedNodeName != null)
           Positioned(
             right: 16,
@@ -1612,9 +1304,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
           ),
 
-        // Centered ↺ / ↻ rotation row ABOVE the bottom selection panel —
-        // visible only while a placed model is selected. Tap = 15° step;
-        // press-and-hold = slow continuous turn (~15°/s).
         if (_selectedNodeName != null)
           Positioned(
             left: 0,
@@ -1623,9 +1312,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             child: Center(child: _buildRotateControls()),
           ),
 
-        // "Placed at true size" / "Placed finish" chip — floats above the
-        // bottom bar (clear of the mode switcher, and clear of the rotation
-        // row while a model is selected) until tapped or after 8 s.
         if (_showPlacedChip && _placedChipText != null)
           Positioned(
             left: 16,
@@ -1658,8 +1344,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                           size: 14, color: AppColors.accentLight),
                       const SizedBox(width: 6),
                       Flexible(
-                        // Shrink instead of ellipsizing: '120 × 8…' would
-                        // hide part of the furniture's dimensions.
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
@@ -1682,8 +1366,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             ),
           ),
 
-        // Bottom bar: the furniture catalog (Furniture mode) or the Room
-        // finish panel.
         Positioned(
           left: 0,
           right: 0,
@@ -1694,7 +1376,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
         ),
 
-        // Furniture | Room mode switcher, floating just above the bar.
         Positioned(
           left: 0,
           right: 0,
@@ -1712,13 +1393,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
       );
 
-  /// The catalog bar shown in Furniture mode.
-  ///
-  /// Was a full-width row of every slot at once; now it is one compact
-  /// selection chip (what's active) plus a picker button that opens the
-  /// catalog as a bottom sheet. The AR camera keeps the vertical space the
-  /// old 108px strip used to eat, and the tiles finally have room for their
-  /// labels.
   Widget _buildFurnitureBar() {
     final selected = _selectedEntry;
     return Container(
@@ -1735,9 +1409,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Readout of the active entry — icon/name for library items, the live
-  /// generation state for products. Tap re-opens the picker on small
-  /// catalogues so switching stays one gesture away.
   Widget _buildSelectionChip(_BarEntry? entry) {
     if (entry == null) {
       return Text(
@@ -1848,14 +1519,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Opens the slot catalog as a bottom sheet and selects the tapped entry.
-  /// Product slots keep their three states (resolved / generating / failed)
-  /// inside the sheet tiles, so the reason a listing cannot be placed is
-  /// visible while choosing rather than only after the fact.
   Future<void> _openFurniturePicker() async {
     if (_entries.isEmpty) return;
-    // Single product slot: still open the sheet so its error / generating
-    // state and dimensions have somewhere to be read.
     final picked = await showCatalogPickerSheet<int>(
       context: context,
       title: widget.product != null ? 'This product' : 'Furniture catalog',
@@ -1876,7 +1541,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// Sheet tile for one slot — library icon, or the product's live state.
   Widget _buildPickerTile(_BarEntry entry) {
     final item = entry.item;
     if (item != null) {
@@ -1948,7 +1612,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Compact segmented Furniture | Room switch floating above the bar.
   Widget _buildModeSwitcher() {
     return Container(
       padding: const EdgeInsets.all(3),
@@ -2002,9 +1665,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   // ─── Rotation controls (above the bottom panel) ───
 
-  /// Centered ↺ [Turn] ↻ row shown while a placed model is selected. A tap
-  /// steps 15°; pressing and holding turns the selection slowly (~15°/s)
-  /// for a controlled spin. Visible only when something is selected.
   Widget _buildRotateControls() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2042,9 +1702,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// One rotate button. [dirSign] +1 turns left (↺), −1 turns right (↻).
-  /// A quick tap steps 15°; a press-and-hold starts a slow continuous turn
-  /// that stops on release (see [_beginRotateHold]/[_stopRotateHold]).
   Widget _buildRotateButton({
     required IconData icon,
     required String tooltip,
@@ -2079,8 +1736,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       decoration: _barDecoration,
       child: SingleChildScrollView(
-        // The panel scrolls vertically when system text scaling makes the
-        // finish rows taller than the fixed bar — no clipped controls.
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2110,8 +1765,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// One-line ellipsized description of the currently selected floor / wall
-  /// type, rendered under its type strip ("Wood — warm plank boards …").
   Widget _buildTypeCaption(String text) {
     return Padding(
       padding: const EdgeInsets.only(left: 42, top: 2),
@@ -2128,9 +1781,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// "Floor" type chips (Wood/Cement/Ceramic/Parquet). Colours live on their
-  /// own row under it — eight controls in one scroll strip was unreadable,
-  /// and the swatches are a second decision from the type, not part of it.
   Widget _buildFloorTypeRow() {
     return _buildFinishRow(
       label: 'Floor',
@@ -2147,7 +1797,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Floor colour swatches for the selected type, on their own line.
   Widget _buildFloorColorRow() {
     final colors = RoomFinishCatalog.colorsForFloor(_floorType);
     return _buildFinishRow(
@@ -2166,7 +1815,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// "Floor" size chips (2 m / 3 m / 4 m / Custom) + the Place floor action.
   Widget _buildFloorSizeRow() {
     return SizedBox(
       height: 34,
@@ -2207,7 +1855,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Returns true if [size] matches one of the preset options.
   bool _isPresetFloorSize(double size) {
     for (final preset in RoomFinishCatalog.floorSizeOptionsM) {
       if (preset > 0 && (preset - size).abs() < 0.01) return true;
@@ -2215,7 +1862,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return false;
   }
 
-  /// Shows a dialog for entering a custom floor size in meters.
   Future<void> _showCustomFloorSizeDialog() async {
     final controller = TextEditingController(
       text: _isPresetFloorSize(_floorSizeM) ? '' : _floorSizeM.toStringAsFixed(1),
@@ -2261,9 +1907,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  /// "Wall" type chips (Paint/Wood Panel/Brick), with the Place wall action
-  /// pinned at the row's end. Colours move to their own line, matching the
-  /// floor section.
   Widget _buildWallTypeRow() {
     return _buildFinishRow(
       label: 'Wall',
@@ -2286,7 +1929,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Wall colour swatches for the selected type, on their own line.
   Widget _buildWallColorRow() {
     final colors = RoomFinishCatalog.colorsForWall(_wallType);
     return _buildFinishRow(
@@ -2305,8 +1947,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Label + horizontally scrollable content strip, optionally with a
-  /// pinned trailing action (e.g. Place wall) outside the scroll area.
   Widget _buildFinishRow({
     required String label,
     required List<Widget> children,
@@ -2340,8 +1980,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return content;
   }
 
-  /// Compact selectable chip (type or size). Exposes a labeled button with a
-  /// selected state to assistive tech; minimum 32 px tall tap target.
   Widget _buildChoiceChip({
     required String label,
     required bool selected,
@@ -2380,8 +2018,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Circular color swatch — ringed when selected. 32 px target with the
-  /// color's name exposed as a Tooltip and to assistive tech.
   Widget _buildSwatch(
     FinishColor color, {
     required String name,
@@ -2421,8 +2057,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return Tooltip(message: name, child: circle);
   }
 
-  /// Primary "Place …" pill. Shows a small spinner while the finish GLB is
-  /// being generated/saved. Minimum 32 px tall tap target.
   Widget _buildPlaceAction({
     required String label,
     required IconData icon,
@@ -2472,8 +2106,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
-  /// Bottom line of the Room panel: the interaction hint, or — while a
-  /// finish is armed — its status + the Done (✕) that clears it.
   Widget _buildFinishHintRow() {
     final pending = _pendingFinish;
     final hintStyle = GoogleFonts.poppins(
@@ -2581,8 +2213,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (entry != null && !entry.placeable) {
       final p = entry.product;
       if (p != null && p.hasError) {
-        // Short copy here (the banner is 2 lines) — the full reason shows
-        // in the snackbar when the slot is tapped.
         return 'This product’s 3D model is not ready — tap its slot for '
             'details.';
       }
@@ -2593,7 +2223,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       return 'Preparing the true-size 3D model — keep moving your phone, '
           'then tap to place once it is ready';
     }
-    // Determine which surface type the selected item needs.
     final placement = entry?.isProduct == true
         ? PlacementType.floor
         : entry?.item?.placement ?? PlacementType.floor;
@@ -2612,8 +2241,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 }
 
-/// Tiny colored chip for the product slot's source. Tripo is the only
-/// product-model source, so the text is always 'AI'.
 class _SourceBadge extends StatelessWidget {
   const _SourceBadge({required this.text});
 

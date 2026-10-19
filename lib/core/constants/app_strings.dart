@@ -1,14 +1,10 @@
-/// App-wide string constants.
-/// Malaysian context — MYR currency, local terminology.
 class AppStrings {
   AppStrings._();
 
-  // App
   static const String appTitle = 'Intellar';
   static const String appSubtitle =
       'AI & AR Interior Design';
 
-  // Auth
   static const String login = 'Login';
   static const String signUp = 'Sign Up';
   static const String createAccount = 'Create Account';
@@ -28,7 +24,6 @@ class AppStrings {
   static const String resendEmail = 'Resend Verification Email';
   static const String iveVerified = "I've Verified";
 
-  // Errors
   static const String invalidEmail = 'Please enter a valid email address';
   static const String invalidPassword =
       'Password must be at least 8 characters with an uppercase letter and a number';
@@ -43,6 +38,5 @@ class AppStrings {
   static const String emailNotVerified =
       'Please verify your email first. Check your inbox.';
 
-  // Currency
   static const String currencyCode = 'MYR';
 }

@@ -1,15 +1,3 @@
-// Tests for the parts of the procedural GLB generator that are still alive:
-// room-scanner floor/wall finish overlays, the resolveShapeFamily keyword
-// classifier (shared with the supplier product form's dimension autofill),
-// and the GLB bounds parser (including a regression guard on a real bundled
-// asset).
-//
-// The FURNITURE generator was deleted with the procedural product-model
-// path: a product's 3D model is a Tripo AI model rescaled to the seller's
-// dimensions (see model_glb_resolver_test.dart / glb_rescaler_test.dart).
-//
-// Pure Dart tests (no widgets); fast and deterministic.
-
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -17,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart';
 
-/// Parses [bytes] and also verifies the GLB container header.
 GlbBounds parseGlb(Uint8List bytes) {
   final data = ByteData.sublistView(bytes);
   expect(data.getUint32(0, Endian.little), 0x46546C67,
@@ -164,7 +151,6 @@ void main() {
         resolveShapeFamily(category: 'Decor', name: 'Picture Frame'),
         'mirror',
       );
-      // Unknown decor names stay a real object ('default'), never a mat.
       expect(
         resolveShapeFamily(category: 'Decor', name: 'Abstract Statue'),
         'default',
@@ -191,11 +177,9 @@ void main() {
     });
 
     test('specific keywords win over generic ones', () {
-      // bedside/nightstand before 'bed'.
       expect(
           resolveShapeFamily(category: 'Furniture', name: 'Bedside Table'),
           'cabinet');
-      // armchair before 'chair'.
       expect(
           resolveShapeFamily(category: 'Furniture', name: 'Recliner Armchair'),
           'armchair');
@@ -232,10 +216,6 @@ void main() {
 
     test('parser falls back to scanning the buffer when POSITION min/max '
         'are missing', () {
-      // Take a real generated GLB and surgically strip the accessor
-      // min/max arrays from its JSON chunk (re-padding to 4-byte
-      // alignment), then make sure GlbBounds still computes the same box
-      // by scanning the raw vertex floats.
       final original = generateFloorGlb(
           finish: const FloorFinish(
               type: FloorFinishType.woodPlanks, colorArgb: 0xFFB08D6B));
@@ -265,7 +245,6 @@ void main() {
       chunk.setUint32(4, 0x4E4F534A, Endian.little);
       builder.add(chunk.buffer.asUint8List());
       builder.add(jsonOut);
-      // GLB JSON padding must be spaces (0x20), not NULs.
       builder.add(Uint8List(jsonPadded - jsonOut.length)
         ..fillRange(0, jsonPadded - jsonOut.length, 0x20));
       builder.add(rest);

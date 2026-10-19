@@ -7,14 +7,6 @@ import 'package:http/http.dart' as http;
 import '../../../../config/app_config.dart';
 import '../../domain/repositories/auth_repository.dart';
 
-/// Sends verification-email requests to the app's middleware server
-/// (`POST {verificationApiUrl}/verify-email/send` with `{email, uid}`).
-///
-/// The middleware emails a confirmation link via Brevo; opening the link
-/// marks the Firebase Auth user `emailVerified` (see server/). This
-/// datasource deliberately carries NO Firebase session — the post-register
-/// flow needs it to work AFTER the user has been signed out, and the verify
-/// screen's Resend path runs signed out too.
 class VerificationEmailDatasource {
   VerificationEmailDatasource({http.Client? client})
       : _client = client ?? http.Client();
@@ -56,8 +48,6 @@ class VerificationEmailDatasource {
       );
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      // The middleware's body is a server diagnostic, not a sentence for the
-      // person waiting on the email — log it and show our own short line.
       debugPrint('[verify] send rejected HTTP ${resp.statusCode}: ${resp.body}');
       throw const AuthException(
         'Could not send the verification email. Please try again.',

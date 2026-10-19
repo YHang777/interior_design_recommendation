@@ -2,16 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Bottom clearance for scroll views when the shell uses `extendBody: true`
-/// and the fallback constant is needed instead of `MediaQuery.padding.bottom`.
 const double kFloatingNavBarClearance = 84;
 
-/// Solid floating pill bottom navigation bar.
-///
-/// Floats above the content with a soft shadow and large corner radius —
-/// iOS-26/27-style placement, but with a solid surface fill (no glass blur).
-/// Unselected destinations are icon-only so 6 homeowner tabs still fit on a
-/// 360dp-wide phone.
 class FloatingNavBar extends StatelessWidget {
   const FloatingNavBar({
     super.key,
@@ -49,12 +41,6 @@ class FloatingNavBar extends StatelessWidget {
           ],
         ),
         clipBehavior: Clip.antiAlias,
-        // Inset the bar inside the 28px rounded pill: the selected indicator
-        // is up to 64dp wide, wider than a single ~51dp slot, so on the first
-        // / last tab it used to run flush against (and get clipped by) the
-        // rounded ends — the highlight looked "out of the box". 10dp of
-        // horizontal padding gives every indicator breathing room at both
-        // ends, on phone (360dp) and tablet widths alike.
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: NavigationBar(
@@ -64,9 +50,6 @@ class FloatingNavBar extends StatelessWidget {
             surfaceTintColor: Colors.transparent,
             backgroundColor: AppColors.surface,
             indicatorColor: AppColors.accent.withValues(alpha: 0.12),
-            // Icon-only for unselected tabs — the only way 6 destinations
-            // stay legible at 360dp ((360 - 32 margin - 20 inset) / 6
-            // ≈ 51.3dp per slot).
             labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
               final isSelected = states.contains(WidgetState.selected);

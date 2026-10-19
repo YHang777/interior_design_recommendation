@@ -17,13 +17,6 @@ import '../../data/budget_estimates.dart';
 import '../../data/budget_plan.dart';
 import '../../data/budget_providers.dart';
 
-/// Budget Planner — set a renovation budget, see live catalogue-based
-/// estimates per category, and export that summary as a shareable PDF.
-///
-/// The budget and preferences are persisted to the signed-in user's own
-/// `users/{uid}` document (field `budgetPlan`) through
-/// [budgetPlanProvider]/[BudgetRepository], and the dashboard's Budget tile
-/// reads the exact same store.
 class BudgetPlannerScreen extends ConsumerStatefulWidget {
   const BudgetPlannerScreen({super.key});
 
@@ -33,17 +26,12 @@ class BudgetPlannerScreen extends ConsumerStatefulWidget {
 }
 
 class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
-  /// Deliberately starts EMPTY — never seeded with a fake default. The
-  /// stored plan prefills it (see the prefill block in [build]).
   final _budgetCtrl = TextEditingController();
   String _selectedRoom = defaultBudgetRoom;
   bool _ecoFriendly = false;
 
-  /// Whether the first stored snapshot has been applied.
   bool _prefilled = false;
 
-  /// Set as soon as the user edits anything, so a late-arriving snapshot
-  /// can never clobber what they just typed.
   bool _touched = false;
 
   @override
@@ -52,14 +40,9 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
     super.dispose();
   }
 
-  /// Typed budget in whole ringgit; digits only, so "5,000" → 5000 and
-  /// an empty/garbage field → 0 (honest zero, never a placeholder).
   int get _budget =>
       int.tryParse(_budgetCtrl.text.replaceAll(RegExp('[^0-9]'), '')) ?? 0;
 
-  /// Write-through to Firestore on every edit (same pattern as the cart /
-  /// wishlist). Fire-and-forget: a failed write is logged, the stream
-  /// remains the source of truth and re-syncs on the next snapshot.
   void _persist() {
     final uid = ref.read(currentUserProvider)?.uid;
     if (uid == null || uid.isEmpty) return;
@@ -77,12 +60,8 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
     );
   }
 
-  /// A share/print call in flight — disables both buttons so one tap
-  /// cannot queue two OS dialogs.
   bool _working = false;
 
-  /// Fresh estimate lines for the export — read at tap time so the PDF
-  /// always matches what is on screen right now.
   List<EstimateLine> _exportLines() => buildEstimateLines(
         ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
         ecoFriendly: _ecoFriendly,
@@ -149,8 +128,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
     final planAsync = ref.watch(budgetPlanProvider);
     final productsAsync = ref.watch(marketplaceProductsProvider);
 
-    // Prefill from the stored plan exactly once, and only if the user has
-    // not already started editing. Absent plan → keep the empty defaults.
     if (!_prefilled && !_touched && planAsync.hasValue) {
       _prefilled = true;
       final plan = planAsync.valueOrNull;
@@ -178,7 +155,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
 
     String priceLabel(int i) {
       if (catalogue == null) {
-        // Loading → ellipsis; a failed load → dash (never a fake number).
         return productsAsync.hasError ? '—' : '…';
       }
       final price = lines[i].price;
@@ -295,9 +271,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                 },
               ),
               const SizedBox(height: 14),
-              // Its own Material so the ListTile's background and ink land
-              // on this layer instead of behind the card's DecoratedBox
-              // (framework assertion: "ink splashes may be invisible").
               Material(
                 type: MaterialType.transparency,
                 child: CheckboxListTile(
@@ -322,9 +295,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
 
             // ── Cost Breakdown (derived from the live catalogue) ──
             _SectionCard(title: 'Cost Breakdown', children: [
-              // Failed load vs genuinely-empty catalogue: both announce
-              // themselves — the user should never have to infer "not
-              // working" from a page of faint dashes.
               if (productsAsync.hasError && catalogue == null) ...[
                 _NoticeBanner(
                   color: AppColors.error,
@@ -379,9 +349,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                                 fontSize: 14,
                                 color: AppColors.textPrimary)),
                       ),
-                      // Money side also flexes: both boxes share the row
-                      // evenly, so the total stays flush right and scales
-                      // down instead of overflowing on big numbers.
                       Expanded(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
@@ -592,10 +559,6 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
   }
 }
 
-/// Inline notice used for the planner's failure/empty states: tinted
-/// container, icon, a clear title, a helpful message and an optional
-/// retry action. Loud enough to read as "something needs attention",
-/// never a faint dash the user has to squint at.
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({
     required this.color,

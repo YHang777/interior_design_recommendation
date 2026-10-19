@@ -9,13 +9,6 @@ import '../../../../shared/widgets/float_button.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
 
-/// Shown after registration: the middleware (via Brevo) has emailed a
-/// verification link. The link's page marks the Firebase user
-/// `emailVerified`; once it has, "I've Verified" proceeds to login.
-///
-/// Receives `email` and `uid` as route query parameters (the user is signed
-/// out at this point, so authState has no user to read them from); the
-/// Resend button uses them to re-request the email from the middleware.
 class VerifyEmailScreen extends ConsumerStatefulWidget {
   const VerifyEmailScreen({super.key});
 
@@ -86,8 +79,6 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
     final uid = uri.queryParameters['uid'];
 
     return Scaffold(
-      // Header-less: the centered hero heading below is the page title, and
-      // the pinned FloatingBackButton replaces the old AppBar back control.
       body: Stack(
         children: [
           Container(
@@ -105,7 +96,6 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                // Animated pulsing email icon with gradient background
                 Center(
                   child: ScaleTransition(
                     scale: _pulseAnimation,
@@ -149,7 +139,6 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
                       fontSize: 14, color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 8),
-                // Highlighted email display
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -178,7 +167,6 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
                 ),
                 const SizedBox(height: 40),
 
-                // Primary: I've Verified button
                 AuthButton(
                   label: AppStrings.iveVerified,
                   onPressed: () {
@@ -195,7 +183,6 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
                 ),
                 const SizedBox(height: 12),
 
-                // Secondary: Resend button
                 AuthButton(
                   label: _resending ? 'Sending…' : AppStrings.resendEmail,
                   onPressed: (uid == null || _resending) ? null : _resend,

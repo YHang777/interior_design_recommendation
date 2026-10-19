@@ -2,6 +2,7 @@ import type { UserRecord } from 'firebase-admin/auth';
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { ApiError } from '../lib/errors';
 import { fbAuth, fbDb, Timestamp } from '../config/firebase';
+import { env } from '../config/env';
 import type { AdminStats, AdminUserDetail, AdminUserRow, UserRole, VerificationStatus } from '../types/models';
 
 /**
@@ -99,6 +100,12 @@ function normalizeStatus(raw: unknown): VerificationStatus | 'unknown' {
   return 'unknown';
 }
 
+/** Same rule as requireAdmin: custom claim OR the ADMIN_UIDS allowlist. */
+export function isAdminUser(uid: string, auth?: UserRecord): boolean {
+  if (auth?.customClaims && (auth.customClaims as { admin?: unknown }).admin === true) return true;
+  return env.adminUids.includes(uid);
+}
+
 /** Merge one Auth record (optional) with one profile doc (optional). */
 function buildRow(
   uid: string,
@@ -113,6 +120,7 @@ function buildRow(
     email: (data.email as string) || auth?.email || '',
     name: (data.name as string) || auth?.displayName || '',
     role: profile ? normalizeRole(data.role) : 'unknown',
+    isAdmin: isAdminUser(uid, auth),
     verificationStatus: profile ? normalizeStatus(data.verificationStatus) : 'unknown',
     phone: (data.phone as string) || '',
     businessName: (data.businessName as string) || '',
@@ -259,6 +267,7 @@ export async function getStats(): Promise<AdminStats> {
       email: (data.email as string) || '',
       name: (data.name as string) || '',
       role,
+      isAdmin: isAdminUser(doc.id, authRecords.get(doc.id)),
       verificationStatus: status,
       createdAt: toIso(data.createdAt),
     });

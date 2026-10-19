@@ -1,12 +1,3 @@
-// AI design chat screen: no forced style/room gate, chips fill the input,
-// the transcript + chip context ship to the proxy, and saved chats can be
-// listed, reopened and deleted from the history sheet.
-//
-// Pumped at phone width (393×852, same as design_report_nav_test) so any
-// Row/RenderFlex overflow fails the run. The datasource talks to the real
-// ChatDatasource over a MockClient — the app's chatApiUrl points at the
-// deployed backend, so with a mocked http.Client no network is touched.
-
 import 'dart:async';
 import 'dart:convert';
 
@@ -46,11 +37,6 @@ MockClient _client(
       );
     });
 
-/// Cart that records adds without touching Firestore: `CartNotifier.build`
-/// and the real `addItem` reach for the repository, which a widget test
-/// cannot construct (there is no Firebase app under test). What these
-/// tests care about is the screen's side of the contract — WHICH product
-/// it hands the cart, and when it refuses to.
 class _RecordingCart extends CartNotifier {
   @override
   List<CartItem> build() => [];
@@ -89,9 +75,6 @@ Future<void> _pumpScreen(
   await tester.pumpAndSettle();
 }
 
-/// A live listing for suggestion tests. Empty image on purpose: a network
-/// URL would pull CachedNetworkImage's cache manager (path_provider), which
-/// a widget test cannot host — the card's error box renders fine.
 Product _chatProduct() => Product.fromJson({
       'id': 'sofa-1',
       'name': 'Nordic Sofa',
@@ -142,10 +125,9 @@ void main() {
     expect(find.text('Room Type'), findsNothing);
     expect(find.text('Welcome to the design assistant'), findsOneWidget);
 
-    // Quick shortcuts sit above the input.
     expect(_chip('Modern'), findsOneWidget);
     expect(_chip('Living Room'), findsOneWidget);
-    expect(capture.calls, 0); // nothing auto-sent
+    expect(capture.calls, 0);
   });
 
   testWidgets('chips fill the input with the composed phrase, never auto-send',
@@ -161,12 +143,10 @@ void main() {
     await tester.pump();
     expect(_inputText(tester), 'Modern Living Room');
 
-    // Swapping the style keeps the room slot.
     await tester.tap(_chip('Minimalist'));
     await tester.pump();
     expect(_inputText(tester), 'Minimalist Living Room');
 
-    // Tapping the selected chip clears its slot.
     await tester.tap(_chip('Minimalist'));
     await tester.pump();
     expect(_inputText(tester), 'Living Room');
@@ -185,7 +165,6 @@ void main() {
     await tester.pump();
     await _send(tester, 'Best sofa for this room?');
 
-    // User bubble in, AI reply in.
     expect(find.text('Best sofa for this room?'), findsOneWidget);
     expect(find.text(_aiReply), findsOneWidget);
     expect(capture.calls, 1);
@@ -198,7 +177,6 @@ void main() {
     expect(body['room'], 'Living Room');
     expect(body['products'], isEmpty);
 
-    // The typing placeholder is render-only — never persisted.
     final saved = await _savedMessages();
     expect(saved, hasLength(2));
     expect(saved.any((m) => m['text'] == '...'), isFalse);
@@ -239,15 +217,11 @@ void main() {
     final products = (body['products'] as List).cast<Map<String, dynamic>>();
     expect(products, hasLength(1));
     final p = products.single;
-    // The id the reply's suggestion cards key on…
     expect(p['id'], 'wall-1');
     expect(p['name'], 'Floral Wallpaper');
-    // …the seller's claim, led by the compact facts line so it survives
-    // the description clip…
     expect(p['description'],
         'In stock. Free delivery. Premium vinyl, waterproof.');
     expect(p['designStyle'], 'Floral');
-    // …and what the photo analysis actually saw, mismatch included.
     expect(p['photoLabels'], ['living room', 'sofa']);
     expect(p['photoSummary'], 'A living room with a grey sofa.');
     expect(p['photoMismatch'], true);
@@ -267,13 +241,11 @@ void main() {
 
     await _send(tester, 'Which sofa fits my room?');
 
-    // The card sits under the reply: photo, name, price, the model's why.
     expect(find.byType(ChatSuggestionCard), findsOneWidget);
     expect(find.text('Nordic Sofa'), findsOneWidget);
     expect(find.text('RM 1,299'), findsOneWidget);
     expect(find.text('Matches your grey floor.'), findsOneWidget);
 
-    // Add → the LIVE product lands in the cart, with the usual snackbar.
     await tester.tap(find.widgetWithText(TextButton, 'Add'));
     await tester.pumpAndSettle();
     final container = ProviderScope.containerOf(
@@ -288,7 +260,6 @@ void main() {
       'a card whose listing vanished says so and keeps the cart empty',
       (tester) async {
     final capture = _ChatCapture();
-    // Live catalogue stream: the listing is present when the reply lands…
     final catalogue = StreamController<List<Product>>();
     addTearDown(catalogue.close);
     catalogue.add([_chatProduct()]);
@@ -303,8 +274,6 @@ void main() {
     await _send(tester, 'Any ideas for my lounge?');
     expect(find.byType(ChatSuggestionCard), findsOneWidget);
 
-    // …and gone by the time the buyer taps Add. The snapshot card still
-    // renders (history survives), but the live lookup fails.
     catalogue.add(const []);
     await tester.pumpAndSettle();
     expect(find.byType(ChatSuggestionCard), findsOneWidget);
@@ -336,27 +305,23 @@ void main() {
     final message = 'What is the best sofa color for a modern living room?';
     final truncatedTitle = '${message.substring(0, 40)}…';
     await _send(tester, message);
-    expect(find.text(message), findsOneWidget); // the user bubble
+    expect(find.text(message), findsOneWidget);
 
-    // Open the history sheet — the row title is the truncated first message.
     await tester.tap(find.byIcon(Icons.history));
     await tester.pumpAndSettle();
     expect(find.text(truncatedTitle), findsOneWidget);
     expect(find.text('2 messages · Just now'), findsOneWidget);
 
-    // Tap the row: sheet closes, that chat is open again.
     await tester.tap(find.text(truncatedTitle));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.history), findsOneWidget);
-    expect(find.text(message), findsWidgets); // bubbles back on screen
+    expect(find.text(message), findsWidgets);
 
-    // New chat: composer fresh, welcome back, history untouched.
     await tester.tap(find.byIcon(Icons.edit_note));
     await tester.pumpAndSettle();
     expect(find.text('Welcome to the design assistant'), findsOneWidget);
     expect(find.text(message), findsNothing);
 
-    // Delete flow: open sheet → delete → confirm → gone.
     await tester.tap(find.byIcon(Icons.history));
     await tester.pumpAndSettle();
     expect(find.text(truncatedTitle), findsOneWidget);
@@ -368,7 +333,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('No saved chats'), findsOneWidget);
 
-    // Store agrees.
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(ChatHistoryStore.prefsKey) ?? '[]';
     expect(jsonDecode(raw) as List, isEmpty);
@@ -402,7 +366,6 @@ void main() {
 
     expect(find.text('The design assistant could not reply. Try again.'),
         findsOneWidget);
-    // The error is persisted as the model's turn, so reopening keeps it.
     final saved = await _savedMessages();
     expect(saved.last['text'],
         'The design assistant could not reply. Try again.');

@@ -1,8 +1,3 @@
-// Tests for supplier invoices — the document issued the moment a supplier
-// accepts an order.
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -131,9 +126,6 @@ void main() {
     });
 
     test('unattributed multi-seller shipping is never invented', () {
-      // No per-supplier shares recorded, several sellers → shippingShareFor
-      // returns 0 rather than guessing a split. The invoice must not silently
-      // bill a share the order never recorded.
       final order = _order(
         items: [
           _item(unitPrice: 100, supplierId: 's1'),
@@ -162,7 +154,6 @@ void main() {
 
       expect(inv.orderDiscount, 10);
       expect(inv.orderTax, 6);
-      // Never folded into the supplier's charge.
       expect(inv.total, 100);
     });
 
@@ -307,13 +298,6 @@ void main() {
     });
   });
 
-  // These are not style checks — `firestore.rules` lets a CUSTOMER update an
-  // order only while the `invoices` value is byte-identical
-  // (`diff().affectedKeys()` must not name it). Every full-document write in
-  // `MarketplaceRepository` that is NOT an invoice write routes through
-  // [preserveStoredInvoices], and these tests pin the two failure modes it
-  // exists to prevent: a parse → serialise drift, and `Order.toJson` adding an
-  // `invoices: {}` key to a document that never had one.
   group('invoices stay invisible to the order rules', () {
     test('an invoice survives a byte-identical JSON round-trip', () {
       final inv = _issue(
@@ -371,9 +355,6 @@ void main() {
 
     test('preserveStoredInvoices drops the key when the store never had one',
         () {
-      // Order.toJson always emits `invoices: {}`. On a legacy order that
-      // predates the feature that would read as an ADD to the rules — and the
-      // customer's Cancel button would fail with permission-denied.
       final payload = <String, dynamic>{
         'status': 'cancelled',
         'invoices': <String, dynamic>{},

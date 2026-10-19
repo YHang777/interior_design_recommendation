@@ -1,4 +1,3 @@
-/// A product category managed by admin via the server API.
 class ProductCategory {
   final String id;
   final String name;

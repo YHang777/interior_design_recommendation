@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { statsApi } from '../api/api';
 import { ApiError } from '../api/client';
 import type { AdminStats } from '../api/types';
-import { RoleBadge, StatusBadge } from '../components/Badge';
+import { RoleBadges, StatusBadge } from '../components/Badge';
 import {
   IconAlertTriangle,
   IconBag,
@@ -37,7 +37,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'customers',
       label: 'Customers',
       value: stats.customers,
-      hint: 'Homeowner accounts',
+      hint: 'Homeowners',
       tone: 'accent',
       icon: <IconUsers size={17} />,
     },
@@ -45,7 +45,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'suppliers',
       label: 'Suppliers',
       value: stats.suppliers,
-      hint: 'Seller accounts',
+      hint: 'Sellers',
       tone: 'success',
       icon: <IconStore size={17} />,
     },
@@ -53,7 +53,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'pending',
       label: 'Pending approvals',
       value: stats.pendingSuppliers,
-      hint: 'Awaiting verification',
+      hint: 'Awaiting review',
       tone: 'warning',
       icon: <IconAlertTriangle size={17} />,
       attention: stats.pendingSuppliers > 0,
@@ -62,7 +62,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'rejected',
       label: 'Rejected suppliers',
       value: stats.rejectedSuppliers,
-      hint: 'Blocked from the marketplace',
+      hint: 'Blocked',
       tone: 'danger',
       icon: <IconXCircle size={17} />,
     },
@@ -70,7 +70,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'verificationQueue',
       label: 'IC applications',
       value: stats.pendingVerifications,
-      hint: 'Identity uploads awaiting review',
+      hint: 'In queue',
       tone: 'accent',
       icon: <IconShield size={17} />,
       attention: stats.pendingVerifications > 0,
@@ -79,7 +79,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'products',
       label: 'Products',
       value: stats.products,
-      hint: 'Active listings',
+      hint: 'Listings',
       tone: 'neutral',
       icon: <IconBox size={17} />,
     },
@@ -87,7 +87,7 @@ function buildKpis(stats: AdminStats): Kpi[] {
       key: 'orders',
       label: 'Orders',
       value: stats.orders,
-      hint: 'Placed to date',
+      hint: 'To date',
       tone: 'neutral',
       icon: <IconBag size={17} />,
     },
@@ -121,11 +121,8 @@ export function OverviewPage() {
     <div className="page">
       <div className="page-intro">
         <div>
-          <h2>Marketplace health at a glance</h2>
-          <p className="subtitle">
-            Headline numbers from Firebase Auth, Firestore products and orders. Refresh to pull the
-            latest snapshot.
-          </p>
+          <h2>Marketplace health</h2>
+          <p className="subtitle">Latest snapshot of users, listings and orders.</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading}>
           <IconRefresh size={14} />
@@ -185,8 +182,8 @@ export function OverviewPage() {
           <h2>Newest signups</h2>
           {stats && (
             <span className="panel-note">
-              {stats.authOnlyAccounts.toLocaleString()} auth-only account
-              {stats.authOnlyAccounts === 1 ? '' : 's'} (no profile document)
+              {stats.authOnlyAccounts.toLocaleString()} without profile
+              {stats.authOnlyAccounts === 1 ? '' : 's'}
             </span>
           )}
         </div>
@@ -224,7 +221,7 @@ export function OverviewPage() {
                       <span className="mono">{u.email}</span>
                     </td>
                     <td>
-                      <RoleBadge role={u.role} />
+                      <RoleBadges role={u.role} isAdmin={u.isAdmin} />
                     </td>
                     <td>
                       <StatusBadge status={u.verificationStatus} />
@@ -239,7 +236,7 @@ export function OverviewPage() {
                       <span className="state-icon">
                         <IconUsers size={28} />
                       </span>
-                      <span>No users yet — accounts appear here as they register.</span>
+                      <span>No users yet.</span>
                     </div>
                   </td>
                 </tr>

@@ -18,11 +18,6 @@ import '../../../../../shared/widgets/quantity_stepper.dart';
 import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Shopping cart with quantity controls, swipe-to-delete (with UNDO),
-/// free-shipping progress and a sticky checkout bar. Every row is
-/// reconciliated against the live catalogue ([cartRowsProvider]) so
-/// price/stock changes surface immediately instead of on the checkout
-/// transaction.
 class CartScreen extends ConsumerWidget {
   const CartScreen({super.key});
 
@@ -39,9 +34,6 @@ class CartScreen extends ConsumerWidget {
     final config = configAsync.valueOrNull;
     final isHydrating = uid != null && !hydrated && cart.isEmpty;
 
-    // Money shown in the checkout bar follows the LIVE product prices the
-    // rows are displayed against, billed at the effective (stock-capped)
-    // quantity so it always matches what the order transaction accepts.
     final subtotal = rows.fold<int>(
         0, (sum, row) => sum + row.live.price * row.effectiveQty);
     final hasInvalidRows = rows.any((row) => row.unavailable);
@@ -127,14 +119,6 @@ class CartScreen extends ConsumerWidget {
                                   ],
                                 ),
                                 const SizedBox(height: 16),
-                                // The free-shipping banner and the checkout summary
-                                // must agree: both go through the shared calculator
-                                // (free once the POST-discount chargeable amount
-                                // reaches the threshold). The raw fee itself comes
-                                // from the products' shipping settings — the same
-                                // derivation checkout commits. Until store config
-                                // has loaded, a neutral skeleton is shown instead
-                                // of invented defaults.
                                 if (config == null)
                                   const _FreeShippingSkeleton()
                                 else
@@ -202,9 +186,6 @@ class CartScreen extends ConsumerWidget {
   }
 }
 
-/// Free-shipping progress — bar + remaining amount below the threshold,
-/// celebration once unlocked. Computed with the shared [PriceBreakdown]
-/// rules so it can never contradict the checkout summary.
 class _FreeShippingCard extends StatelessWidget {
   const _FreeShippingCard({
     required this.chargeableBase,
@@ -214,7 +195,6 @@ class _FreeShippingCard extends StatelessWidget {
     required this.taxRate,
   });
 
-  /// Pre-discount subtotal of the cart rows.
   final int chargeableBase;
   final int discountPercent;
   final int shippingFee;
@@ -223,9 +203,6 @@ class _FreeShippingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Nothing to progress toward when the products themselves ship free —
-    // a static success row is honest where "unlocked at RM X" would be
-    // meaningless.
     if (shippingFee <= 0) {
       return Container(
         padding: const EdgeInsets.all(14),
@@ -325,8 +302,6 @@ class _FreeShippingCard extends StatelessWidget {
   }
 }
 
-/// Neutral block shown in place of the free-shipping banner while store
-/// config is still loading.
 class _FreeShippingSkeleton extends StatelessWidget {
   const _FreeShippingSkeleton();
 
@@ -364,10 +339,6 @@ class _FreeShippingSkeleton extends StatelessWidget {
   }
 }
 
-/// A single cart line: thumb, name, unit price, stepper, line total, remove.
-/// State comes from the reconciliated [CartRow] — the live catalogue product
-/// wins for name/price/stock, and rows whose product vanished or went
-/// off-sale carry their own banner.
 class _CartItemCard extends ConsumerWidget {
   const _CartItemCard({required this.row, required this.onRemove});
 
@@ -460,8 +431,6 @@ class _CartItemCard extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    // Seller attribution — only rendered for admin-verified
-                    // suppliers (nothing at all otherwise).
                     VerifiedSellerLine(supplier: product.supplier),
                     Text(
                       '${Formatters.myr(product.price)} each',
@@ -505,9 +474,6 @@ class _CartItemCard extends ConsumerWidget {
                                     )
                                 : null,
                           ),
-                        // One flex child only (no Spacer): it takes exactly
-                        // the remaining width, stays flush right, and the
-                        // money shrinks instead of overflowing the row.
                         Expanded(
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
@@ -578,8 +544,6 @@ class _RowNotice extends StatelessWidget {
   }
 }
 
-/// Sticky bottom bar: subtotal, membership note, unavailable-item gate and
-/// the full-width checkout button.
 class _CheckoutBar extends StatelessWidget {
   const _CheckoutBar({
     required this.itemCount,
@@ -641,8 +605,6 @@ class _CheckoutBar extends StatelessWidget {
                       color: AppColors.textPrimary,
                     ),
                   ),
-                  // One flex child only (no Spacer): flush right, and the
-                  // total scales down rather than overflowing the row.
                   Expanded(
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
@@ -691,8 +653,6 @@ class _CheckoutBar extends StatelessWidget {
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       foregroundColor: Colors.white,
-                      // Tight 52px wrapper — keep the label's line box
-                      // (descenders included) inside the button at any scale.
                       padding: const EdgeInsets.symmetric(
                           vertical: 10, horizontal: 16),
                       shape: RoundedRectangleBorder(
@@ -712,14 +672,12 @@ class _CheckoutBar extends StatelessWidget {
   }
 }
 
-/// Placeholder cards shown while the Firestore cart hydrates.
 class _CartSkeleton extends StatelessWidget {
   const _CartSkeleton();
 
   @override
   Widget build(BuildContext context) {
     return ListView(
-      // Top clearance for the pinned floating back button.
       padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
       children: [
         for (var i = 0; i < 4; i++) ...[

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Consistent empty state used across marketplace, cart, wishlist, orders, etc.
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
@@ -27,7 +26,6 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Larger icon container with gradient background
             Container(
               width: 100,
               height: 100,

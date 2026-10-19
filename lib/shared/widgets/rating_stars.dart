@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Star rating display with optional review count.
 class RatingStars extends StatelessWidget {
   const RatingStars({
     super.key,

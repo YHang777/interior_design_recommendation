@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Consistent section header with optional trailing action and leading accent bar.
 class SectionHeader extends StatelessWidget {
   const SectionHeader({
     super.key,
@@ -21,7 +20,6 @@ class SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          // Leading accent bar
           Container(
             width: 4,
             height: 20,
@@ -31,7 +29,6 @@ class SectionHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Title
           Expanded(
             child: Text(
               title,
@@ -44,7 +41,6 @@ class SectionHeader extends StatelessWidget {
               ),
             ),
           ),
-          // Trailing action
           if (trailingLabel != null)
             GestureDetector(
               onTap: onTrailing,

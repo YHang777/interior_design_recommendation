@@ -1,12 +1,8 @@
-// Automatic FlutterFlow imports
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'index.dart'; // Imports other custom widgets
+import 'index.dart';
 import 'package:flutter/material.dart';
-// Begin custom widget code
-// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-//AR Flutter Plugin
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
@@ -16,7 +12,6 @@ import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
 import 'package:ar_flutter_plugin_2/datatypes/node_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 
-//Other custom imports
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart';
@@ -42,9 +37,7 @@ class LocalAndWebObjects extends StatefulWidget {
 class _LocalAndWebObjectsState extends State<LocalAndWebObjects> {
   ARSessionManager? arSessionManager;
   ARObjectManager? arObjectManager;
-  //String localObjectReference;
   ARNode? localObjectNode;
-  //String webObjectReference;
   ARNode? webObjectNode;
   ARNode? fileSystemNode;
   HttpClient? httpClient;
@@ -122,15 +115,10 @@ class _LocalAndWebObjectsState extends State<LocalAndWebObjects> {
         );
     this.arObjectManager!.onInitialize();
 
-    //Download model to file system
     httpClient = new HttpClient();
     _downloadFile(
         "https://github.com/KhronosGroup/glTF-Sample-Models/raw/refs/heads/main/2.0/Duck/glTF-Binary/Duck.glb",
         "LocalDuck.glb");
-    // Alternative to use type fileSystemAppFolderGLTF2:
-    //_downloadAndUnpack(
-    //    "https://drive.google.com/uc?export=download&id=1fng7yiK0DIR0uem7XkV2nlPSGH9PysUs",
-    //    "Chicken_01.zip");
   }
 
   Future<File> _downloadFile(String url, String filename) async {
@@ -153,7 +141,6 @@ class _LocalAndWebObjectsState extends State<LocalAndWebObjects> {
     await file.writeAsBytes(bytes);
     print("Downloading finished, path: " + '$dir/$filename');
 
-    // To print all files in the directory: print(Directory(dir).listSync());
     try {
       await ZipFile.extractToDirectory(
           zipFile: File('$dir/$filename'), destinationDir: Directory(dir));
@@ -203,11 +190,6 @@ class _LocalAndWebObjectsState extends State<LocalAndWebObjects> {
           type: NodeType.fileSystemAppFolderGLB,
           uri: "LocalDuck.glb",
           scale: Vector3(0.2, 0.2, 0.2));
-      //Alternative to use type fileSystemAppFolderGLTF2:
-      //var newNode = ARNode(
-      //    type: NodeType.fileSystemAppFolderGLTF2,
-      //    uri: "Chicken_01.gltf",
-      //    scale: Vector3(0.2, 0.2, 0.2));
       bool? didAddFileSystemNode = await this.arObjectManager!.addNode(newNode);
       this.fileSystemNode = (didAddFileSystemNode!) ? newNode : null;
     }

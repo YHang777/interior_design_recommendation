@@ -1,14 +1,6 @@
 import '../../../../core/utils/formatters.dart';
 import '../../../../models/product.dart';
 
-/// Pure estimation logic for the budget planner: line-item estimates
-/// derived from the LIVE marketplace catalogue, plus the plain-text twin
-/// of the planner's PDF export.
-///
-/// No hardcoded prices anywhere — a category with no matching listings
-/// yields `price == null` and is rendered as "— / no price data yet".
-
-/// One row of the planner's cost breakdown.
 class EstimateLine {
   const EstimateLine({
     required this.label,
@@ -16,20 +8,15 @@ class EstimateLine {
     required this.matches,
   });
 
-  /// Display label, e.g. "Wall Paint".
   final String label;
 
-  /// Median price of the matching listings, or null when there is no price
-  /// data yet (never an invented number).
   final int? price;
 
-  /// How many listings the price was derived from (0 → [price] is null).
   final int matches;
 
   bool get hasData => price != null;
 }
 
-/// The five budget lines, in display order.
 const budgetLineLabels = [
   'Wall Paint',
   'Flooring',
@@ -38,7 +25,6 @@ const budgetLineLabels = [
   'Accessories',
 ];
 
-/// Marketplace product categories that feed each budget line.
 const List<List<String>> _budgetLineCategories = [
   ['Paint', 'Wall Covering'],
   ['Flooring'],
@@ -47,9 +33,6 @@ const List<List<String>> _budgetLineCategories = [
   ['Decor', 'Textiles'],
 ];
 
-/// Median of [prices]: the middle value, or the mean of the two middle
-/// values for an even count. Robust to a single outlier listing, which is
-/// why it beats both "cheapest" and "average" for a rough estimate.
 int? medianPrice(Iterable<int> prices) {
   final sorted = prices.toList()..sort();
   if (sorted.isEmpty) return null;
@@ -58,12 +41,6 @@ int? medianPrice(Iterable<int> prices) {
   return ((sorted[mid - 1] + sorted[mid]) / 2).round();
 }
 
-/// Builds one [EstimateLine] per budget line from [products].
-///
-/// - Only ACTIVE listings are priced (a paused listing is not a live quote).
-/// - When [ecoFriendly] is on, only eco-friendly listings are considered —
-///   a category with no eco listing honestly reports no price data.
-/// - Category matching is case-insensitive.
 List<EstimateLine> buildEstimateLines(
   List<Product> products, {
   required bool ecoFriendly,
@@ -89,13 +66,9 @@ List<EstimateLine> buildEstimateLines(
   ];
 }
 
-/// Total of the lines that have price data (null-priced lines contribute
-/// nothing — the summary is explicit that it only covers known data).
 int estimateTotal(List<EstimateLine> lines) =>
     lines.fold<int>(0, (sum, l) => sum + (l.price ?? 0));
 
-/// Plain-text twin of the planner's PDF export — a real, shareable
-/// summary of what the screen shows, not a mocked file.
 String buildBudgetReport({
   required String room,
   required int budgetRm,

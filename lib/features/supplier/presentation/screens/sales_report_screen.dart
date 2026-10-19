@@ -20,14 +20,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Sales report — the printable counterpart to Analytics: KPI grid, a
-/// hand-rolled 6-month bar chart (no chart dependency), top products,
-/// customer insights and Share/Print PDF actions.
-///
-/// Every figure follows the supplier_providers revenue semantics: only THIS
-/// supplier's line items + their shipping share, cancelled orders excluded —
-/// except conversion rate, whose denominator is ALL orders involving the
-/// supplier (see [conversionRate]).
 class SalesReportScreen extends ConsumerStatefulWidget {
   const SalesReportScreen({super.key});
 
@@ -37,8 +29,6 @@ class SalesReportScreen extends ConsumerStatefulWidget {
 }
 
 class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
-  /// A share/print call in flight — disables both buttons so one tap cannot
-  /// queue two OS dialogs (same guard as OrderInvoiceScreen).
   bool _working = false;
 
   Future<void> _refresh() async {
@@ -46,7 +36,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
     try {
       final _ = await ref.refresh(supplierOrdersProvider(uid).future);
     } catch (_) {
-      // Best effort pull-to-refresh.
     }
   }
 
@@ -62,7 +51,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
     return '$amount';
   }
 
-  /// Rates are 0–1 doubles; null renders as '—' (never a misleading 0%).
   static String _percent(double? rate) =>
       rate == null ? '—' : '${(rate * 100).round()}%';
 
@@ -215,8 +203,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
     );
   }
 
-  /// Full-height EmptyState inside a scroll view so the pull-to-refresh
-  /// gesture keeps working (same pattern as SalesAnalyticsScreen).
   Widget _retryScrollable(IconData icon, String title, String subtitle,
       {bool withRetry = true}) {
     return LayoutBuilder(
@@ -246,7 +232,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
     final insights = customerInsights(orders, uid, now: now);
     final top = topProductsByUnits(orders, uid);
 
-    // Months oldest → newest (includes the current partial month).
     final months = List.generate(
         6, (i) => DateTime(now.year, now.month - (5 - i), 1));
     final monthly = months.map((m) => revenueInMonth(orders, uid, m)).toList();
@@ -355,7 +340,7 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
                             month: months[i],
                             value: monthly[i],
                             barHeight:
-                                monthly[i] / maxMonthly * 120, // 120 max px
+                                monthly[i] / maxMonthly * 120,
                             showYear: months[i].year != now.year,
                           ),
                         ),
@@ -421,7 +406,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
         ],
       );
 
-  /// StatCard plus its honesty caption (small hint text under the card).
   Widget _statCell(StatCard card, String caption) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -438,7 +422,6 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
         ],
       );
 
-  /// Simple surface card for the customer-insight figures.
   Widget _plainCell(String label, String value) => Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(

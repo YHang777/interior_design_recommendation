@@ -1,10 +1,3 @@
-// Tests for the Design Report PDF renderer — the document the customer
-// shares or prints from the report screen.
-//
-// `DesignReportPdf.bytes` is pure (no IO, no plugins), so the document build
-// can be exercised headless. The share/print actions wrap the `printing`
-// plugin and are not covered here.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/design_report.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -65,7 +58,6 @@ DesignReportData _report({List<FurniturePlacement> furniture = const []}) {
   ]);
 }
 
-/// PDF files start with the magic `%PDF-` and are not empty stubs.
 void expectValidPdf(List<int> bytes, {int minBytes = 500}) {
   expect(bytes.length, greaterThan(minBytes),
       reason: 'PDF should be a real document, not an empty stub');

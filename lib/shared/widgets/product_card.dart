@@ -7,13 +7,6 @@ import 'product_image.dart';
 import 'rating_stars.dart';
 import 'verified_badge.dart';
 
-/// Reusable product card used in marketplace grid and related-product rails.
-/// All colors from AppColors — no raw Color() values.
-///
-/// Visual language (Loop 3): hero image (tag `product-{id}`), discount and
-/// eco badges top-left, wishlist heart top-right, low-stock chip and overlay
-/// quick actions (AR, add-to-cart) on the image, name/rating/price below.
-/// Out-of-stock items get a scrim and lose their buy affordances.
 class ProductCard extends StatelessWidget {
   const ProductCard({
     super.key,
@@ -79,7 +72,6 @@ class ProductCard extends StatelessWidget {
                       ),
                     ),
 
-                    // Top-left badges: discount first, eco underneath.
                     Positioned(
                       top: 8,
                       left: 8,
@@ -104,7 +96,6 @@ class ProductCard extends StatelessWidget {
                       ),
                     ),
 
-                    // Wishlist heart (top-right)
                     if (onToggleWishlist != null)
                       Positioned(
                         top: 6,
@@ -146,7 +137,6 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
 
-                    // Low stock chip (bottom-left)
                     if (product.isLowStock)
                       Positioned(
                         left: 8,
@@ -166,7 +156,6 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
 
-                    // Out of stock scrim + label
                     if (product.isOutOfStock)
                       Positioned.fill(
                         child: Container(
@@ -188,7 +177,6 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
 
-                    // Bottom-right quick actions: AR preview above add-to-cart.
                     Positioned(
                       right: 6,
                       bottom: 6,
@@ -235,7 +223,6 @@ class ProductCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Name
                       Text(
                         product.name,
                         maxLines: 1,
@@ -249,9 +236,6 @@ class ProductCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
 
-                      // Seller + verified pill — own row (never inside the
-                      // ellipsised name row); renders nothing at all for
-                      // unverified suppliers.
                       VerifiedSellerLine(
                         supplier: product.supplier,
                         nameStyle: GoogleFonts.poppins(
@@ -262,7 +246,6 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
 
-                      // Rating (or "New" for unreviewed items)
                       if (!compact) ...[
                         if (product.ratingCount > 0)
                           RatingStars(
@@ -287,7 +270,6 @@ class ProductCard extends StatelessWidget {
                           ),
                       ],
 
-                      // Price row
                       Row(
                         children: [
                           Text(
@@ -300,8 +282,6 @@ class ProductCard extends StatelessWidget {
                           ),
                           if (product.originalPrice != null) ...[
                             const SizedBox(width: 4),
-                            // Shrink rather than ellipsize: a cut price
-                            // ('RM 12,3…') reads as a different number.
                             Flexible(
                               child: FittedBox(
                                 fit: BoxFit.scaleDown,
@@ -332,7 +312,6 @@ class ProductCard extends StatelessWidget {
   }
 }
 
-/// Small filled label used on the card image (discount %, eco).
 class _Badge extends StatelessWidget {
   const _Badge({
     required this.text,
@@ -370,7 +349,6 @@ class _Badge extends StatelessWidget {
   }
 }
 
-/// Small circular overlay action (AR / add-to-cart) on the card image.
 class _CircleAction extends StatelessWidget {
   const _CircleAction({
     required this.icon,
@@ -382,7 +360,6 @@ class _CircleAction extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
 
-  /// Callers guard visibility; null simply leaves the button inert.
   final VoidCallback? onTap;
 
   final String tooltip;

@@ -1,8 +1,3 @@
-// Tests for the Room-mode finish catalog (RoomFinishCatalog) and the
-// FinishSelection value class.
-//
-// Pure Dart — no widgets, no Firebase, no filesystem.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart'
     show FloorFinishType, WallFinishType;
@@ -77,9 +72,6 @@ void main() {
         () {
       final options = RoomFinishCatalog.floorSizeOptionsM;
       expect(options, isNotEmpty);
-      // The list ends with a -1.0 sentinel for the "Custom" chip (it opens
-      // the text-input dialog); every REAL preset must be positive and
-      // strictly ascending.
       final presets = options.where((o) => o >= 0).toList();
       expect(presets, isNotEmpty);
       for (var i = 0; i < presets.length; i++) {
@@ -163,8 +155,6 @@ void main() {
       expect(oneField.wallType, base.wallType);
       expect(oneField.wallColorArgb, base.wallColorArgb);
 
-      // copyWith with no arguments is the identity (equal, not identical —
-      // copyWith returns a fresh instance by design).
       expect(base.copyWith(), base);
     });
   });

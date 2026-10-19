@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usersApi } from '../api/api';
 import { ApiError } from '../api/client';
 import type { AdminUserRow, VerificationStatus } from '../api/types';
-import { RoleBadge, StatusBadge } from '../components/Badge';
+import { RoleBadges, StatusBadge } from '../components/Badge';
 import { DataTable, type Column, type SortState } from '../components/DataTable';
 import { DeleteUserDialog } from '../components/DeleteUserDialog';
 import { PasswordResetModal } from '../components/PasswordResetModal';
@@ -43,10 +43,9 @@ function formatDate(iso: string | null): string {
 }
 
 const ROLE_SUBTITLE: Record<RoleFilter, string> = {
-  all: 'Every account in the marketplace — customers, suppliers and auth-only users. Manage passwords and guarded deletion from any row.',
-  homeowner: 'Homeowner accounts: monitor activity, help with passwords, delete accounts.',
-  supplier:
-    'Approve or reject sellers; their status drives the marketplace’s “Verified sellers only” filter.',
+  all: 'All marketplace accounts.',
+  homeowner: 'Homeowner accounts.',
+  supplier: 'Seller accounts and approvals.',
 };
 
 const ROLE_HEADING: Record<RoleFilter, string> = {
@@ -159,8 +158,8 @@ export function UsersPage({ role, showRoleChips = false, query, onQueryChange }:
         key: 'role',
         header: 'Role',
         sortValue: (u) => u.role,
-        render: (u) => <RoleBadge role={u.role} />,
-        width: '110px',
+        render: (u) => <RoleBadges role={u.role} isAdmin={u.isAdmin} />,
+        width: '150px',
       },
       {
         key: 'status',

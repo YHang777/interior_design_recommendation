@@ -5,6 +5,10 @@ import { statsRouter } from './stats.routes';
 import { verificationRouter } from './verification.routes';
 import { createProductFlagsRouter } from './product-flags.routes';
 import { defaultProductFlagsDeps } from '../services/product-flags.service';
+import { createProductsRouter } from './products.routes';
+import { defaultProductsDeps } from '../services/products.service';
+import { createOrdersRouter } from './orders.routes';
+import { defaultOrdersDeps } from '../services/orders.service';
 import { firebaseConfigured } from '../config/firebase';
 import { verificationEmailConfigured } from '../services/verification-email.service';
 
@@ -27,3 +31,8 @@ apiRouter.use('/stats', statsRouter);
 apiRouter.use('/verification', verificationRouter);
 // Photo-vs-claim review queue — authenticate + requireAdmin applied inside.
 apiRouter.use('/products', createProductFlagsRouter(defaultProductFlagsDeps()));
+// Catalogue CRUD — mounted AFTER the flags router so /products/flags* keeps
+// winning the match; this router owns GET / and GET|PATCH|DELETE /:id.
+apiRouter.use('/products', createProductsRouter(defaultProductsDeps()));
+// Order list/detail/status — authenticate + requireAdmin applied inside.
+apiRouter.use('/orders', createOrdersRouter(defaultOrdersDeps()));

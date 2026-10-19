@@ -25,7 +25,6 @@ import '../../features/supplier/presentation/screens/supplier_profile_screen.dar
 import '../../features/supplier/presentation/screens/supplier_shell.dart';
 import '../../features/supplier/presentation/screens/verification_application_screen.dart';
 
-// Marketplace feature
 import '../../features/customer/marketplace/presentation/screens/marketplace_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/product_detail_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/cart_screen.dart';
@@ -42,29 +41,15 @@ import '../../shared/screens/order_invoice_screen.dart';
 
 import 'route_names.dart';
 
-/// GoRouter provider with role-based redirect logic.
-///
-/// The router uses [refreshListenable] (the auth state notifier) to
-/// re-evaluate redirects when auth state changes, instead of recreating
-/// the entire router. This prevents the login page from flashing on app
-/// restart or after a successful login.
 final appRouterProvider = Provider<GoRouter>((ref) {
-  // Use a ChangeNotifier that fires on auth state changes. This lets
-  // GoRouter re-evaluate redirects without recreating the router (which
-  // would flash the login page on app restart or after login).
   final authRefresh = ref.watch(authRefreshProvider);
 
   return GuardedGoRouter(
     initialLocation: '/login',
-    // Re-evaluate the redirect whenever the auth state changes.
     refreshListenable: authRefresh,
     redirect: (context, state) {
-      // Read the *current* auth state at redirect time (not captured at
-      // router creation).
       final authState = ref.read(authStateProvider);
 
-      // While Firebase Auth is checking the session, don't redirect —
-      // this prevents the login page from flashing on app restart.
       final isLoading = authState.isLoading;
       if (isLoading) return null;
 
@@ -85,17 +70,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation.startsWith('/supplier')) {
         return '/home';
       }
-      // Suppliers may browse the storefront (grid + product detail) so they
-      // can preview their own live listings ("View in store"), and may open
-      // the AR viewer from a product's "View in AR" preview. Cart, checkout,
-      // orders and wishlist remain buyer-only.
       final isStorefrontBrowse =
           state.matchedLocation == '/marketplace' ||
               state.matchedLocation.startsWith('/marketplace/product/') ||
               state.matchedLocation == '/ar-viewer';
-      // The invoice screen is shared (buyer receipt + seller paperwork), so
-      // suppliers must reach /orders/... without being bounced to the
-      // dashboard they normally get sent to outside /supplier.
       final isSharedInvoice =
           state.matchedLocation.startsWith('/orders/');
       if (isLoggedIn && user.isSupplier &&
@@ -376,27 +354,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-/// [GoRouter] that makes the duplicate-page-key red screen impossible.
-///
-/// go_router keys each shell page by `route.hashCode`, not by path, so
-/// pushing a location that matches *through* a shell (e.g. `/design`)
-/// while a full-screen route (`/design/report`, cart, checkout, …) sits
-/// on top of the stack appends a SECOND copy of that shell: two pages,
-/// one `LocalKey`, and Flutter's Navigator fails
-/// `!keyReservation.contains(key)` (navigator.dart:4096).
-///
-/// The report screen's "Create a design" hit this when it used
-/// `pushNamed(homeownerScan)`, and the dashboard's `/ai`,
-/// `/marketplace` and `/saved` shortcuts were the same shape.
-/// Rather than trusting every call site, [push] reroutes exactly that
-/// combination to [go]: switching tabs replaces the stack, which is
-/// what the shell does anyway, and Back lands on the tab's previous
-/// screen instead of a red screen. A push that targets a *different
-/// branch* of the shell currently on top is rerouted to [go] for the
-/// same reason — it would otherwise show the pushed screen while
-/// [StatefulNavigationShell.currentIndex] (and the FloatingNavBar)
-/// keeps pointing at the previous tab. Every other push flows through
-/// unchanged.
 class GuardedGoRouter extends GoRouter {
   GuardedGoRouter({
     required List<RouteBase> routes,
@@ -422,13 +379,8 @@ class GuardedGoRouter extends GoRouter {
     return super.push<T>(location, extra: extra);
   }
 
-  /// True when pushing [location] onto the current stack would put a
-  /// second copy of a shell route in the root navigator.
   bool _wouldStackSecondShell(String location, Object? extra) {
     final RouteMatchList current = routerDelegate.currentConfiguration;
-    // Only a full-screen route pushed at the root (imperative match on
-    // top) creates the window — a shell-through push while the shell is
-    // last recurses into the shell's children and is safe.
     if (current.matches.isEmpty ||
         current.matches.last is! ImperativeRouteMatch) {
       return false;
@@ -438,37 +390,21 @@ class GuardedGoRouter extends GoRouter {
     return next.matches.any((RouteMatchBase match) => match is ShellRouteMatch);
   }
 
-  /// True when [location] lands in a *different branch* of the shell that
-  /// is currently the top of the stack (a tab switch written as a push).
-  ///
-  /// go_router implements such a push by recursing into the shell's
-  /// children while keeping the shell match's original branch
-  /// `navigatorKey`, so the pushed screen shows but
-  /// `StatefulNavigationShell.currentIndex` — which the shell reads off
-  /// that key — never moves and the FloatingNavBar keeps highlighting the
-  /// previous tab. Switching branches is `go` semantics, so reroute.
   bool _wouldSwitchShellBranch(String location, Object? extra) {
     final RouteMatchList current = routerDelegate.currentConfiguration;
     if (current.matches.isEmpty) return false;
     final RouteMatchBase top = current.matches.last;
-    // While a full-screen route covers the shell, _wouldStackSecondShell
-    // already owns the decision; this is the plain shell-on-top case.
     if (top is! ShellRouteMatch) return false;
     final RouteMatchList next =
         configuration.findMatch(Uri.parse(location), extra: extra);
     if (next.matches.isEmpty) return false;
     final RouteMatchBase nextTop = next.matches.last;
-    // A top-level route (cart, checkout, product detail, …) pushed over
-    // the shell is a normal full-screen overlay — leave it alone.
     if (nextTop is! ShellRouteMatch) return false;
-    // A different shell entirely is not a tab switch (redirects gate it).
     if (!identical(nextTop.route, top.route)) return false;
-    // Same branch → ordinary push; different branch → must switch.
     return nextTop.navigatorKey != top.navigatorKey;
   }
 }
 
-/// Smooth fade transition for all pages.
 CustomTransitionPage<T> _buildPage<T>(Widget child) {
   return CustomTransitionPage<T>(
     child: child,
@@ -479,12 +415,6 @@ CustomTransitionPage<T> _buildPage<T>(Widget child) {
   );
 }
 
-/// Maps the /ar-viewer route extra to the screen:
-///  * a [Product] → product mode (marketplace AR button): the product's own
-///    true-size 3D model leads the catalog;
-///  * a [List] of [ArFurnitureItem] → room-plan mode (scanner / saved
-///    designs) with exactly those bundled models;
-///  * anything else / nothing → the full bundled catalog.
 Widget _buildArViewer(Object? extra) {
   if (extra is Product) return ArViewerScreen(product: extra);
   if (extra is List<ArFurnitureItem>) return ArViewerScreen(items: extra);

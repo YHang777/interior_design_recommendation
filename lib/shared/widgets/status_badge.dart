@@ -3,8 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../models/order.dart';
 
-/// Colored status pill used for order status, refund status, and verification
-/// status.
 class StatusBadge extends StatelessWidget {
   const StatusBadge({
     super.key,
@@ -14,7 +12,6 @@ class StatusBadge extends StatelessWidget {
     this.icon,
   });
 
-  /// Convenience factory for OrderStatus.
   factory StatusBadge.order(OrderStatus status, {bool compact = false}) {
     return StatusBadge(
       label: status.label,
@@ -23,7 +20,6 @@ class StatusBadge extends StatelessWidget {
     );
   }
 
-  /// Convenience factory for RefundStatus.
   factory StatusBadge.refund(RefundStatus status, {bool compact = false}) {
     return StatusBadge(
       label: status.label,
@@ -32,22 +28,16 @@ class StatusBadge extends StatelessWidget {
     );
   }
 
-  /// Convenience factory for supplier verification.
   factory StatusBadge.verification(String status, {bool compact = false}) {
     final (label, color, icon) = switch (status) {
       'verified' => ('Verified', AppColors.success, Icons.check_circle_outline),
       'pending' => ('Pending', AppColors.warning, Icons.schedule),
       'rejected' => ('Rejected', AppColors.error, Icons.cancel_outlined),
-      // 'none' is the default for every new account — it is the ordinary
-      // "has not applied yet" state, not an unknown/error condition.
       _ => ('Not verified', AppColors.textHint, Icons.outlined_flag),
     };
     return StatusBadge(label: label, color: color, compact: compact, icon: icon);
   }
 
-  /// Display label for a verification status — shared with plain-text rows
-  /// (e.g. the profile's "Verification" field) so they read exactly like the
-  /// badge beside them.
   static String verificationLabel(String status) => switch (status) {
         'verified' => 'Verified',
         'pending' => 'Pending',

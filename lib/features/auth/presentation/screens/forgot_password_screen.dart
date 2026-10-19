@@ -57,8 +57,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Header-less: the centered hero heading below is the page title, and
-      // the pinned FloatingBackButton replaces the old AppBar back control.
       body: Stack(
         children: [
           Container(
@@ -93,7 +91,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Hero icon with gradient circle background
           Center(
             child: Container(
               width: 100,
@@ -148,7 +145,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             onPressed: _handleReset,
           ),
           const SizedBox(height: 20),
-          // Prominent back to login
           TextButton.icon(
             onPressed: () => context.pop(),
             icon: const Icon(Icons.arrow_back_ios,
@@ -168,7 +164,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Animated success icon with gradient circle
         Center(
           child: Container(
             width: 100,
@@ -209,7 +204,6 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               fontSize: 14, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
-        // Highlighted email display
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 32),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

@@ -4,10 +4,6 @@ import '../../core/constants/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/pricing.dart';
 
-/// One label/value row of a money summary — the shared replacement for the
-/// private `_Line`/`_SummaryLine` copies the checkout, order-confirmation
-/// and buyer-order-detail screens each used to keep. Same fonts, spacing
-/// and colors as the originals.
 class SummaryLine extends StatelessWidget {
   const SummaryLine(this.label, this.value,
       {super.key, this.bold = false, this.valueColor});
@@ -54,12 +50,6 @@ class SummaryLine extends StatelessWidget {
   }
 }
 
-/// The standard money column — Subtotal, membership discount (when > 0),
-/// Shipping (FREE in success green once unlocked), Tax and a divider before
-/// the bold Total — rendered from one [PriceBreakdown].
-///
-/// Screens wrap this in their own bordered card; [dividerVerticalPadding]
-/// lets each screen keep its original rhythm above the Total divider.
 class PriceSummaryCard extends StatelessWidget {
   const PriceSummaryCard({
     super.key,
@@ -71,11 +61,8 @@ class PriceSummaryCard extends StatelessWidget {
 
   final PriceBreakdown breakdown;
 
-  /// Label for the discount row (e.g. "Membership discount (Gold)").
-  /// The row only renders while [PriceBreakdown.discount] is > 0.
   final String? discountLabel;
 
-  /// Tax row label, e.g. "Tax (6%)".
   final String taxLabel;
 
   final double dividerVerticalPadding;

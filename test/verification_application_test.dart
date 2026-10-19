@@ -1,8 +1,3 @@
-// Tests for the supplier verification data contract and status state
-// machine (the pure logic behind the admin verification application work).
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/auth/data/models/app_user.dart';
 import 'package:interior_design_recommendation/services/verification/verification_application_model.dart';
@@ -67,7 +62,6 @@ void main() {
     test('fromJson tolerates a legacy document missing every field', () {
       final legacy = VerificationDocument.fromJson(const {});
       expect(legacy.id, '');
-      // Never guess that an unlabelled attachment is an IC page.
       expect(legacy.kind, kVerificationDocSupporting);
       expect(legacy.fileName, '');
       expect(legacy.contentType, '');
@@ -130,8 +124,6 @@ void main() {
       expect(legacy.uid, 'u1');
       expect(legacy.email, '');
       expect(legacy.businessName, isNull);
-      // No recorded outcome means still awaiting review — never invent an
-      // approval (or a rejection) for it.
       expect(legacy.status, 'pending');
       expect(legacy.submittedAt, isNull);
       expect(legacy.reviewedAt, isNull);

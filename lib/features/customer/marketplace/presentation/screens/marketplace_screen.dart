@@ -18,11 +18,6 @@ import '../../../../../shared/widgets/skeleton_loader.dart';
 import '../providers/marketplace_providers.dart';
 import '../widgets/robot_assistant/robot_assistant_host.dart';
 
-/// Marketplace — browse, search, sort/filter, and shop products.
-///
-/// Products stream live from Firestore (seller publishes → buyer sees it);
-/// pull-to-refresh forces a re-read on top of the stream. Search remembers
-/// recent terms on-device and offers live product-name suggestions.
 class MarketplaceScreen extends ConsumerStatefulWidget {
   const MarketplaceScreen({super.key});
 
@@ -62,7 +57,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
     try {
       await ref.read(marketplaceProductsProvider.future);
     } catch (_) {
-      // Failures surface via the productsAsync error branch.
     }
   }
 
@@ -166,7 +160,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                         title: 'Marketplace',
                         subtitle: 'Furniture & materials for your space',
                         actions: [
-                          // Wishlist
                           IconButton(
                             icon: Badge(
                               isLabelVisible: wishlistCount > 0,
@@ -179,7 +172,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                             onPressed: () =>
                                 context.pushNamed(RouteNames.homeownerWishlist),
                           ),
-                          // Order history
                           IconButton(
                             icon: Badge(
                               isLabelVisible: orderCount > 0,
@@ -192,7 +184,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                             onPressed: () => context
                                 .pushNamed(RouteNames.homeownerOrderHistory),
                           ),
-                          // Cart
                           IconButton(
                             icon: Badge(
                               isLabelVisible: cartCount > 0,
@@ -281,7 +272,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                 },
               ),
 
-              // Bottom padding
               const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
             ],
           ),
@@ -324,12 +314,10 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
             onFocusChanged: (_) => setState(() {}),
           ),
         ),
-        // Focus panels: recents when empty, live suggestions while typing.
         if (hasFocus && query.isEmpty)
           _buildRecentSearches(),
         if (hasFocus && query.isNotEmpty)
           _buildSuggestions(query),
-        // Category chips stay available above the grid.
         _buildCategoryChips(),
       ],
     );
@@ -398,8 +386,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                       .remove(term);
                 }
 
-                // GestureDetector adds long-press-to-remove on top of the
-                // chip's tap-to-apply and X-to-delete affordances.
                 return GestureDetector(
                   onLongPress: removeTerm,
                   child: InputChip(
@@ -537,9 +523,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
           style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
         const SizedBox(width: 8),
-        // The chips keep their intrinsic width: this strip scrolls
-        // horizontally instead of ellipsizing a button label, and the
-        // Align keeps it pinned to the right edge of the row.
         Expanded(
           child: Align(
             alignment: Alignment.centerRight,
@@ -548,7 +531,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Eco quick toggle
                   GestureDetector(
                     onTap: () =>
                         ref.read(ecoOnlyProvider.notifier).state = !ecoOnly,
@@ -592,9 +574,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Sort — short label, so it can never ellipsize; the
-                  // active choice is shown by the chip row above and in
-                  // the sheet.
                   GestureDetector(
                     onTap: _showSortSheet,
                     child: Container(
@@ -635,7 +614,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Filters
                   GestureDetector(
                     onTap: _showFiltersSheet,
                     child: Container(
@@ -780,11 +758,6 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
   bool _sortChipVisible() =>
       ref.read(sortOptionProvider) != SortOption.recommended;
 
-  /// Removable filter chips (search term, category, style, price, stock,
-  /// eco, verified-off) shown above the grid. WHICH chips appear is decided
-  /// by the shared [MarketplaceFilterState] so this list can never disagree
-  /// with the Filters badge or the "Clear filters" CTA; the provider reads
-  /// below only supply labels for dims that state already flagged active.
   List<_RemovableChip> _chipRowEntries() {
     final state = ref.read(marketplaceFilterStateProvider);
     final entries = <_RemovableChip>[];
@@ -930,8 +903,6 @@ class _FiltersSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final liveCount = ref.watch(filteredProductsProvider).length;
-    // "Has anything deviated from default?" comes from the shared filter
-    // state so the sheet's Clear-all and the toolbar badge always agree.
     final sheetDirty = ref.watch(marketplaceFilterStateProvider).sheetDirty;
 
     return SafeArea(
@@ -1097,7 +1068,6 @@ class _FiltersSheet extends ConsumerWidget {
 
     if (bounds == null) return const SizedBox.shrink();
 
-    // Apply the user's last band when it is still inside the current bounds.
     var start = (selected?.min ?? bounds.min)
         .clamp(bounds.min, bounds.max)
         .toDouble();

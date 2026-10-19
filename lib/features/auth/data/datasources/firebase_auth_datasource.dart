@@ -1,6 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
-/// Thin wrapper around FirebaseAuth for testability.
 class FirebaseAuthDatasource {
   final FirebaseAuth _auth;
 

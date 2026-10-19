@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-/// Thrown when a byte sequence cannot be parsed as a glTF 2.0 GLB.
 class GlbParseException implements Exception {
   const GlbParseException(this.message);
 
@@ -12,9 +11,6 @@ class GlbParseException implements Exception {
   String toString() => 'GlbParseException: $message';
 }
 
-/// Axis-aligned bounding box of the POSITION geometry of a parsed GLB,
-/// computed in the file's own coordinate system / units (we author all
-/// generated models in meters, so the extents are real-world meters).
 class GlbBounds {
   const GlbBounds({
     required this.minX,
@@ -40,20 +36,10 @@ class GlbBounds {
   double get centerY => (minY + maxY) / 2;
   double get centerZ => (minZ + maxZ) / 2;
 
-  /// Largest of the three extents (the AR plugin's scale-to-unit-cube value).
   double get maxExtent => math.max(widthM, math.max(heightM, depthM));
 
   bool get isDegenerate => widthM <= 0 || heightM <= 0 || depthM <= 0;
 
-  /// Parses a GLB (binary glTF 2.0) file from raw bytes and returns the
-  /// bounding box covering **every** mesh primitive's POSITION data.
-  ///
-  /// Prefers each POSITION accessor's `min`/`max` (which the glTF spec
-  /// requires on POSITION accessors). When those arrays are missing or
-  /// malformed it falls back to scanning the raw vertex floats inside the
-  /// BIN chunk. All parsing / validation is delegated to
-  /// [GlbStructure.parse] — the ONE shared GLB reader (the rescaler
-  /// consumes the same structure; there is no second parser to drift).
   static GlbBounds fromGlbBytes(Uint8List bytes) {
     final glb = GlbStructure.parse(bytes);
     var minX = double.infinity, minY = double.infinity, minZ = double.infinity;
@@ -74,7 +60,6 @@ class GlbBounds {
 
     for (final primitive in glb.primitives) {
       final accessorJson = glb.rawAccessor(primitive.positionAccessorIndex);
-      // glTF: POSITION accessors must carry min/max — prefer them.
       final minV = accessorJson == null
           ? null
           : GlbStructure.finiteMinMax(accessorJson['min']);
@@ -86,9 +71,6 @@ class GlbBounds {
         merge(maxV[0], maxV[1], maxV[2]);
         continue;
       }
-      // Fallback: scan the raw float32s. dataAccessor is the single accessor
-      // validation (VEC3 float, count, stride >= 12, data inside BIN) — it
-      // throws on violations in strict mode, so the non-null assertion holds.
       final accessor = glb.dataAccessor(primitive, 'POSITION')!;
       final binData = ByteData.sublistView(glb.binChunk!);
       for (var i = 0; i < accessor.count; i++) {
@@ -122,18 +104,14 @@ class GlbBounds {
       '${depthM.toStringAsFixed(3)} m)';
 }
 
-/// One mesh primitive with its (structurally validated) attribute map.
 class GlbPrimitive {
   GlbPrimitive._(this.meshIndex, this.primitiveIndex, this.attributes);
 
   final int meshIndex;
   final int primitiveIndex;
 
-  /// The primitive's `attributes` map (semantic → accessor index).
   final Map<String, dynamic> attributes;
 
-  /// POSITION accessor index — parse-time validated to be a valid in-range
-  /// int for every primitive.
   int get positionAccessorIndex {
     final idx = attributes['POSITION'];
     return idx is int ? idx : -1;
@@ -142,9 +120,6 @@ class GlbPrimitive {
   String get context => 'Mesh #$meshIndex primitive #$primitiveIndex';
 }
 
-/// Fully resolved + validated descriptor of one attribute's data stream
-/// (returned by [GlbStructure.dataAccessor] — the single accessor
-/// validation implementation).
 class GlbDataAccessor {
   GlbDataAccessor._({
     required this.json,
@@ -153,35 +128,15 @@ class GlbDataAccessor {
     required this.elementStart,
   });
 
-  /// The raw accessor JSON (the rescaler rewrites `min`/`max` on it).
   final Map<String, dynamic> json;
 
-  /// Number of elements (validated > 0, VEC3 float).
   final int count;
 
-  /// Byte offset between consecutive elements (validated >= 12).
   final int byteStride;
 
-  /// Absolute offset of element 0 inside the BIN chunk.
   final int elementStart;
 }
 
-/// Shared low-level GLB reader.
-///
-/// This is the ONLY place that walks the GLB container and validates
-/// accessor/bufferView chains. [GlbBounds.fromGlbBytes] and the rescaler
-/// (glb_rescaler.dart) both consume this structure — they used to carry two
-/// drifted copies of the same parser.
-///
-/// [parse] validates:
-///  * the 12-byte header (magic / version / declared length),
-///  * the chunk layout (JSON chunk required; BIN chunk optional),
-///  * the JSON document's top-level lists and the single-buffer rule,
-///  * every mesh / primitive / attributes map and a valid POSITION accessor
-///    index per primitive.
-/// Accessor-level validation (VEC3 float, count, sparse rejection, bufferView
-/// resolution, the stride >= 12 rejection, data-inside-BIN) happens lazily in
-/// [dataAccessor] — the one function that actually reads the stream.
 class GlbStructure {
   GlbStructure._({
     required this.json,
@@ -191,37 +146,26 @@ class GlbStructure {
     required this.primitives,
   });
 
-  static const int _magic = 0x46546C67; // 'glTF'
-  static const int _chunkJson = 0x4E4F534A; // 'JSON'
-  static const int _chunkBin = 0x004E4942; // 'BIN\0'
+  static const int _magic = 0x46546C67;
+  static const int _chunkJson = 0x4E4F534A;
+  static const int _chunkBin = 0x004E4942;
   static const int _headerSize = 12;
   static const int _chunkHeaderSize = 8;
 
-  static const int _componentFloat = 5126; // GL_FLOAT
+  static const int _componentFloat = 5126;
   static const int _floatBytes = 4;
   static const int _vec3Floats = 3;
 
-  /// Decoded JSON chunk (object form — consumers may mutate it, e.g. the
-  /// rescaler rewrites POSITION min/max arrays on it).
   final Map<String, dynamic> json;
 
-  /// Raw (undecoded) JSON chunk bytes, for diagnostics.
   final Uint8List jsonChunkBytes;
 
-  /// BIN chunk contents. A *copy* when [parse] was called with
-  /// `mutableBin: true` (consumers patch floats in place), otherwise a view
-  /// of the source bytes. Null when the GLB carries no BIN chunk.
   final Uint8List? binChunk;
 
-  /// Anything after the BIN chunk (usually empty; preserved so rewriting
-  /// consumers can round-trip the file byte-for-byte).
   final Uint8List trailing;
 
-  /// Every primitive of every mesh, in file order.
   final List<GlbPrimitive> primitives;
 
-  /// Parses a binary glTF 2.0 file. With [mutableBin] the BIN chunk is
-  /// copied so callers may patch vertex floats without touching [bytes].
   static GlbStructure parse(Uint8List bytes, {bool mutableBin = false}) {
     final data = ByteData.sublistView(bytes);
     if (bytes.length < _headerSize) {
@@ -249,7 +193,7 @@ class GlbStructure {
     // ── Collect the JSON chunk and the BIN chunk ──────────────────────────
     Uint8List? jsonChunk;
     Uint8List? binChunk;
-    var binEnd = effectiveLength; // file end when there is no BIN chunk
+    var binEnd = effectiveLength;
     var offset = _headerSize;
     while (offset + _chunkHeaderSize <= effectiveLength) {
       final chunkLength = data.getUint32(offset, Endian.little);
@@ -349,9 +293,6 @@ class GlbStructure {
     );
   }
 
-  /// Raw accessor JSON for [index]; null when out of range / not an object.
-  /// The parsed POSITION indices were validated in [parse]; for other
-  /// semantics (NORMAL, COLOR_0, …) callers must handle null.
   Map<String, dynamic>? rawAccessor(int index) {
     final accessors = json['accessors'];
     if (accessors is! List || index < 0 || index >= accessors.length) {
@@ -361,23 +302,6 @@ class GlbStructure {
     return a is Map<String, dynamic> ? a : null;
   }
 
-  /// Resolves + fully validates the data stream of attribute [semantic] on
-  /// [primitive] — the ONE implementation of every data-level accessor
-  /// check, shared by the bounds fallback scanner and the rescaler:
-  ///
-  ///  * accessor exists, is an object, not sparse;
-  ///  * payload is `type` VEC3, `componentType` 5126 (float), `count` > 0;
-  ///  * bufferView in range, an object, buffer 0;
-  ///  * byteStride >= 12 (rejects streams packed tighter than one VEC3 float
-  ///    — physically impossible for real data; this rejection previously
-  ///    lived ONLY in the rescaler);
-  ///  * element range inside the BIN chunk.
-  ///
-  /// Throws [GlbParseException] on any violation when [strict] (used for
-  /// POSITION — every consumer needs valid positions). When [strict] is
-  /// false it returns null instead so the caller can skip the primitive —
-  /// used for NORMAL accessors where a malformed stream is best left alone
-  /// (never corrupts a rescale, at worst the normals stay stale).
   GlbDataAccessor? dataAccessor(
     GlbPrimitive primitive,
     String semantic, {
@@ -454,7 +378,6 @@ class GlbStructure {
     }
     final bufferStart = (bufferView['byteOffset'] as num?)?.toInt() ?? 0;
     final accessorOffset = (accessor['byteOffset'] as num?)?.toInt() ?? 0;
-    // Tightly packed when the bufferView does not define a stride.
     final byteStride = (bufferView['byteStride'] as num?)?.toInt() ??
         _floatBytes * _vec3Floats;
     if (byteStride < _floatBytes * _vec3Floats) {
@@ -484,8 +407,6 @@ class GlbStructure {
     );
   }
 
-  /// [list] as 3 finite doubles, or null when absent / malformed /
-  /// non-finite (used for the spec-required POSITION `min`/`max` arrays).
   static List<double>? finiteMinMax(Object? list) {
     if (list is! List || list.length < 3) return null;
     final out = <double>[];

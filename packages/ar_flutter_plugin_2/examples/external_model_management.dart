@@ -1,12 +1,8 @@
-// Automatic FlutterFlow imports
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'index.dart'; // Imports other custom widgets
+import 'index.dart';
 import 'package:flutter/material.dart';
-// Begin custom widget code
-// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-//AR Flutter Plugin
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
@@ -19,7 +15,6 @@ import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 
-//Other custom imports
 import 'dart:convert';
 import 'package:vector_math/vector_math_64.dart' as VectorMath;
 import 'package:firebase_core/firebase_core.dart';
@@ -43,7 +38,6 @@ class ExternalModelManagement extends StatefulWidget {
 }
 
 class _ExternalModelManagementState extends State<ExternalModelManagement> {
-  // Firebase stuff
   bool _initialized = false;
   bool _error = false;
   FirebaseManager firebaseManager = FirebaseManager();
@@ -84,7 +78,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
 
   @override
   Widget build(BuildContext context) {
-    // Show error message if initialization failed
     if (_error) {
       return Scaffold(
           appBar: AppBar(
@@ -101,7 +94,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
           ))));
     }
 
-    // Show a loader until FlutterFire is initialized
     if (!_initialized) {
       return Scaffold(
           appBar: AppBar(
@@ -298,7 +290,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
       bool? didAddAnchor = await this.arAnchorManager!.addAnchor(newAnchor);
       if (didAddAnchor!) {
         this.anchors.add(newAnchor);
-        // Add note to anchor
         var newNode = ARNode(
             type: NodeType.webGLB,
             uri: this.selectedModel.uri,
@@ -337,10 +328,8 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
   }
 
   onAnchorUploaded(ARAnchor anchor) {
-    // Upload anchor information to firebase
     firebaseManager.uploadAnchor(anchor,
         currentLocation: this.arLocationManager!.currentLocation);
-    // Upload child nodes to firebase
     if (anchor is ARPlaneAnchor) {
       anchor.childNodes.forEach((nodeName) => firebaseManager.uploadObject(
           nodes.firstWhere((element) => element.name == nodeName)));
@@ -362,7 +351,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
     anchorsInDownloadProgress.remove(anchor.cloudanchorid);
     this.anchors.add(anchor);
 
-    // Download nodes attached to this anchor
     firebaseManager.getObjectsFromAnchor(anchor, (snapshot) {
       snapshot.docs.forEach((objectDoc) {
         ARNode object =
@@ -376,14 +364,7 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
   }
 
   Future<void> onDownloadButtonPressed() async {
-    //this.arAnchorManager.downloadAnchor(lastUploadedAnchor);
-    //firebaseManager.downloadLatestAnchor((snapshot) {
-    //  final cloudAnchorId = snapshot.docs.first.get("cloudanchorid");
-    //  anchorsInDownloadProgress[cloudAnchorId] = snapshot.docs.first.data();
-    //  arAnchorManager.downloadAnchor(cloudAnchorId);
-    //});
 
-    // Get anchors within a radius of 100m of the current device's location
     if (this.arLocationManager!.currentLocation != null) {
       firebaseManager.downloadAnchorsByLocation((snapshot) {
         final cloudAnchorId = snapshot.get("cloudanchorid");
@@ -404,7 +385,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
 
   void showAlertDialog(BuildContext context, String title, String content,
       String buttonText, Function buttonFunction, String cancelButtonText) {
-    // set up the buttons
     Widget cancelButton = ElevatedButton(
       child: Text(cancelButtonText),
       onPressed: () {
@@ -419,7 +399,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
       },
     );
 
-    // set up the AlertDialog
     AlertDialog alert = AlertDialog(
       title: Text(title),
       content: Text(content),
@@ -429,7 +408,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
       ],
     );
 
-    // show the dialog
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -439,7 +417,6 @@ class _ExternalModelManagementState extends State<ExternalModelManagement> {
   }
 }
 
-// Class for managing interaction with Firebase (in your own app, this can be put in a separate file to keep everything clean and tidy)
 typedef FirebaseListener = void Function(QuerySnapshot snapshot);
 typedef FirebaseDocumentStreamListener = void Function(
     DocumentSnapshot snapshot);
@@ -451,10 +428,8 @@ class FirebaseManager {
   CollectionReference? objectCollection;
   CollectionReference? modelCollection;
 
-  // Firebase initialization function
   Future<bool> initializeFlutterFire() async {
     try {
-      // Wait for Firebase to initialize
       await Firebase.initializeApp();
       geo = GeoFlutterFire();
       firestore = FirebaseFirestore.instance;
@@ -474,7 +449,6 @@ class FirebaseManager {
     var expirationTime = DateTime.now().millisecondsSinceEpoch / 1000 +
         serializedAnchor["ttl"] * 24 * 60 * 60;
     serializedAnchor["expirationTime"] = expirationTime;
-    // Add location
     if (currentLocation != null) {
       GeoFirePoint myLocation = geo!.point(
           latitude: currentLocation.latitude,
@@ -544,13 +518,11 @@ class FirebaseManager {
             isLessThan: DateTime.now().millisecondsSinceEpoch / 1000)
         .get()
         .then((anchorSnapshot) => anchorSnapshot.docs.forEach((anchorDoc) {
-              // Delete all objects attached to the expired anchor
               objectCollection!
                   .where("name", arrayContainsAny: anchorDoc.get("childNodes"))
                   .get()
                   .then((objectSnapshot) => objectSnapshot.docs.forEach(
                       (objectDoc) => batch.delete(objectDoc.reference)));
-              // Delete the expired anchor
               batch.delete(anchorDoc.reference);
             }));
     batch.commit();

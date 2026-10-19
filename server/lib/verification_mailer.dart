@@ -3,9 +3,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-/// Raised when Brevo rejects the send or the request fails — the message is
-/// safe to log but is NOT shown to end users (the handlers surface a generic
-/// failure).
 class VerificationEmailException implements Exception {
   const VerificationEmailException(this.message);
 
@@ -15,9 +12,6 @@ class VerificationEmailException implements Exception {
   String toString() => 'VerificationEmailException: $message';
 }
 
-/// Sends verification emails through the Brevo v3 transactional API
-/// (https://api.brevo.com/v3/smtp/email). Free tier: 300 emails/day; the
-/// sender address must be verified in the Brevo console.
 class VerificationMailer {
   VerificationMailer({
     required String apiKey,
@@ -41,8 +35,6 @@ class VerificationMailer {
 
   bool get isConfigured => _apiKey.trim().isNotEmpty;
 
-  /// Override the configured public base URL (e.g. when the server detects
-  /// its own hostname from the incoming request instead of relying on env).
   Future<void> sendVerificationEmail({
     required String email,
     required String token,

@@ -1,11 +1,3 @@
-// Buyer-facing "supplier verified" badge tests.
-//
-// This is a TRUST signal: the badge may only ever appear for a supplier an
-// admin actually approved. These tests pin both halves of that contract —
-// it renders for 'verified', and for every other status it renders nothing
-// at all (no greyed-out "Unverified" variant exists on the buyer side).
-// Pure widget tests: no Firebase, no network.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -36,8 +28,6 @@ Product _product(Supplier supplier) => Product(
       supplier: supplier,
     );
 
-/// A typical Android phone width — the badge must stay legible and never
-/// overflow a product card laid out at 360dp.
 Future<void> _usePhoneWidth(WidgetTester tester) async {
   tester.view.physicalSize = const Size(360, 720);
   tester.view.devicePixelRatio = 1.0;
@@ -100,7 +90,6 @@ void main() {
 
         expect(find.text('Verified'), findsNothing);
         expect(find.byIcon(Icons.verified), findsNothing);
-        // No "Unverified" label either — absence of the badge is the signal.
         expect(find.text('Unverified'), findsNothing);
         expect(tester.takeException(), isNull);
       }
@@ -111,7 +100,6 @@ void main() {
     testWidgets('verified seller badge fits without overflow', (tester) async {
       await _usePhoneWidth(tester);
 
-      // Same cell size the marketplace grid uses (2-up, aspect 0.68).
       const cell = Size(158, 232);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -138,7 +126,6 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      // 2-up grid cell at 320dp: (320 − 32 padding − 12 gap) / 2, aspect 0.68.
       const cell = Size(138, 203);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(

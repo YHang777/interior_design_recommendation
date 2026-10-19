@@ -1,7 +1,3 @@
-// ChatHistoryNotifier: hydration from the store, create-on-first-send,
-// message/title bookkeeping, delete semantics (a late reply must never
-// land in the wrong chat), and persistence on every mutation.
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
@@ -69,10 +65,10 @@ void main() {
     );
     addTearDown(container.dispose);
 
-    container.read(chatHistoryProvider); // schedule hydration
+    container.read(chatHistoryProvider);
     await pumpEventQueue();
 
-    expect(state().sessions.map((s) => s.id), ['a', 'b']); // newest first
+    expect(state().sessions.map((s) => s.id), ['a', 'b']);
     expect(state().activeSessionId, 'a');
     expect(state().activeSession?.id, 'a');
   });
@@ -116,7 +112,6 @@ void main() {
     expect(session.title, 'Sofa ideas for a modern flat');
     expect(session.messages, hasLength(2));
     expect(session.messages.last.role, 'model');
-    // A second user message must not retitle the chat.
     expect(state().activeSession!.title, 'Sofa ideas for a modern flat');
   });
 
@@ -126,9 +121,9 @@ void main() {
     notifier().addMessage(id, role: 'user', text: long);
 
     final title = state().activeSession!.title;
-    expect(title, hasLength(41)); // 40 chars + ellipsis
+    expect(title, hasLength(41));
     expect(title, endsWith('…'));
-    expect(state().activeSession!.messages.single.text, long); // full text kept
+    expect(state().activeSession!.messages.single.text, long);
   });
 
   test('adding to a deleted session is a no-op', () async {
@@ -139,7 +134,7 @@ void main() {
     notifier().addMessage(id, role: 'model', text: 'late reply');
 
     expect(state().sessions, isEmpty);
-    expect(store.saveCalls, savesAfterDelete); // no persist either
+    expect(store.saveCalls, savesAfterDelete);
   });
 
   test('addMessage moves its session to the top of the list', () async {
@@ -150,8 +145,6 @@ void main() {
 
     notifier().addMessage(a, role: 'user', text: 'back to chat a');
     expect(state().sessions.first.id, a);
-    // Switching chats mid-flight is preserved — the update must not
-    // yank the user back to a.
     expect(state().activeSessionId, b);
   });
 
@@ -174,7 +167,7 @@ void main() {
     notifier().openSession(id);
     expect(state().activeSessionId, id);
 
-    notifier().openSession('missing'); // ignored
+    notifier().openSession('missing');
     expect(state().activeSessionId, id);
   });
 
@@ -187,7 +180,6 @@ void main() {
     expect(session.style, 'Minimalist');
     expect(session.room, 'Bedroom');
 
-    // No open session: must not throw or create one.
     notifier().startNewChat();
     notifier().setActiveContext(style: 'Classic');
     expect(state().sessions, hasLength(1));

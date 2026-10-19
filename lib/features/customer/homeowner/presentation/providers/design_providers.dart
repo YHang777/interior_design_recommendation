@@ -16,8 +16,6 @@ final roomDesignDatasourceProvider =
   return SupabaseRoomDesignDatasource();
 });
 
-/// Design-chat proxy client — the app talks to our backend, never to
-/// Gemini directly (the key lives only server-side).
 final chatDatasourceProvider = Provider<ChatDatasource>((ref) {
   return ChatDatasource();
 });
@@ -28,9 +26,6 @@ final chatHistoryStoreProvider = Provider<ChatHistoryStore>((ref) {
   return ChatHistoryStore();
 });
 
-/// What the AI screen renders: the saved chats (newest first) and which
-/// one is open. [activeSessionId] is null for a fresh, not-yet-saved
-/// composer.
 class ChatHistoryState {
   const ChatHistoryState({required this.sessions, this.activeSessionId});
 
@@ -58,8 +53,6 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
         if (sessions.isEmpty && activeId == null) return;
         state = ChatHistoryState(
           sessions: _sorted(sessions),
-          // An active id pointing at a missing/foreign session just means
-          // "fresh composer" — never resurrect a half-loaded chat.
           activeSessionId:
               sessions.any((s) => s.id == activeId) ? activeId : null,
         );
@@ -93,8 +86,6 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
     unawaited(_persist());
   }
 
-  /// Returns the open session's id, creating an empty one on the first
-  /// send when none is open. Repeated calls return the same id.
   String ensureActiveSession({String? style, String? room}) {
     final existing = state.activeSession;
     if (existing != null) return existing.id;
@@ -117,11 +108,6 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
     return session.id;
   }
 
-  /// Appends a message to [sessionId]. A reply that lands after its chat
-  /// was deleted is a no-op — it must never fall into another thread.
-  ///
-  /// [suggestions] is for assistant turns: the product cards that go with
-  /// the prose (null/empty for user turns and plain replies).
   void addMessage(
     String sessionId, {
     required String role,
@@ -148,14 +134,10 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
     sessions
       ..removeAt(index)
       ..insert(0, updated);
-    // Keep whatever chat is currently open — a late reply must not yank
-    // the user away from a session they switched to mid-flight.
     state = ChatHistoryState(sessions: _sorted(sessions), activeSessionId: state.activeSessionId);
     unawaited(_persist());
   }
 
-  /// Writes the quick-shortcut context onto the open chat so a reopened
-  /// session keeps its style/room. No-op without an open session.
   void setActiveContext({String? style, String? room}) {
     final sessions = [...state.sessions];
     final id = state.activeSessionId;

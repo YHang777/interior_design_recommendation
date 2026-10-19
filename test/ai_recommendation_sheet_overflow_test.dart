@@ -1,10 +1,3 @@
-// History sheet overflow regression: on short windows the empty state
-// ("No saved chats") used to blow past the sheet's height cap —
-// showModalBottomSheet without isScrollControlled caps at 9/16 of the
-// screen and Expanded force-filled that cap against EmptyState's fixed
-// ~263px stack. The main suite pumps at 393×852, which always fits, so
-// these cases pin the surface down to window sizes that actually broke.
-
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -17,7 +10,6 @@ import 'package:interior_design_recommendation/features/customer/marketplace/pre
 import 'package:interior_design_recommendation/services/chat_history_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// A stored session so the non-empty branch can render too.
 void _seedSession({required String title}) {
   SharedPreferences.setMockInitialValues({
     ChatHistoryStore.prefsKey: jsonEncode([
@@ -69,14 +61,12 @@ void main() {
     testWidgets('empty history state fits a ${size.width}×${size.height} window',
         (tester) async {
       await _pumpScreen(tester, size);
-      expect(tester.takeException(), isNull); // the screen itself fits
+      expect(tester.takeException(), isNull);
 
       await tester.tap(find.byIcon(Icons.history));
       await tester.pumpAndSettle();
 
       expect(find.text('No saved chats'), findsOneWidget);
-      // A RenderFlex overflow surfaces as a test exception — the
-      // regression this file exists to catch.
       expect(tester.takeException(), isNull);
     });
   }

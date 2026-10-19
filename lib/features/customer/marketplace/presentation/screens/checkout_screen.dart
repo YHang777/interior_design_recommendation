@@ -21,12 +21,6 @@ import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Checkout — delivery form, payment method, priced order summary and the
-/// stock-safe "Place order" action.
-///
-/// The order can be built from the whole cart (default) or from a single
-/// product when the screen is opened with a [BuyNowRequest] extra: the
-/// buy-now order contains ONLY that item and the cart is left untouched.
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
 
@@ -43,10 +37,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String _paymentMethod = 'fpx';
   bool _submitting = false;
 
-  /// Deterministic order id for THIS submission session: generated on the
-  /// first attempt and reused across retries so a re-submit after an
-  /// ambiguous failure is idempotent (createOrder returns the existing
-  /// order instead of charging twice). Reset once an order lands.
   String? _pendingOrderId;
 
   @override
@@ -89,14 +79,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     return null;
   }
 
-  /// The Buy-Now payload carried by this route, when there is one.
   BuyNowRequest? _buyNowRequest() {
     final extra = GoRouterState.of(context).extra;
     return extra is BuyNowRequest ? extra : null;
   }
 
-  /// The rows this checkout will place: the whole (reconciliated) cart, or a
-  /// single live-resolved row for a Buy-Now request.
   List<CartRow> _checkoutRows() {
     final buyNow = _buyNowRequest();
     if (buyNow == null) return ref.read(cartRowsProvider);
@@ -113,24 +100,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     ];
   }
 
-  /// Shipping derived from PRODUCT-LEVEL settings (the seller's per-product
-  /// charge), never the old flat store constant. Multi-supplier rule —
-  /// documented in `models/product.dart`:
-  ///   1. each distinct product adds its `shippingCharge` once per order
-  ///      (quantity never multiplies shipping);
-  ///   2. per-supplier shipping = sum of that supplier's product charges;
-  ///   3. order shipping = sum of the per-supplier charges.
-  /// The store free-shipping threshold is applied by `computePriceBreakdown`
-  /// afterwards: it waives the fee binary-style, and the caller must zero
-  /// every share when it does (so recorded shares always sum to the fee
-  /// actually charged).
   ({Map<String, int> shares, int fee}) _deriveShipping(List<CartRow> rows) {
     final shares = shippingBySupplierFor(rows.map((r) => r.live));
     final fee = shares.values.fold(0, (sum, v) => sum + v);
     return (shares: shares, fee: fee);
   }
 
-  /// The failure copy for a blocked row — mirrors the cart screen's banners.
   String? _rowBlockMessage(CartRow row) {
     if (row.missing) return 'No longer available';
     if (row.inactive) return 'No longer on sale';
@@ -145,8 +120,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (!mounted) return;
       showAppSnackbar(context, 'Please fix the highlighted fields',
           color: AppColors.error);
-      // The delivery fields sit at the top of the form — scroll back up so
-      // the error highlights are actually visible.
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await Future<void>.delayed(const Duration(milliseconds: 120));
         if (!mounted || !_scrollCtrl.hasClients) return;
@@ -166,7 +139,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       showAppSnackbar(context, 'Your cart is empty', color: AppColors.error);
       return;
     }
-    // Safety net for rows that went off-sale while on this screen.
     final blocked = rows.where((r) => _rowBlockMessage(r) != null).toList();
     if (blocked.isNotEmpty) {
       if (!mounted) return;
@@ -199,9 +171,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       freeShippingThreshold: config.freeShippingThreshold,
       taxRate: config.taxRate,
     );
-    // Free-shipping waiver zeroes the fee binary-style → zero every
-    // supplier's share too, so the recorded shares always sum to
-    // `breakdown.shippingFee` (the amount the buyer actually pays).
     final shippingShares =
         breakdown.shippingFee == 0 ? const <String, int>{} : shipping.shares;
 
@@ -237,8 +206,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         tax: breakdown.tax,
         membershipTier: tier?.name ?? 'Free',
         total: breakdown.total,
-        // Per-supplier shipping attribution recorded at checkout so each
-        // seller sees their own delivery earnings (see Order.shippingShareFor).
         shippingBySupplier: shippingShares,
         createdAt: DateTime.now(),
       );
@@ -246,10 +213,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       final created = await repo.createOrder(order);
       if (!mounted) return;
 
-      // Commit the cart clear BEFORE navigating — the confirmation screen
-      // must never race a fire-and-forget delete that could resurrect the
-      // purchased rows on the next hydration. Buy-now leaves the cart
-      // untouched (only the single item was ordered).
       if (buyNow == null) {
         await ref.read(cartProvider.notifier).clearAndPersist();
         if (!mounted) return;
@@ -260,15 +223,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         extra: created.id,
       );
     } on StateError catch (e) {
-      // Stock/availability raced between the cart and the transaction —
-      // deterministic: nothing committed, safe to retry after adjusting.
       if (!mounted) return;
       await _showUnavailableDialog(e.message, popOnClose: false);
     } catch (_) {
-      // Ambiguous failure (timeout, dropped connection, ...): the order MAY
-      // have committed server-side. Say so, and keep the same order id for
-      // retries — createOrder is idempotent per id, so a re-tap returns the
-      // stored order instead of placing it twice.
       if (!mounted) return;
       showAppSnackbar(
         context,
@@ -284,9 +241,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
   }
 
-  /// Explains a stock/availability failure and sends the buyer back to the
-  /// cart to fix quantities. [popOnClose] also pops this screen when the
-  /// dialog is dismissed by tapping outside.
   Future<void> _showUnavailableDialog(
     String message, {
     required bool popOnClose,
@@ -351,7 +305,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       breakdown = computePriceBreakdown(
         subtotal: subtotal,
         discountPercent: tier?.discountPercent ?? 0,
-        // Product-level shipping — same derivation `_placeOrder` commits.
         shippingFee: _deriveShipping(rows).fee,
         freeShippingThreshold: config.freeShippingThreshold,
         taxRate: config.taxRate,
@@ -607,8 +560,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         backgroundColor: Colors.transparent,
                         shadowColor: Colors.transparent,
                         foregroundColor: Colors.white,
-                        // Tight 52px wrapper — shrink vertical padding so the
-                        // label's line box always fits the 52px button.
                         padding: const EdgeInsets.symmetric(
                             vertical: 10, horizontal: 16),
                         shape: RoundedRectangleBorder(
@@ -623,8 +574,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                   strokeWidth: 2, color: Colors.white),
                             )
                           : FittedBox(
-                              // One line, scaled to fit: a long total must
-                              // not wrap and overflow the 52px button.
                               fit: BoxFit.scaleDown,
                               child: Text(
                                 'Place order'
@@ -662,9 +611,6 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 }
 
-/// Grey placeholder lines shown in the summary while store config (the
-/// shipping fee / free-shipping threshold / tax rate) is still loading —
-/// the screen never invents fallback prices.
 class _SummarySkeleton extends StatelessWidget {
   const _SummarySkeleton();
 
@@ -701,8 +647,6 @@ class _SummarySkeleton extends StatelessWidget {
   }
 }
 
-/// Compact amber line under a checkout item that can no longer be bought —
-/// copy mirrors the cart screen's row banners.
 class _RowBlockNotice extends StatelessWidget {
   const _RowBlockNotice({required this.message});
 
@@ -764,8 +708,6 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Shrink to fit: a section heading must never ellipsize or
-        // overflow the card.
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -791,9 +733,6 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-/// One cart line in the summary: thumb, name × qty, line total. Rendered
-/// against the row's LIVE product so the amounts match the current
-/// catalogue.
 class _ItemSummaryRow extends StatelessWidget {
   const _ItemSummaryRow({required this.row});
 
@@ -832,7 +771,6 @@ class _ItemSummaryRow extends StatelessWidget {
                     color: AppColors.textPrimary,
                   ),
                 ),
-                // Verified sellers only — renders nothing otherwise.
                 VerifiedSellerLine(
                   supplier: product.supplier,
                   nameStyle: const TextStyle(

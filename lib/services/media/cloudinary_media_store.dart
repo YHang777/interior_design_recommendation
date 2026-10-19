@@ -8,21 +8,6 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../../config/app_config.dart';
 import 'media_store.dart';
 
-/// Cloudinary-backed [MediaStore] using UNSIGNED uploads (no API secret on
-/// the client — the account's upload preset allows uploads; see README setup).
-///
-/// Handles product PHOTOS in the hybrid setup (see [HybridMediaStore]): the
-/// free plan's 25 GB quota is generous for images, whose per-file 10 MB cap
-/// never bites. GLB models go through [SupabaseMediaStore] instead.
-///
-/// - images land as `image/upload` under [remotePath] as the public_id
-///   (folders come free: `/` in the id is a folder separator);
-/// - public urls are returned from `secure_url` — required both for the
-///   marketplace image rendering and because Tripo fetches the product photo
-///   server-side (the url must be publicly readable);
-/// - [deleteByUrl] is a no-op: Cloudinary `destroy` requires a signed
-///   request, which a client app must not build. Orphans are reclaimable
-///   from the Cloudinary console.
 class CloudinaryMediaStore implements MediaStore {
   CloudinaryMediaStore({HttpClient Function()? clientFactory})
       : _clientFactory = clientFactory ?? _defaultClient;
@@ -75,16 +60,11 @@ class CloudinaryMediaStore implements MediaStore {
 
   @override
   Future<void> deleteByUrl(String url) async {
-    // Cloudinary `destroy` requires a signed request; unsigned client-side
-    // deletion is not possible. Orphaned assets stay in the account and can
-    // be removed from the Cloudinary console.
     debugPrint('[media] delete requested (no-op on Cloudinary): $url');
   }
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  /// Cloudinary rejects multipart bodies where the file part is not the
-  /// FIRST field, so `file` is always written before the plain fields.
   Future<String> _uploadMultipart({
     required String resourceType,
     required String filename,
@@ -108,7 +88,6 @@ class CloudinaryMediaStore implements MediaStore {
 
       var sent = 0;
       final sink = request;
-      // file part (must come first)
       sink.add(utf8.encode(
           '--$boundary\r\n'
           'Content-Disposition: form-data; name="file"; '
@@ -123,7 +102,6 @@ class CloudinaryMediaStore implements MediaStore {
           },
         ),
       ));
-      // plain fields
       sink.add(utf8.encode(
           '\r\n--$boundary\r\n'
           'Content-Disposition: form-data; name="upload_preset"\r\n\r\n'
@@ -175,7 +153,6 @@ class CloudinaryMediaStore implements MediaStore {
         }
       }
     } catch (_) {
-      // Non-JSON error body — keep the bare status message.
     }
     if (resourceType == 'raw') {
       message += ' — note: Cloudinary\'s free plan rejects uploads over '

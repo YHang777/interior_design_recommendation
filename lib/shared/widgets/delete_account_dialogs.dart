@@ -6,27 +6,11 @@ import '../../core/utils/user_errors.dart';
 import 'app_feedback.dart';
 import 'confirm_dialog.dart';
 
-/// The phrase a person must type before an account-deletion request is
-/// sent. Matched with [deletionPhraseMatches] (trimmed, case-insensitive).
 const kDeleteAccountPhrase = 'DELETE MY ACCOUNT';
 
-/// True when [typed] is the confirmation phrase — whitespace and case
-/// aside. Exported so the rule can be unit-tested without a widget.
 bool deletionPhraseMatches(String typed) =>
     typed.trim().toUpperCase() == kDeleteAccountPhrase;
 
-/// The progressive delete-account flow: warning dialog → type-to-confirm
-/// dialog → [onSubmit].
-///
-/// [confirmEmail] is the signed-in user's email (the profile screens read
-/// it off their auth state); the server checks it against the account, so
-/// an empty value aborts before any dialog shows.
-/// [onSubmit] receives that same email — the caller's closure performs the
-/// actual `requestAccountDeletion` call (and shows the success snackbar).
-///
-/// Resolves to `true` only when the request was submitted successfully,
-/// `false` on cancel, dismissal, empty email, or failure (the failure is
-/// surfaced as an error snackbar with a short, plain sentence).
 Future<bool> showDeleteAccountFlow(
   BuildContext context, {
   required String confirmEmail,
@@ -37,7 +21,6 @@ Future<bool> showDeleteAccountFlow(
     return false;
   }
 
-  // --- Dialog 1: what will happen -------------------------------------
   final warned = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -101,7 +84,6 @@ Future<bool> showDeleteAccountFlow(
   );
   if (warned != true || !context.mounted) return false;
 
-  // --- Dialog 2: type the phrase --------------------------------------
   final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => const _TypeToConfirmDialog(),
@@ -109,7 +91,6 @@ Future<bool> showDeleteAccountFlow(
       false;
   if (!confirmed || !context.mounted) return false;
 
-  // --- Submit -----------------------------------------------------------
   try {
     await onSubmit(confirmEmail);
     return true;
@@ -125,7 +106,6 @@ Future<bool> showDeleteAccountFlow(
   }
 }
 
-/// Dialog 2: type [kDeleteAccountPhrase] to arm the confirm button.
 class _TypeToConfirmDialog extends StatefulWidget {
   const _TypeToConfirmDialog();
 
@@ -200,15 +180,6 @@ class _TypeToConfirmDialogState extends State<_TypeToConfirmDialog> {
   }
 }
 
-/// The same two-button row as [ConfirmDialogActions], plus an [enabled]
-/// gate.
-///
-/// [ConfirmDialogActions] cannot express a disabled confirm — its
-/// `onConfirm` is a non-null `VoidCallback`, so the button always renders
-/// active. Rather than edit the shared widget (every other dialog depends
-/// on it) or ship an inert-but-always-red button, the type-to-confirm
-/// dialog uses this copy: `onPressed: null` gives a genuinely disabled
-/// confirm until the phrase matches. Keep both rows visually identical.
 class _ConfirmDialogActions extends StatelessWidget {
   const _ConfirmDialogActions({
     required this.confirmLabel,

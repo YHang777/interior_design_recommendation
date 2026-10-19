@@ -8,12 +8,6 @@ import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/chat_session.dart';
 import '../../../../../shared/widgets/product_image.dart';
 
-/// One product an assistant reply points at: photo, name, price and the
-/// model's one-line why, with an **Add** button that drops it in the cart.
-///
-/// The card body opens the product page; Add is handled by the chat screen
-/// ([onAdd]), which re-checks the live catalogue first — a snapshot that
-/// has since sold out or been pulled must fail loudly, not add stale stock.
 class ChatSuggestionCard extends StatelessWidget {
   const ChatSuggestionCard({
     super.key,
@@ -23,7 +17,6 @@ class ChatSuggestionCard extends StatelessWidget {
 
   final ChatSuggestionSnapshot suggestion;
 
-  /// Cart action — the screen owns availability checks and the snackbar.
   final VoidCallback onAdd;
 
   void _openDetail(BuildContext context) {
@@ -46,8 +39,6 @@ class ChatSuggestionCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Body (photo + text) → product page; the Add button below
-          // handles its own tap, so it wins the gesture inside its bounds.
           Expanded(
             child: InkWell(
               borderRadius: BorderRadius.circular(8),

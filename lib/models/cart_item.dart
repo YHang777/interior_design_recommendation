@@ -1,6 +1,5 @@
 import 'product.dart';
 
-/// A product in the shopping cart with quantity tracking.
 class CartItem {
   final Product product;
   final int quantity;

@@ -12,23 +12,15 @@ import '../../data/stats/customer_stats.dart';
 import '../../data/stats/stats_providers.dart';
 import '../providers/design_providers.dart';
 
-/// Homeowner dashboard — every stat and the Recent Activity feed come from
-/// the shared stats layer (`homeowner/data/stats/`), which computes them
-/// from live backend sources. Loading shows '…', failure shows '—' or a
-/// retry card, and an empty account shows a real empty state: this screen
-/// never renders placeholder numbers.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
-  /// Metric formatting: keep loading, error and real data distinct.
   static String _countValue(AsyncValue<int> value) => value.when(
         data: (v) => '$v',
         loading: () => '…',
         error: (_, __) => '—',
       );
 
-  /// Budget tile: 'RM 4,200' once a plan exists, 'RM —' when none has been
-  /// saved (or loading/failed) — never a fabricated figure.
   static String _budgetValue(CustomerStats stats) => stats.budget.when(
         data: (_) => stats.budgetLabel,
         loading: () => '…',
@@ -41,7 +33,6 @@ class DashboardScreen extends ConsumerWidget {
     final name = user?.name ?? 'User';
     final stats = ref.watch(customerStatsProvider);
 
-    // Time-appropriate greeting
     final hour = DateTime.now().hour;
     final greeting = switch (hour) {
       < 12 => 'Good Morning',
@@ -51,11 +42,6 @@ class DashboardScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      // Edge-to-edge display (SystemChrome in main.dart): the status bar
-      // overlays page content, so the scroll column must start below it —
-      // exactly how profile_screen.dart does it (SafeArea + 16px). Without
-      // the inset the greeting slid under the phone's notification bar.
-      // Bottom stays manual: the floating nav bar overlays the content.
       body: SafeArea(
         top: true,
         bottom: false,
@@ -78,7 +64,6 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
 
-            // Welcome banner
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -131,8 +116,6 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 20),
 
-            // Stats — all computed by customerStatsProvider (see
-            // homeowner/data/stats/stats_providers.dart for sources).
             Row(
               children: [
                 Expanded(
@@ -162,7 +145,6 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 24),
 
-            // Quick Actions
             Text('Quick Actions',
                 style: GoogleFonts.poppins(
                     fontSize: 18,
@@ -210,7 +192,6 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 24),
 
-            // Recent Activity — real orders + saved designs only.
             Text('Recent Activity',
                 style: GoogleFonts.poppins(
                     fontSize: 18,
@@ -229,8 +210,6 @@ class DashboardScreen extends ConsumerWidget {
 
 // ─── Recent Activity ──────────────────────────────────────────────────────────
 
-/// Renders `recentActivityProvider`: loading spinner, retryable error
-/// card, proper empty state, or the real feed. Never invents rows.
 class _RecentActivity extends ConsumerWidget {
   const _RecentActivity();
 
@@ -294,7 +273,6 @@ class _RecentActivity extends ConsumerWidget {
   }
 }
 
-/// Icon + accent colour per real activity kind.
 (IconData, Color) _activityStyle(ActivityKind kind) => switch (kind) {
       ActivityKind.orderPlaced =>
         (Icons.receipt_long_outlined, AppColors.secondaryAccent),
@@ -333,8 +311,6 @@ class _ActivityRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(entry.title,
-                    // Two lines: 'Order ORD-20260902-4821 shipped' must keep
-                    // the full order id visible in this narrow column.
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
@@ -411,8 +387,6 @@ class _StatCard extends StatelessWidget {
             child: Icon(icon, color: Colors.white, size: 18),
           ),
           const SizedBox(height: 10),
-          // Shrink to fit rather than ellipsize: 'RM 1,250,000' and
-          // 'Saved Designs' must stay fully readable in a ~100dp column.
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -478,8 +452,6 @@ class _ActionCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Flexible(
-                // Bounded, so an unexpectedly long label scales down
-                // instead of overflowing the card.
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(

@@ -1,14 +1,3 @@
-// Device regression: the real GoRouter configuration (two shells,
-// redirect, refreshListenable) must survive the exact reported flow —
-// Profile → Reports → "Create a design" on the empty report — without
-// tripping `!keyReservation.contains(key)` (navigator.dart:4096).
-//
-// The simplified router in repro_report_push_test.dart proves the crash
-// mechanism (a shell-through push on top of an imperative overlay appends
-// a second ShellRouteMatch keyed by route.hashCode). These tests guard
-// the actual app router, whose GuardedGoRouter reroutes exactly that
-// combination to `go()` instead of stacking a duplicate shell.
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -26,8 +15,6 @@ import 'package:interior_design_recommendation/features/customer/homeowner/prese
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 
-/// Bounded settling: skeleton/shimmer loops make `pumpAndSettle` hang for
-/// its full timeout, so step the frame clock explicitly instead.
 Future<void> _settle(WidgetTester tester, {int frames = 6}) async {
   await tester.pump();
   for (var i = 0; i < frames; i++) {
@@ -35,8 +22,6 @@ Future<void> _settle(WidgetTester tester, {int frames = 6}) async {
   }
 }
 
-/// Boots the real app (real router, signed-in homeowner, Firebase-free
-/// provider overrides) and returns the router for imperative navigation.
 Future<GoRouter> _boot(WidgetTester tester) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -73,17 +58,14 @@ void main() {
       (tester) async {
     final router = await _boot(tester);
 
-    // Land inside the homeowner shell, as the profile screen does.
     router.go('/profile');
     await _settle(tester);
 
-    // pushOnce('/design/report') — the Reports tool row.
     router.push('/design/report');
     await _settle(tester);
     expect(find.byType(DesignReportScreen), findsOneWidget);
     expect(find.text('Create a design'), findsOneWidget);
 
-    // The reported red-screen action.
     await tester.tap(find.text('Create a design'));
     await _settle(tester);
 
@@ -92,7 +74,6 @@ void main() {
         reason: 'the push must not append a second homeowner-shell match '
             '(duplicate ValueKey(route.hashCode) → keyReservation assert)');
 
-    // Back returns to the report, as the empty-state subtitle promises.
     router.pop();
     await _settle(tester);
     expect(find.byType(DesignReportScreen), findsOneWidget);
@@ -110,11 +91,6 @@ void main() {
     await _settle(tester);
     expect(find.byType(DesignReportScreen), findsOneWidget);
 
-    // The historical crash: pushNamed(homeownerScan) — a location that
-    // matches through the homeowner shell — pushed on top of the
-    // imperative report overlay. GuardedGoRouter must convert this to
-    // `go()` (tab switch replaces the stack) instead of appending a
-    // second ShellRouteMatch with the same page key.
     router.push('/design');
     await _settle(tester);
 
@@ -127,8 +103,6 @@ void main() {
   });
 }
 
-/// Signed-in homeowner stub: the router's redirect only passes once auth
-/// delivers a non-loading state, and every role gate reads this user.
 class _HomeownerAuth implements IAuthRepository {
   static final AppUser _user = AppUser(
     uid: 'u-test',

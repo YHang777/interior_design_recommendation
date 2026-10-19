@@ -28,17 +28,9 @@ import '../../../../shared/widgets/quantity_stepper.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Full-screen create/edit form for a supplier product.
-///
-/// Create: `/supplier/products/new`. Edit: `/supplier/products/:id/edit`
-/// (the product is resolved from the real-time product stream by id).
-///
-/// Structure: Photos → Details → Pricing & stock → Dimensions (for 3D & AR)
-/// → Live buyer preview.
 class ProductFormScreen extends ConsumerStatefulWidget {
   const ProductFormScreen({super.key, this.productId});
 
-  /// Null in create mode; the product id to edit otherwise.
   final String? productId;
 
   bool get isEditing => productId != null && productId!.trim().isNotEmpty;
@@ -47,8 +39,6 @@ class ProductFormScreen extends ConsumerStatefulWidget {
   ConsumerState<ProductFormScreen> createState() => _ProductFormScreenState();
 }
 
-/// One photo slot: a picked-and-uploaded file, a bundled catalogue asset, or
-/// an image already on the product (edit mode).
 class _ImageEntry {
   const _ImageEntry({
     required this.id,
@@ -60,15 +50,11 @@ class _ImageEntry {
 
   final int id;
 
-  /// Display source: http(s) URL, local temp file path, or asset path.
   final String source;
   final bool isLocalFile;
 
-  /// Uploaded to Firebase Storage during this session (safe to delete
-  /// remotely if the user removes the photo before saving).
   final bool isSessionUpload;
 
-  /// Non-null while uploading (0..1).
   final double? progress;
 
   bool get isUploading => isLocalFile && progress != null;
@@ -95,8 +81,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   static const int _descriptionMaxChars = 500;
   static const int _nameMaxChars = 80;
 
-  /// Bundled furniture imagery offered as a no-internet fallback when the
-  /// camera/gallery/upload path fails.
   static const List<String> _catalogAssets = [
     'assets/images/furniture_sofa_modern.png',
     'assets/images/furniture_sofa_classic.png',
@@ -138,14 +122,8 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   late final TextEditingController _heightCtrl;
   late final TextEditingController _depthCtrl;
 
-  /// Whether the seller has entered 3D dimensions themselves (or they came
-  /// from an existing product). While false, category/name auto-fill the
-  /// dimensions with shape-typical defaults; once true the auto-fill stops
-  /// so the fields never fight the seller's own values.
   bool _dimsEdited = false;
 
-  /// ProductDimensions that pass parsing, or null while any field is empty
-  /// or unparseable (the per-field validators block saving those).
   ProductDimensions? get _formDimensions {
     final w = double.tryParse(_widthCtrl.text.trim());
     final h = double.tryParse(_heightCtrl.text.trim());
@@ -164,9 +142,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   bool _isEco = false;
   bool _isActive = true;
 
-  /// Shipping toggles (Task B): fee charged on delivery + the buyer-facing
-  /// 30 km notice. The fee text lives in [_shippingFeeCtrl]; it is only
-  /// VALIDATED while [_shippingEnabled] is on.
   bool _shippingEnabled = false;
   bool _shippingNotice = false;
   String? _category;
@@ -174,15 +149,8 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   List<_ImageEntry> _images = [];
   int _nextImageId = 0;
 
-  /// Stock the product had when the edit form was opened (create mode: 0).
-  /// The save passes `stock − _originalStock` so the repository applies the
-  /// seller's intended CHANGE on top of the live document stock instead of
-  /// overwriting sales that land mid-edit.
   int _originalStock = 0;
 
-  /// Pre-existing network image URLs the seller removed from the gallery —
-  /// handed to [MarketplaceRepository.updateProduct] on save so the orphaned
-  /// Storage blobs are deleted once the doc write succeeds.
   final Set<String> _removedOriginalUrls = {};
 
   bool get _isEditing => widget.isEditing;
@@ -199,8 +167,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _heightCtrl = TextEditingController();
     _depthCtrl = TextEditingController();
 
-    // Edit from the product list: the product is usually already cached in
-    // the real-time stream, so seed immediately to avoid a flash.
     final cached = ref
         .read(marketplaceProductsProvider)
         .valueOrNull;
@@ -223,8 +189,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _originalStock = p.stock;
     _isEco = p.isEcoFriendly;
     _isActive = p.isActive;
-    // Legacy products predate shipping fields — fromJson defaults them to
-    // free/no-notice, which is exactly what this form should show.
     _shippingEnabled = p.shippingEnabled;
     _shippingNotice = p.shippingLongDistanceNotice;
     _shippingFeeCtrl.text =
@@ -234,23 +198,16 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       return _ImageEntry(
         id: ++_nextImageId,
         source: url,
-        // Pre-existing photos are never deleted remotely from the form —
-        // removing one only drops it from the list (the DB overwrite on save
-        // is what actually detaches it).
         isSessionUpload: false,
       );
     }).toList();
     final dims = p.dimensions;
     if (dims != null && (dims.widthM > 0 || dims.heightM > 0 || dims.depthM > 0)) {
-      // Existing dimensions are the seller's own data — prefill them and
-      // lock the fields so a category change cannot stomp them.
       _widthCtrl.text = _dimText(dims.widthM);
       _heightCtrl.text = _dimText(dims.heightM);
       _depthCtrl.text = _dimText(dims.depthM);
       _dimsEdited = true;
     } else {
-      // Legacy product without dimensions — propose shape-typical defaults
-      // (still editable; category/name changes keep refining them).
       _maybeAutoFillDims();
     }
     _seeded = true;
@@ -266,7 +223,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _widthCtrl.dispose();
     _heightCtrl.dispose();
     _depthCtrl.dispose();
-    // Discarded, never-published uploads would otherwise linger in Storage.
     if (!_saved) _cleanupSessionUploads();
     super.dispose();
   }
@@ -285,7 +241,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
   // ── 3D dimensions auto-fill ────────────────────────────────────────────
 
-  /// Decimal without trailing zeros, e.g. 2.20 → '2.2', 1.00 → '1.0'.
   static String _dimText(double v) {
     var s = v.toStringAsFixed(2);
     while (s.endsWith('0')) {
@@ -295,16 +250,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     return s;
   }
 
-  /// Typical W×H×D (m) per shape family. The family comes from the ONE
-  /// classifier shared with the GLB generator ([resolveShapeFamily]), so the
-  /// form and the generator can never disagree about what a product name
-  /// means ('Table Lamp' is a lamp here and in the generator, 'Bedside
-  /// Table' a cabinet).
-  ///
-  /// Only families with genuinely typical sizes carry a guess. A product
-  /// whose name no classifier keyword matches ([resolveShapeFamily] returns
-  /// 'default') has NO entry here and its fields are left EMPTY — never
-  /// fabricate a generic cuboid for a shape nobody recognized.
   static const Map<String, ProductDimensions> _familyDefaultDims = {
     'table': ProductDimensions(widthM: 1.0, heightM: 0.75, depthM: 0.6),
     'sofa': ProductDimensions(widthM: 2.2, heightM: 0.85, depthM: 0.9),
@@ -320,14 +265,8 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     'cushion': ProductDimensions(widthM: 0.45, heightM: 0.15, depthM: 0.45),
   };
 
-  /// Guess shape-typical dimensions from the current name + category, or
-  /// null when nothing suggests a shape yet (the fields then stay EMPTY and
-  /// just show their 'e.g. 1.0' placeholders).
   ProductDimensions? _guessDefaultDims() {
     final name = _nameCtrl.text.trim();
-    // Name-only overrides the generic family table cannot express: a
-    // bedside table is a small 'cabinet' — 0.45 × 0.6 × 0.4 m, not a
-    // 1.8 m tall wardrobe.
     final lower = name.toLowerCase();
     if (lower.contains('bedside') || lower.contains('nightstand')) {
       return const ProductDimensions(widthM: 0.45, heightM: 0.6, depthM: 0.4);
@@ -336,9 +275,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     return _familyDefaultDims[family];
   }
 
-  /// Fills the dimension fields from a name/category hint, but only while
-  /// the seller has not typed their own values (or inherited them from an
-  /// existing product). Called on category changes and name edits.
   void _maybeAutoFillDims() {
     if (_dimsEdited) return;
     final dims = _guessDefaultDims();
@@ -349,7 +285,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     if (_widthCtrl.text.trim() == w &&
         _heightCtrl.text.trim() == h &&
         _depthCtrl.text.trim() == d) {
-      return; // already showing these defaults
+      return;
     }
     _widthCtrl.text = w;
     _heightCtrl.text = h;
@@ -366,7 +302,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _onAnyChange();
   }
 
-  /// Required + numeric + 0.1–10.0 m with inline error messages.
   String? _validateDim(String? v) {
     final t = v?.trim() ?? '';
     if (t.isEmpty) return 'Required';
@@ -459,8 +394,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
     final entryId = ++_nextImageId;
     final uid = supplier.id;
-    // NOTE: the remote path doubles as the Cloudinary public_id (`/` becomes
-    // a folder separator, so photos group under product_images/{uid}).
     final millis = DateTime.now().millisecondsSinceEpoch;
 
     final entry = _ImageEntry(
@@ -491,13 +424,12 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
         ),
       );
       if (!stillListed) {
-        // The user removed the thumbnail mid-upload — drop the orphan file.
         unawaited(_deleteRemote(url));
       }
     } catch (e) {
       debugPrint('[product form] upload failed: $e');
       if (!mounted) return;
-      _updateEntry(entryId, (_) => null); // remove failed entry
+      _updateEntry(entryId, (_) => null);
       showAppSnackbar(
         context,
         'Photo upload failed. Please try again.',
@@ -597,8 +529,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     );
   }
 
-  /// Applies [update] to the entry with [id]. Returns false when the entry is
-  /// no longer in the list (removed while uploading).
   bool _updateEntry(int id, _ImageEntry? Function(_ImageEntry) update) {
     var found = false;
     final next = <_ImageEntry>[];
@@ -620,10 +550,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     final entry = _images.where((e) => e.id == id).firstOrNull;
     if (entry == null) return;
     _setImageList(_images.where((e) => e.id != id).toList());
-    // Photos uploaded during THIS session are safe to delete remotely right
-    // away. Pre-existing product photos are instead tracked so the SAVE
-    // deletes their remote blobs (only after the doc write succeeds — the
-    // user might otherwise hit back and keep the photo on the product).
     if (entry.isSessionUpload) {
       unawaited(_deleteRemote(entry.source));
     } else if (entry.source.startsWith('http')) {
@@ -635,7 +561,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     try {
       await MediaStore.instance.deleteByUrl(url);
     } catch (_) {
-      // Already gone or not deletable — orphan cleanup is best effort.
     }
   }
 
@@ -675,21 +600,13 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       supplierId: supplier.id,
       isActive: _isActive,
       isEcoFriendly: _isEco,
-      // Preserve rolling ratings on edits; never fabricate on create.
       rating: _existing?.rating ?? 0.0,
       ratingCount: _existing?.ratingCount ?? 0,
       originalPrice: _discountPercent != null
           ? int.tryParse(_originalPriceCtrl.text.trim())
           : null,
       dimensions: _formDimensions,
-      // Editing must never erase the product's auto-3D state — carry the
-      // existing record forward so a form save cannot reset a ready /
-      // generating / failed model back to 'none' (the repository additionally
-      // re-merges ar3d from the live document inside its update transaction).
       ar3d: _existing?.ar3d,
-      // The fee is persisted even while the toggle is off (so re-enabling
-      // later restores the seller's number) — `shippingCharge` gates it, so
-      // a disabled product can never bill buyers.
       shippingEnabled: _shippingEnabled,
       shippingFee: int.tryParse(_shippingFeeCtrl.text.trim()) ?? 0,
       shippingLongDistanceNotice: _shippingNotice,
@@ -698,7 +615,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   }
 
   bool _validate() {
-    // Photo requirement is validated manually (not a FormField).
     if (_images.isEmpty) {
       final photoCtx = _photosSectionKey.currentContext;
       if (photoCtx != null) {
@@ -748,8 +664,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     if (_saving) return;
     setState(() => _attemptedSubmit = true);
 
-    // Wait for any in-flight image uploads — the product image must be a
-    // public URL for3D generation (Tripo fetches it server-side).
     if (_hasPendingUploads) {
       showAppSnackbar(
         context,
@@ -777,8 +691,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
     setState(() => _saving = true);
     final repo = ref.read(marketplaceRepositoryProvider);
-    // The messenger/error snackbars below may fire AFTER the form pops
-    // itself, so capture them while this context is still live.
     final messenger = ScaffoldMessenger.of(context);
     try {
       final product = _buildProduct(supplier);
@@ -794,17 +706,8 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       }
       _saved = true;
       _dirty = false;
-      // Auto-3D pipeline, fire-and-forget, BEFORE popping: the saved product
-      // (with its real doc id) decides — procedural-ready when dims exist,
-      // a Tripo AI task when configured + network image, else ar3d 'none'.
-      // Status shows up in the management list's chip when the seller
-      // returns to it.
       kickOffProduct3DGeneration(saved);
 
-      // Photo analysis (server-side Gemini vision), awaited so a photo that
-      // contradicts the listing can warn the seller BEFORE they leave —
-      // but never a blocker: failure/timeout just skips the warning, and
-      // the admin flag queue is the safety net.
       final vision = await kickOffProductVisionAnalysis(saved)
           .timeout(const Duration(seconds: 20), onTimeout: () => null);
       if (!mounted) return;
@@ -844,16 +747,11 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             ],
           ),
         );
-        // "Edit listing": leave the form open (already saved and clean) so
-        // the seller can fix the text and re-save — which re-runs analysis.
         if (edit == true) return;
       }
       if (!mounted) return;
-      // Capture the router while this context is still live — the snackbar
-      // action below fires after the form has popped itself.
       final goRouter = GoRouter.of(context);
       context.pop();
-      // The live Firestore streams refresh the seller lists automatically.
 
       final label = _isEditing ? 'Changes saved' : 'Product published';
       showAppSnackbarOn(
@@ -864,10 +762,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
         actionLabel: product.isActive && !_isEditing ? 'View in store' : null,
         onAction: product.isActive && !_isEditing
             ? () {
-                // Suppliers are allowed to browse the storefront (Loop 3):
-                // /marketplace and product detail pages are whitelisted in
-                // the router redirect. `go` (rather than `push`) avoids
-                // stacking a duplicate shell.
                 messenger.hideCurrentSnackBar();
                 goRouter.goNamed(RouteNames.homeownerMarketplace);
               }
@@ -936,8 +830,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Always watch — used to resolve the product being edited (the seeded
-    // snapshot from initState covers the common list → edit path).
     final productsAsync = ref.watch(marketplaceProductsProvider);
     if (!_seeded && _isEditing) {
       final found =
@@ -1176,7 +1068,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             borderRadius: BorderRadius.circular(12),
             child: _entryImage(entry),
           ),
-          // Cover badge — first image is the marketplace cover.
           if (index == 0)
             Positioned(
               left: 4,
@@ -1198,7 +1089,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                 ),
               ),
             ),
-          // Remove button — ~36px tap target with tooltip + semantics.
           Positioned(
             top: 0,
             right: 0,
@@ -1228,7 +1118,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
               ),
             ),
           ),
-          // Upload progress ring.
           if (entry.isUploading)
             Positioned.fill(
               child: Container(
@@ -1323,8 +1212,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
               onChanged: (v) {
                 _onAnyChange();
                 setState(() => _category = v);
-                // Suggest shape-typical 3D dims for the new category unless
-                // the seller already entered their own.
                 _maybeAutoFillDims();
               },
               validator: (v) =>
@@ -1575,11 +1462,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
 
   // ── Section 4: Shipping ─────────────────────────────────────────────────
 
-  /// Seller-controlled delivery charge + the long-distance notice shown on
-  /// the customer product page. Everything flows through
-  /// `Product.shippingEnabled`/`shippingFee`/`shippingLongDistanceNotice`
-  /// (see models/product.dart): `shippingCharge` gates the fee everywhere,
-  /// so a stored amount with the toggle off can never bill a buyer.
   Widget _buildShippingSection() {
     return _SectionCard(
       title: 'Shipping',
@@ -1667,8 +1549,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
           ),
           if (_shippingNotice) ...[
             const SizedBox(height: 4),
-            // Live preview of the exact copy buyers see on the product page
-            // (shared constant — preview and store page cannot drift).
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1768,9 +1648,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             ],
           ),
           const SizedBox(height: 4),
-          // Shown while the fields carry the shape-typical auto-fill (and
-          // disappears the moment the seller types their own values): the
-          // guess comes from the product name, so it needs a human check.
           if (!_dimsEdited &&
               _widthCtrl.text.trim().isNotEmpty &&
               _heightCtrl.text.trim().isNotEmpty &&
@@ -1821,7 +1698,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final cardWidth = (constraints.maxWidth - 12) / 2;
-        final cardHeight = cardWidth / 0.68; // matches buyer grid tiles
+        final cardHeight = cardWidth / 0.68;
         return _SectionCard(
           title: 'Buyer preview',
           subtitle: 'How buyers see this product in the marketplace',
@@ -1835,7 +1712,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                   product: preview,
                   compact: false,
                   onTap: () {
-                    // Nothing to open yet — the preview is illustrative.
                   },
                 ),
               ),
@@ -1893,8 +1769,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.transparent,
                   disabledForegroundColor: AppColors.textHint,
-                  // Tight 52px wrapper — keep the label's line box
-                  // (e.g. the 'g' in "changes") inside the button.
                   padding:
                       const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                   shape: RoundedRectangleBorder(
@@ -1940,7 +1814,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   }
 }
 
-/// Dashed rounded-rect border used by the "add photo" tile.
 class _DashedBorderPainter extends CustomPainter {
   _DashedBorderPainter({required this.color});
 
@@ -2017,8 +1890,6 @@ class _DropdownPlaceholder extends StatelessWidget {
   }
 }
 
-/// Text field with the app's "filled" treatment: a soft fill that brightens
-/// and an accent border that appears on focus or when the field has content.
 class _AppInput extends StatefulWidget {
   const _AppInput({
     required this.label,
@@ -2051,8 +1922,6 @@ class _AppInput extends StatefulWidget {
   final int? minLines;
   final VoidCallback? onChanged;
 
-  /// False greys the field out (e.g. the delivery fee while "Charge for
-  /// delivery" is off) while keeping it inside the Form validation flow.
   final bool enabled;
 
   @override
@@ -2089,8 +1958,6 @@ class _AppInputState extends State<_AppInput> {
   }
 
   InputDecoration _decoration() {
-    // Subtle state shift: soft grey fill → white once focused or filled;
-    // the focused border (accent, 2px) comes from the app input theme.
     final hasState = _focused || _hasText;
     return InputDecoration(
       labelText: widget.label,
@@ -2129,7 +1996,6 @@ class _AppInputState extends State<_AppInput> {
         widget.onChanged?.call();
       },
       decoration: _decoration(),
-      // Custom counter ('n/max') in the hint color.
       buildCounter: (context,
           {required currentLength,
           required isFocused,
@@ -2147,7 +2013,6 @@ class _AppInputState extends State<_AppInput> {
   }
 }
 
-/// White card container for a form section, with a heading + optional caption.
 class _SectionCard extends StatelessWidget {
   const _SectionCard({
     this.sectionKey,

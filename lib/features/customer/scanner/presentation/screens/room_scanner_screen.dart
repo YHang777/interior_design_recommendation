@@ -16,7 +16,6 @@ import '../../../ar/data/furniture_model_library.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 
-/// Real AR room scanner — camera + ML Kit + interactive floor plan editor.
 class RoomScannerScreen extends ConsumerStatefulWidget {
   const RoomScannerScreen({super.key, this.existingDesign});
   final RoomDesign? existingDesign;
@@ -39,17 +38,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   Timer? _timer;
   String _roomType = 'living_room';
 
-  // Editor state
   late List<FurniturePlacement> _furniture;
   double _roomW = 400;
   double _roomH = 500;
   int _selectedIdx = -1;
   bool _isEditingDimensions = false;
 
-  // Room walls (user-drawn polygon in room-cm coordinates).
-  // Mutated in place; [_wallsRev] is bumped so only the wall layer repaints
-  // while a corner is being dragged (a full setState per pointer-move was one
-  // of the planner's drag-jank sources).
   final List<Offset> _walls = [];
   final ValueNotifier<int> _wallsRev = ValueNotifier(0);
   bool _wallMode = false;
@@ -57,7 +51,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   void _touchWalls() => _wallsRev.value++;
 
-  // Scanning state
   DateTime? _lastProcessedAt;
   bool _processingFrame = false;
   DateTime? _scanDeadline;
@@ -121,13 +114,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           .map((l) => _Found(label: l, confidence: 0.9)));
       _stage = _Stage.plan;
     } else {
-      // Start directly on the room plan editor — scanning is optional.
       _stage = _Stage.plan;
     }
-    // The camera is opened lazily when a scan starts and released again when
-    // the plan editor is showing. Holding CameraController open the whole
-    // time keeps the camera HAL hot and steals CPU/thermal budget from the
-    // drag path — a real source of planner jank on mid-range phones.
   }
 
   Future<void> _setupCam() async {
@@ -151,8 +139,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _cam = cam;
       setState(() {});
     } catch (_) {
-      // A controller that failed mid-initialize still holds native camera
-      // resources — dispose it here, since _releaseCam() only knows _cam.
       try {
         await cam?.dispose();
       } catch (_) {}
@@ -160,7 +146,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     }
   }
 
-  /// Releases the camera so the plan editor gets the device's full CPU/GPU.
   Future<void> _releaseCam() async {
     final cam = _cam;
     _cam = null;
@@ -173,11 +158,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     } catch (_) {}
   }
 
-  /// In-flight camera open, so a double-tap on Scan can't run two
-  /// `_setupCam`s and leak whichever controller loses the race.
   Future<void>? _camOpening;
 
-  /// Opens the camera on demand (Scan button) instead of at screen init.
   Future<void> _ensureCam() {
     if (_cam != null && _cam!.value.isInitialized) return Future.value();
     return _camOpening ??= _setupCam().whenComplete(() => _camOpening = null);
@@ -194,10 +176,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _scanDeadline =
           DateTime.now().add(Duration(seconds: _scanDurationSec));
     });
-    // Live camera stream — much faster than taking full photos (no
-    // autofocus/capture cycle per frame). Frames are throttled before ML.
     _cam!.startImageStream(_onCameraFrame);
-    // 1s ticker: elapsed time + auto-stop deadline check.
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => _elapsed++);
@@ -210,7 +189,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     });
   }
 
-  /// Called for every preview frame; throttled to ~1 frame/s for ML Kit.
   void _onCameraFrame(CameraImage image) {
     if (_stage != _Stage.scanning || _processingFrame) return;
     final now = DateTime.now();
@@ -245,9 +223,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     } catch (_) {}
   }
 
-  /// Converts a [CameraImage] (YUV) into an ML Kit [InputImage].
-  /// Uses the same plane-concatenation approach as Google's Flutter ML Kit
-  /// quickstart — good enough for image labeling.
   InputImage? _cameraImageToInputImage(CameraImage image) {
     try {
       final builder = BytesBuilder();
@@ -277,7 +252,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     }
   }
 
-  /// Extends the scan window so the user can keep looking around.
   void _extendScan() {
     setState(() {
       _scanDeadline =
@@ -288,10 +262,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   void _stopScan() {
     if (_stage != _Stage.scanning) return;
     _timer?.cancel();
-    // Auto-place detected items and return to plan editor directly.
     _autoPlaceFound();
     if (mounted) setState(() => _stage = _Stage.plan);
-    // Drop the camera now that the editor is up — see _setupCam.
     unawaited(_releaseCam());
   }
 
@@ -333,7 +305,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   // ─── Wall (room shape) geometry helpers ───
 
-  /// Ray-casting point-in-polygon test (room-cm coordinates).
   bool _pointInPolygon(Offset p) {
     if (_walls.length < 3) return true;
     var inside = false;
@@ -348,8 +319,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     return inside;
   }
 
-  /// Nudges a furniture item until it sits fully inside the drawn walls
-  /// (or returns it unchanged when no walls are drawn / it can't fit).
   FurniturePlacement _clampToWalls(FurniturePlacement f) {
     if (_walls.length < 3) return f;
 
@@ -369,7 +338,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
     if (fits(Offset(f.x, f.y))) return f;
 
-    // Walk the item's center towards the polygon centroid until it fits.
     final centroid = Offset(
       _walls.map((w) => w.dx).reduce((a, b) => a + b) / _walls.length,
       _walls.map((w) => w.dy).reduce((a, b) => a + b) / _walls.length,
@@ -377,7 +345,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     var center = Offset(f.x + f.width / 2, f.y + f.height / 2);
     final delta = centroid - center;
     if (delta.distance < 0.5) return f;
-    final step = delta / delta.distance * 5.0; // 5 cm steps
+    final step = delta / delta.distance * 5.0;
     for (var i = 0; i < 200; i++) {
       center += step;
       final tl = Offset(
@@ -391,8 +359,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   // ─── Raw pointer interactions (canvas pixels → room cm) ───
-  // Uses Listener instead of GestureDetector so pan starts instantly
-  // without the 18 px kTouchSlop dead zone.
 
   bool _pointerMoved = false;
   bool _pointerOnTile = false;
@@ -403,10 +369,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
     final p = Offset(e.localPosition.dx / s, e.localPosition.dy / s);
 
-    // A press that lands on a furniture tile belongs to the tile's own
-    // gesture (tap = select, long-press = remove). The canvas must not treat
-    // its release as an empty-canvas tap, or it clears the selection the tile
-    // just made/kept.
     for (final f in _furniture) {
       if (p.dx >= f.x &&
           p.dx <= f.x + f.width &&
@@ -417,7 +379,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       }
     }
 
-    // Try to grab an existing wall corner.
     _draggingWallIdx = -1;
     if (_walls.isNotEmpty) {
       int? best;
@@ -429,10 +390,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           best = i;
         }
       }
-      // 25 cm grab radius in room coordinates.
       if (best != null && bestDist <= 25) {
         _draggingWallIdx = best;
-        return; // consume — start dragging immediately
+        return;
       }
     }
   }
@@ -440,34 +400,29 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   void _onPointerMove(PointerMoveEvent e, double s) {
     _pointerMoved = true;
 
-    // Drag an existing wall corner.
     if (_draggingWallIdx >= 0 && _draggingWallIdx < _walls.length) {
       final p = Offset(
         (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
         (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
       );
       _walls[_draggingWallIdx] = p;
-      // Only the wall layer needs to repaint — not the whole planner.
       _touchWalls();
     }
   }
 
   void _onPointerUp(PointerUpEvent e, double s) {
-    // Tap = pointer-down → pointer-up with < 5 px movement.
     if (!_pointerMoved && _draggingWallIdx < 0 && !_pointerOnTile) {
       final p = Offset(
         (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
         (e.localPosition.dy / s).clamp(0.0, _roomH).toDouble(),
       );
       if (_wallMode) {
-        // Add a new corner (ignore taps too close to existing ones).
         final tooClose = _walls.any((w) => (w - p).distance < 12);
         if (!tooClose) {
           setState(() => _walls.add(p));
           _touchWalls();
         }
       } else {
-        // Empty canvas tap — clear the selection.
         setState(() => _selectedIdx = -1);
       }
     }
@@ -519,10 +474,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     setState(() => _furniture.add(item));
   }
 
-  /// Opens the furniture catalogue as a bottom sheet and drops the picked
-  /// item onto the plan. Categories come from `_Cat.category`, which the old
-  /// full-width strip never used — the sheet groups by it so twelve tiles
-  /// stop competing for one 84px row.
   Future<void> _openFurniturePicker() async {
     final picked = await showCatalogPickerSheet<_Cat>(
       context: context,
@@ -652,20 +603,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     final bgColor = isDark ? Colors.black : AppColors.background;
     final fgColor = isDark ? Colors.white : AppColors.textPrimary;
 
-    // Use a plain Column instead of a nested Scaffold to avoid layout
-    // conflicts with the outer HomeownerShell Scaffold.
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      // Dark camera stages keep white status icons; the light plan stage
-      // matches the app-wide dark icons (main.dart flips them globally).
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      // When pushed full-screen (e.g. Reports → "Create a design") there is
-      // no Scaffold above us, so nothing provides a Material. Without one,
-      // every Text inherits MaterialApp's fallback style — a yellow double
-      // underline meant to flag missing Materials. This Material (replacing
-      // the old ColoredBox, same opaque color as its ink background) also
-      // gives the header IconButtons a proper ink surface. Under the
-      // HomeownerShell tab it is harmless: a nested Material just re-provides
-      // the same bodyMedium DefaultTextStyle the shell's Scaffold already did.
       child: Material(
         color: bgColor,
         child: Column(
@@ -687,8 +626,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               ? 'Edit: ${widget.existingDesign!.name}'
                               : 'Room Planner',
                         },
-                        // Light plan stage uses the in-body page-heading look;
-                        // dark camera stages keep the compact white title.
                         style: isDark
                             ? GoogleFonts.poppins(
                                 color: fgColor,
@@ -825,7 +762,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         ),
         const SizedBox(height: 10),
 
-        // Scan progress bar
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
@@ -866,7 +802,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         ),
         const SizedBox(height: 10),
 
-        // Live detection feed
         SizedBox(
           height: 40,
           child: _found.isEmpty
@@ -1016,12 +951,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   // ─── Floor plan editor ───
   Widget _planEditor() {
-    // The shell's floating pill overlays tab content (extendBody: true), so
-    // the plan editor's action rows need to clear it.
     final bottomClearance = MediaQuery.paddingOf(context).bottom + 8;
     return Column(
       children: [
-        // Detected items — tappable chips that auto-add to plan
         if (_found.isNotEmpty)
           Container(
             padding:
@@ -1089,7 +1021,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        // Room size selector — shown when the plan is empty
         if (_furniture.isEmpty && widget.existingDesign == null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1109,10 +1040,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary)),
                     const SizedBox(width: 6),
-                    // Flexible: this hint is the longest of the three and was
-                    // an unbounded Row child, so it pushed past the container
-                    // edge and produced the RenderFlex overflow the user saw.
-                    // Wrapping keeps the full sentence instead of clipping it.
                     Expanded(
                       child: Text('— then add furniture from the catalog below',
                           style: GoogleFonts.poppins(
@@ -1168,18 +1095,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        // Room canvas — floor plan style
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Center(
               child: LayoutBuilder(
                 builder: (ctx, constraints) {
-                  // The canvas frame's border insets the child by 3px a side.
-                  // Room-cm coordinates must map onto that inner box exactly,
-                  // otherwise furniture at the room's right/bottom edge paints
-                  // outside the frame — so the border is added back onto the
-                  // SizedBox, not taken out of the scale.
                   const border = 3.0;
                   final maxW = constraints.maxWidth - border * 2;
                   final maxH = constraints.maxHeight - border * 2;
@@ -1218,8 +1139,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                         child: Stack(
                           clipBehavior: Clip.hardEdge,
                           children: [
-                            // Subtle grid — own layer so furniture/wall
-                            // movement never repaints it.
                             RepaintBoundary(
                               child: CustomPaint(
                                 painter:
@@ -1228,9 +1147,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                                 size: Size.infinite,
                               ),
                             ),
-                            // Room walls (user-drawn polygon). Listens to
-                            // [_wallsRev] so dragging a corner repaints only
-                            // this layer instead of the whole planner.
                             RepaintBoundary(
                               child: ValueListenableBuilder<int>(
                                 valueListenable: _wallsRev,
@@ -1241,7 +1157,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                                 ),
                               ),
                             ),
-                          // Dimension labels on walls
                           _dimLabel('${_roomW.toInt()} cm',
                               top: -20,
                               left: canvasW / 2 - 30),
@@ -1249,7 +1164,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               left: -22,
                               top: canvasH / 2 - 10,
                               vertical: true),
-                          // Room type label
                           Positioned(
                             top: 6,
                             left: 0,
@@ -1282,11 +1196,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               ),
                             ),
                           ),
-                          // Furniture placements. Each tile owns its drag
-                          // state, so a pan rebuilds only that tile — not the
-                          // whole planner (that full-tree rebuild was the main
-                          // source of drag jank). Wall clamping runs once on
-                          // release rather than on every pointer-move.
                           for (var i = 0; i < _furniture.length; i++)
                             _FurnitureTile(
                               key: ValueKey(_furniture[i].id),
@@ -1312,7 +1221,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                                   final idx = _furniture
                                       .indexWhere((e) => e.id == moved.id);
                                   if (idx < 0) return;
-                                  // One wall-clamp per drop, not per frame.
                                   _furniture[idx] = _clampToWalls(moved);
                                 });
                               },
@@ -1328,7 +1236,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           ),
         ),
 
-        // Selected item info
         if (_selectedIdx >= 0 &&
             _selectedIdx < _furniture.length)
           Container(
@@ -1375,7 +1282,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        // Wall-drawing hint
         if (_wallMode)
           Container(
             padding: const EdgeInsets.symmetric(
@@ -1399,10 +1305,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        // Furniture picker — one compact pill instead of the old full-width
-        // strip of twelve 60px tiles. The catalog opens in a themed bottom
-        // sheet (category chips + image cards), so the plan canvas keeps its
-        // height and the labels are readable.
         Container(
           padding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1439,8 +1341,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           ),
         ),
 
-        // Bottom bar: dimensions + wall drawing + actions (two rows — no
-        // overflow on narrow screens).
         Container(
           padding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1452,7 +1352,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Row 1 — room dimensions
               if (_isEditingDimensions) ...[
                 Row(
                   children: [
@@ -1518,8 +1417,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                           color: AppColors.textSecondary),
                       const SizedBox(width: 6),
                       Flexible(
-                        // Shrink instead of ellipsizing: the room
-                        // dimensions are the whole point of this chip.
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
@@ -1540,12 +1437,10 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                 const SizedBox(height: 8),
               ],
 
-              // Row 2 — actions (scrollable on narrow screens)
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    // Wall drawing toggle (long-press clears the walls)
                     GestureDetector(
                       onLongPress: _walls.isEmpty ? null : _clearWalls,
                       child: OutlinedButton.icon(
@@ -1621,7 +1516,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ],
           ),
         ),
-        // Clearance so the floating pill never covers the action row.
         SizedBox(height: bottomClearance),
       ],
     );
@@ -1654,7 +1548,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   // ─── Icon lookup ───
 }
 
-// Icon lookup — shared by the plan editor and [_FurnitureTile].
 IconData _iconFor(String iconName) {
   for (final c in _RoomScannerScreenState._catalog) {
     if (c.iconName == iconName) return c.icon;
@@ -1663,9 +1556,6 @@ IconData _iconFor(String iconName) {
 }
 
 // ─── Draggable furniture tile ───
-// Owns its live drag position in local state so a pan rebuilds only this
-// tile (plus its own repaint layer), never the whole planner. The parent is
-// notified once, on pan end, with the committed placement.
 class _FurnitureTile extends StatefulWidget {
   const _FurnitureTile({
     super.key,
@@ -1687,8 +1577,6 @@ class _FurnitureTile extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
-  /// Called once when a drag ends, with the tile's new placement already
-  /// clamped to the room rectangle. The parent applies wall clamping.
   final ValueChanged<FurniturePlacement> onCommit;
 
   @override
@@ -1696,7 +1584,6 @@ class _FurnitureTile extends StatefulWidget {
 }
 
 class _FurnitureTileState extends State<_FurnitureTile> {
-  /// Live room-cm position while dragging; null means "use [widget.item]".
   Offset? _live;
 
   Offset get _pos => _live ?? Offset(widget.item.x, widget.item.y);
@@ -1725,10 +1612,6 @@ class _FurnitureTileState extends State<_FurnitureTile> {
     widget.onCommit(widget.item.copyWith(x: p.dx, y: p.dy));
   }
 
-  /// A cancelled gesture (notification shade, incoming call, palm rejection)
-  /// never fires [DragEndDetails] — without this the tile would freeze at the
-  /// drag position while the model still held the pre-drag one, so Save
-  /// would persist a different place than the user sees.
   void _onPanCancel() {
     final p = _pos;
     setState(() => _live = null);
@@ -1748,8 +1631,6 @@ class _FurnitureTileState extends State<_FurnitureTile> {
     return Positioned(
       left: p.dx * s,
       top: p.dy * s,
-      // Own layer: dragging this tile leaves the grid, walls and other
-      // tiles untouched.
       child: RepaintBoundary(
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -1838,10 +1719,6 @@ class _Cat {
       this.defaultWidth, this.defaultHeight, this.imageAsset);
 }
 
-/// Picker-sheet tile for one catalogue entry. Prefers the furniture photo
-/// (several entries carry an `imageAsset` the old strip ignored) and falls
-/// back to the icon in a tinted circle — same language as the saved-designs
-/// style cards.
 class _CatalogThumb extends StatelessWidget {
   const _CatalogThumb({required this.cat});
 
@@ -1879,11 +1756,9 @@ class _RoomShapePainter extends CustomPainter {
   _RoomShapePainter(this.scale, this.walls, this.wallMode, this.revision);
 
   final double scale;
-  final List<Offset> walls; // room-cm coordinates
+  final List<Offset> walls;
   final bool wallMode;
 
-  /// Bumped whenever [walls] is mutated in place. Comparing the list itself
-  /// won't work because the painter holds the same mutable reference.
   final int revision;
 
   @override
@@ -1900,10 +1775,8 @@ class _RoomShapePainter extends CustomPainter {
 
     if (walls.length >= 3) {
       final shape = path();
-      // Floor fill — slightly warmer than the paper background.
       canvas.drawPath(
           shape, Paint()..color = const Color(0xFFF5EDDE));
-      // Wall outline.
       canvas.drawPath(
           shape,
           Paint()
@@ -1912,7 +1785,6 @@ class _RoomShapePainter extends CustomPainter {
             ..strokeWidth = 3
             ..strokeJoin = StrokeJoin.round);
     } else if (wallMode && walls.length >= 2) {
-      // Show the wall line currently being drawn.
       final line = Path()
         ..moveTo(walls.first.dx * scale, walls.first.dy * scale);
       for (final w in walls.skip(1)) {
@@ -1927,7 +1799,6 @@ class _RoomShapePainter extends CustomPainter {
             ..strokeCap = StrokeCap.round);
     }
 
-    // Corner handles while in wall mode.
     if (wallMode) {
       for (final w in walls) {
         canvas.drawCircle(Offset(w.dx * scale, w.dy * scale), 6,
@@ -1954,7 +1825,6 @@ class _FloorPlanGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Subtle 50cm grid
     final grid50 = 50 * scale;
     final p = Paint()
       ..color = const Color(0xFFE8E4DB)
@@ -1967,7 +1837,6 @@ class _FloorPlanGridPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), p);
     }
 
-    // 100cm grid (slightly stronger)
     final grid100 = 100 * scale;
     final p100 = Paint()
       ..color = const Color(0xFFD4CFC4)

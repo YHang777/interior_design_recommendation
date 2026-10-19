@@ -13,9 +13,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Sales analytics — hand-rolled 6-month revenue bars (no chart dependency),
-/// top products by units sold and summary figures. All money figures only
-/// include THIS supplier's line items; cancelled orders never count.
 class SalesAnalyticsScreen extends ConsumerStatefulWidget {
   const SalesAnalyticsScreen({super.key});
 
@@ -24,7 +21,6 @@ class SalesAnalyticsScreen extends ConsumerStatefulWidget {
       _SalesAnalyticsScreenState();
 }
 
-/// Mutable tally used while aggregating top products.
 class _Tally {
   _Tally({required this.name, required this.image});
   String name;
@@ -39,7 +35,6 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
     try {
       final _ = await ref.refresh(supplierOrdersProvider(uid).future);
     } catch (_) {
-      // Best effort pull-to-refresh.
     }
   }
 
@@ -67,7 +62,6 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
     final avgOrderValue =
         totalOrders == 0 ? 0 : totalRevenue ~/ totalOrders;
 
-    // Months oldest → newest (includes the current partial month).
     final now = DateTime.now();
     final months = List.generate(
         6, (i) => DateTime(now.year, now.month - (5 - i), 1));
@@ -127,8 +121,6 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
     );
   }
 
-  /// Items + this supplier's shipping share (kept consistent with
-  /// `totalRevenue`/`revenueInMonth` in supplier_providers).
   int totalRevenueOf(List<Order> sold, String uid) =>
       sold.fold(0, (sum, o) => sum + mySubtotal(o, uid) + myShipping(o, uid));
 
@@ -160,8 +152,6 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
         const SizedBox(height: 16),
 
         // ── Summary figures ──
-        // Expanded keeps the three cards at equal 1/3 width — as bare Row
-        // children they sized to intrinsic text width and overflowed 360dp.
         Row(
           children: [
             Expanded(
@@ -227,7 +217,7 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
                             month: months[i],
                             value: monthly[i],
                             barHeight:
-                                monthly[i] / maxMonthly * 120, // 120 max px
+                                monthly[i] / maxMonthly * 120,
                             showYear: months[i].year != now.year,
                           ),
                         ),

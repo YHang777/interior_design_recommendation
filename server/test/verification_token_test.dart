@@ -21,7 +21,6 @@ void main() {
       final token = createVerificationToken(
           uid: 'abc123', email: 'user@example.com', secret: secret);
       final parts = token.split('.');
-      // Flip the uid from abc123 to abc124 inside the payload.
       final forgedPayload = '{"uid":"abc124","email":"user@example.com","exp":9999999999}';
       final forgedB64 = base64UrlEncode(utf8.encode(forgedPayload))
           .replaceAll('=', '');
@@ -61,7 +60,6 @@ void main() {
         secret: secret,
         clock: () => start,
       );
-      // Verify with a clock 25 hours later (ttl is 24h).
       expect(
         verifyVerificationToken(token, secret,
             clock: () => start.add(const Duration(hours: 25))),

@@ -8,7 +8,6 @@ class ArFlutterPlugin {
   static const MethodChannel _channel =
       const MethodChannel('ar_flutter_plugin_2');
 
-  /// Private constructor to prevent accidental instantiation of the Plugin using the implicit default constructor
   ArFlutterPlugin._();
 
   static Future<String> get platformVersion async {

@@ -1,12 +1,8 @@
-// Automatic FlutterFlow imports
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'index.dart'; // Imports other custom widgets
+import 'index.dart';
 import 'package:flutter/material.dart';
-// Begin custom widget code
-// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-//AR Flutter Plugin
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
@@ -19,7 +15,6 @@ import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 
-//Other custom imports
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'dart:math';
@@ -106,9 +101,7 @@ class _ObjectGesturesState extends State<ObjectGestures> {
   }
 
   Future<void> onRemoveEverything() async {
-    /*nodes.forEach((node) {
-      this.arObjectManager.removeNode(node);
-    });*/
+
     anchors.forEach((anchor) {
       this.arAnchorManager!.removeAnchor(anchor);
     });
@@ -125,7 +118,6 @@ class _ObjectGesturesState extends State<ObjectGestures> {
       bool? didAddAnchor = await this.arAnchorManager!.addAnchor(newAnchor);
       if (didAddAnchor!) {
         this.anchors.add(newAnchor);
-        // Add note to anchor
         var newNode = ARNode(
             type: NodeType.webGLB,
             uri:
@@ -166,11 +158,6 @@ class _ObjectGesturesState extends State<ObjectGestures> {
     final pannedNode =
         this.nodes.firstWhere((element) => element.name == nodeName);
 
-    /*
-    * Uncomment the following command if you want to keep the transformations of the Flutter representations of the nodes up to date
-    * (e.g. if you intend to share the nodes through the cloud)
-    */
-    //pannedNode.transform = newTransform;
   }
 
   onRotationStarted(String nodeName) {
@@ -186,10 +173,5 @@ class _ObjectGesturesState extends State<ObjectGestures> {
     final rotatedNode =
         this.nodes.firstWhere((element) => element.name == nodeName);
 
-    /*
-    * Uncomment the following command if you want to keep the transformations of the Flutter representations of the nodes up to date
-    * (e.g. if you intend to share the nodes through the cloud)
-    */
-    //rotatedNode.transform = newTransform;
   }
 }

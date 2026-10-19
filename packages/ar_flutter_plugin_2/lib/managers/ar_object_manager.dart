@@ -6,7 +6,6 @@ import 'package:ar_flutter_plugin_2/utils/json_converters.dart';
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-// Type definitions to enforce a consistent use of the API
 typedef NodeTapResultHandler = void Function(List<String> nodes);
 typedef NodePanStartHandler = void Function(String node);
 typedef NodePanChangeHandler = void Function(String node);
@@ -15,15 +14,11 @@ typedef NodeRotationStartHandler = void Function(String node);
 typedef NodeRotationChangeHandler = void Function(String node);
 typedef NodeRotationEndHandler = void Function(String node, Matrix4 transform);
 
-/// Manages the all node-related actions of an [ARView]
 class ARObjectManager {
-  /// Platform channel used for communication from and to [ARObjectManager]
   late MethodChannel _channel;
 
-  /// Debugging status flag. If true, all platform calls are printed. Defaults to false.
   final bool debug;
 
-  /// Callback function that is invoked when the platform detects a tap on a node
   NodeTapResultHandler? onNodeTap;
   NodePanStartHandler? onPanStart;
   NodePanChangeHandler? onPanChange;
@@ -60,14 +55,12 @@ class ARObjectManager {
         case 'onPanStart':
           if (onPanStart != null) {
             final tappedNode = call.arguments as String;
-            // Notify callback
             onPanStart!(tappedNode);
           }
           break;
         case 'onPanChange':
           if (onPanChange != null) {
             final tappedNode = call.arguments as String;
-            // Notify callback
             onPanChange!(tappedNode);
           }
           break;
@@ -77,7 +70,6 @@ class ARObjectManager {
             final transform =
                 MatrixConverter().fromJson(call.arguments['transform'] as List);
 
-            // Notify callback
             onPanEnd!(tappedNodeName, transform);
           }
           break;
@@ -99,7 +91,6 @@ class ARObjectManager {
             final transform =
                 MatrixConverter().fromJson(call.arguments['transform'] as List);
 
-            // Notify callback
             onRotationEnd!(tappedNodeName, transform);
           }
           break;
@@ -114,12 +105,10 @@ class ARObjectManager {
     return Future.value();
   }
 
-  /// Sets up the AR Object Manager
   onInitialize() {
     _channel.invokeMethod<void>('init', {});
   }
 
-  /// Add given node to the given anchor of the underlying AR scene (or to its top-level if no anchor is given) and listen to any changes made to its transformation
   Future<bool?> addNode(ARNode node, {ARPlaneAnchor? planeAnchor}) async {
     try {
       node.transformNotifier.addListener(() {
@@ -141,15 +130,10 @@ class ARObjectManager {
     }
   }
 
-  /// Remove given node from the AR Scene
   removeNode(ARNode node) {
     _channel.invokeMethod<String>('removeNode', {'name': node.name});
   }
 
-  /// Rotates the node named [name] by [deltaYawRadians] around the world's
-  /// up (+Y) axis — yaw only, pitch/roll are never modified, so furniture
-  /// can not tilt. No-op when node manipulation is disabled on the native
-  /// side, or on platforms whose handler does not implement the call.
   Future<void> rotateNodeY(String name, double deltaYawRadians) async {
     try {
       await _channel.invokeMethod<void>('rotateNode', {
@@ -157,7 +141,6 @@ class ARObjectManager {
         'deltaYawRadians': deltaYawRadians,
       });
     } on MissingPluginException {
-      // Platform (e.g. iOS stub) does not implement rotateNode.
     }
   }
 }

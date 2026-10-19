@@ -7,14 +7,9 @@ import 'package:printing/printing.dart';
 import '../../core/utils/formatters.dart';
 import '../../features/customer/budget/data/budget_estimates.dart';
 
-/// Renders the Budget Planner's summary as a PDF and hands it to the OS.
-///
-/// [bytes] is pure document generation (no IO, no plugins) so it can be
-/// unit-tested headless; [share] and [print] wrap the `printing` plugin.
 class BudgetReportPdf {
   const BudgetReportPdf._();
 
-  /// Renders the report as PDF bytes. Pure — no IO, no plugins.
   static Future<Uint8List> bytes({
     required String room,
     required int budgetRm,
@@ -34,8 +29,6 @@ class BudgetReportPdf {
           generatedAt: generatedAt,
           ecoFriendly: ecoFriendly,
         ),
-        // Long line lists spill onto a second page; the running footer ties
-        // every page back to one report.
         footer: (context) => pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
@@ -49,8 +42,6 @@ class BudgetReportPdf {
     return doc.save();
   }
 
-  /// Opens the system share sheet for the report as
-  /// `budget-report-<room>-<date>.pdf`.
   static Future<void> share({
     required String room,
     required int budgetRm,
@@ -70,7 +61,6 @@ class BudgetReportPdf {
     );
   }
 
-  /// Opens the OS print dialog for the report.
   static Future<void> print({
     required String room,
     required int budgetRm,
@@ -91,8 +81,6 @@ class BudgetReportPdf {
   }
 }
 
-// Column flexes for the breakdown table: the category label gets the room,
-// the price column stays wide enough for "RM 12,500" without wrapping.
 const List<int> _lineFlex = [3, 1];
 
 List<pw.Widget> _body({
@@ -209,8 +197,6 @@ pw.Widget _linesTable(List<EstimateLine> lines) {
           child: _tableRow([
             pw.Text(line.label, style: _cell),
             pw.Text(
-              // Helvetica (the default PDF font) cannot draw an em dash —
-              // the full phrase renders instead of silently vanishing.
               line.hasData ? Formatters.myr(line.price!) : 'No price data yet',
               style: _cell,
               textAlign: pw.TextAlign.right,
@@ -230,8 +216,6 @@ pw.Widget _tableRow(List<pw.Widget> cells) {
   );
 }
 
-/// The honesty footnote — every number in the report is an estimate, and
-/// the document says so in the same words the app uses.
 pw.Widget _footnote({required bool ecoFriendly}) {
   return pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -282,8 +266,6 @@ final pw.TextStyle _cell =
 pw.TextStyle _muted(double size) =>
     pw.TextStyle(fontSize: size, color: PdfColors.grey600);
 
-/// `budget-report-<slug>-<yyyy-mm-dd>.pdf` — the room name slugified so
-/// an odd character can never produce an unusable filename.
 String _filename(String room, DateTime generatedAt) {
   final slug = room
       .trim()

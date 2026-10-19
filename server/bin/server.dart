@@ -3,40 +3,13 @@ import 'dart:convert';
 
 import 'package:interior_design_server/verify_handlers.dart';
 
-/// Modular local API server for the interior design marketplace.
-///
-/// Endpoints:
-///   /products     GET/POST         → list / create products
-///   /products/{id} PUT/DELETE      → update / delete product
-///   /orders       GET/POST         → list / create orders
-///   /orders/{id}  PUT/DELETE       → update status / delete order
-///   /categories   GET/POST         → list / create categories
-///   /categories/{id} PUT/DELETE    → update / soft-delete category
-///   /styles       GET/POST         → list / create styles
-///   /styles/{id}  PUT/DELETE       → update / soft-delete style
-///   /config       GET              → global configuration
-///   /refunds/{id} PUT              → approve / reject refund
-///   /verify-email/send    POST     → email a verification link (Brevo)
-///   /verify-email/confirm GET      → validate the link + mark Firebase
-///                                    emailVerified (HTML page)
-///
-/// Marketplace endpoints return JSON (CORS enabled). The verify-email
-/// endpoints are driven by env vars: VERIFY_TOKEN_SECRET, BREVO_API_KEY,
-/// BREVO_SENDER_EMAIL/NAME, PUBLIC_BASE_URL, SERVICE_ACCOUNT_PATH,
-/// DATA_DIR, PRODUCTS_SEED_ASSET, PORT (Render injects PORT).
-
 Future<void> main(List<String> args) async {
-  // Local development keys live in secrets/local.env (gitignored); real
-  // environment variables take precedence (Render uses those).
   final env = {
     ..._loadLocalEnv(),
     ...Platform.environment,
   };
   final port = _readPort(args, env) ?? 8080;
 
-  // The server is its own package now (run from server/: `dart run
-  // bin/server.dart`), so the CWD-relative defaults point at `server/data`
-  // and the repo-root assets. Render overrides both via env.
   final dataDir = env['DATA_DIR'] ?? 'data';
   final seedAsset = env['PRODUCTS_SEED_ASSET'] ?? '../assets/data/products.json';
 
@@ -97,8 +70,6 @@ Future<void> main(List<String> args) async {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Loads `secrets/local.env` (KEY=VALUE lines, `#` comments) for local
-/// development. A missing file is fine (production uses real env vars).
 Map<String, String> _loadLocalEnv() {
   final out = <String, String>{};
   final file = File('secrets/local.env');
@@ -119,7 +90,6 @@ int? _readPort(List<String> args, Map<String, String> env) {
       return int.tryParse(a.split('=')[1]);
     }
   }
-  // Render (and similar hosts) inject PORT.
   final envPort = env['PORT'];
   return envPort != null ? int.tryParse(envPort) : null;
 }
@@ -151,7 +121,6 @@ Future<void> _route(
   final segments = req.uri.pathSegments;
   final method = req.method.toUpperCase();
 
-  // CORS preflight
   if (method == 'OPTIONS') {
     req.response.statusCode = HttpStatus.noContent;
     await req.response.close();
@@ -159,7 +128,6 @@ Future<void> _route(
   }
 
   if (segments.isEmpty) {
-    // Health check — Render's health pings hit the root path.
     return await _jsonResponse(req.response, {
       'status': 'ok',
       'service': 'intellar-api',
@@ -224,14 +192,12 @@ Future<void> _route(
   }
 }
 
-/// Generic CRUD handler for products / categories / styles.
 Future<void> _handleResource(
     HttpRequest req, String method, String? id, JsonFileStore store) async {
   switch (method) {
     case 'GET':
       if (id == null) {
         final all = store.list();
-        // For categories & styles, optionally filter active only
         final activeOnly = req.uri.queryParameters['active'] == 'true';
         if (activeOnly) {
           return await _jsonResponse(
@@ -240,7 +206,6 @@ Future<void> _handleResource(
         }
         return await _jsonResponse(req.response, all);
       }
-      // GET by id
       final item = store.findById(id);
       if (item == null) {
         return await _jsonResponse(req.response, {'error': 'Not found: $id'},
@@ -281,7 +246,6 @@ Future<void> _handleResource(
   }
 }
 
-/// Products handler — same CRUD pattern but ProductsStore has its own type.
 Future<void> _handleProducts(
     HttpRequest req, String method, String? id, ProductsStore store) async {
   switch (method) {
@@ -324,8 +288,6 @@ Future<void> _handleProducts(
   }
 }
 
-/// Orders have custom logic: POST auto-assigns id/orderNumber,
-/// PUT updates status, DELETE cancels.
 Future<void> _handleOrders(
     HttpRequest req, String method, String? id, JsonFileStore store) async {
   switch (method) {
@@ -346,7 +308,6 @@ Future<void> _handleOrders(
         return await req.response.close();
       }
       final body = await _readBody(req);
-      // Auto-assign order id and number if not provided by client
       body.putIfAbsent('id', () => 'ord-${DateTime.now().millisecondsSinceEpoch}');
       final existingCount = store.list().length;
       body.putIfAbsent('orderNumber',
@@ -381,7 +342,6 @@ Future<void> _handleOrders(
   }
 }
 
-/// Process a refund request — admin approves or rejects.
 Future<void> _handleRefund(
     HttpRequest req, String orderId, JsonFileStore ordersStore) async {
   if (req.method.toUpperCase() != 'PUT') {
@@ -389,7 +349,7 @@ Future<void> _handleRefund(
     return await req.response.close();
   }
   final body = await _readBody(req);
-  final action = body['action'] as String?; // 'approve' or 'reject'
+  final action = body['action'] as String?;
   final order = ordersStore.findById(orderId);
   if (order == null) {
     return await _jsonResponse(req.response,
@@ -430,7 +390,6 @@ class ProductsStore {
       _inner.reload();
       return;
     }
-    // Seed from asset fallback
     if (await fallbackAsset.exists()) {
       final raw = await fallbackAsset.readAsString();
       final decoded = jsonDecode(raw);
@@ -442,7 +401,6 @@ class ProductsStore {
       }
       return;
     }
-    // Empty
     _inner.reload();
   }
 

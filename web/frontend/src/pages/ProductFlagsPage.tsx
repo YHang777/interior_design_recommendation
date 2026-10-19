@@ -17,20 +17,20 @@ import { useToast } from '../state/ToastContext';
 
 /* ── Honest error copy (house style: short, plain, actionable) ── */
 function describeFlagError(err: unknown): string {
-  if (!(err instanceof ApiError)) return 'Something went wrong while loading photo flags. Try again.';
+  if (!(err instanceof ApiError)) return 'Could not load photo flags.';
   switch (err.code) {
     case 'UNAUTHENTICATED':
-      return 'Your session has expired. Sign in again to keep reviewing flags.';
+      return 'Session expired. Sign in again.';
     case 'NOT_ADMIN':
-      return 'This account doesn’t have admin access — only administrators can review photo flags.';
+      return 'Admin access required.';
     case 'HTTP_403':
-      return 'Access denied — this account isn’t an administrator.';
+      return 'Admin access required.';
     case 'NETWORK_ERROR':
       return apiBaseConfigured
-        ? 'Can’t reach the admin API. Check your internet connection — or the backend may be down.'
-        : `Can’t reach the admin API at ${apiBaseUrl}. VITE_API_BASE_URL isn’t set for this build, so the console fell back to the local default — whoever deployed it must set that variable and rebuild.`;
+        ? 'Cannot reach the admin API.'
+        : `Cannot reach the admin API at ${apiBaseUrl}. Set VITE_API_BASE_URL and rebuild.`;
     case 'PRODUCT_NOT_FOUND':
-      return 'This product no longer exists — the listing was deleted after it was flagged.';
+      return 'Listing no longer exists.';
     case 'VALIDATION_ERROR':
       return err.message;
     default:
@@ -130,9 +130,7 @@ export function ProductFlagsPage({ query = '' }: Props) {
       await productFlagsApi.setReview(selected.productId, status, note.trim() || undefined);
       push(
         'success',
-        status === 'resolved'
-          ? `${selected.name} resolved — it stays listed, and the chat keeps treating the photo as truth.`
-          : `${selected.name} reopened — back in the open queue.`
+        status === 'resolved' ? `${selected.name} resolved.` : `${selected.name} reopened.`
       );
       closeDetail();
       refresh();
@@ -252,21 +250,17 @@ export function ProductFlagsPage({ query = '' }: Props) {
   };
 
   const emptyMessage = debouncedQuery
-    ? 'No photo flags match your search.'
+    ? 'No matches.'
     : filter === 'open'
-      ? 'No open photo flags — every flagged listing has been reviewed.'
+      ? 'No open flags.'
       : `No ${filter} photo flags.`;
 
   return (
     <div className="page">
       <div className="page-intro">
         <div>
-          <h2>Photo-vs-claim review queue</h2>
-          <p className="subtitle">
-            When a product photo clearly contradicts the seller&apos;s description, the upload-time
-            vision pass flags the listing and the design chat trusts the photo over the seller text.
-            Inspect each verdict, then resolve or reopen the flag.
-          </p>
+          <h2>Photo flags</h2>
+          <p className="subtitle">Photos that contradict the seller&apos;s text.</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={refresh} disabled={loading}>
           <IconRefresh size={14} />
@@ -414,9 +408,9 @@ export function ProductFlagsPage({ query = '' }: Props) {
                 value={note}
                 maxLength={1000}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="e.g. Photo is a stock living-room shot — the wallpaper itself is never shown."
+                placeholder="e.g. Stock photo — wallpaper never shown."
               />
-              <span className="field-hint">Optional. Saved with the decision for the audit trail.</span>
+              <span className="field-hint">Optional. Saved with the decision.</span>
             </div>
           </section>
 

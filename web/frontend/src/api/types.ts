@@ -9,6 +9,8 @@ export interface AdminUserRow {
   email: string;
   name: string;
   role: UserRole;
+  /** Firebase admin claim or ADMIN_UIDS allowlist — display-only badge. */
+  isAdmin: boolean;
   verificationStatus: VerificationStatus | 'unknown';
   phone: string;
   businessName: string;
@@ -51,7 +53,7 @@ export interface AdminStats {
   pendingVerifications: number;
   recentUsers: Pick<
     AdminUserRow,
-    'uid' | 'email' | 'name' | 'role' | 'verificationStatus' | 'createdAt'
+    'uid' | 'email' | 'name' | 'role' | 'isAdmin' | 'verificationStatus' | 'createdAt'
   >[];
 }
 
@@ -185,4 +187,112 @@ export interface ProductFlagRow {
 export interface ProductFlagListResult {
   items: ProductFlagRow[];
   total: number;
+}
+
+// ── Product catalogue admin ─────────────────────────────────────────────────
+
+export interface AdminProductRow {
+  productId: string;
+  name: string;
+  category: string;
+  designStyle: string;
+  price: number;
+  originalPrice: number | null;
+  stock: number;
+  isActive: boolean;
+  isEcoFriendly: boolean;
+  rating: number;
+  ratingCount: number;
+  supplierId: string;
+  supplierName: string;
+  image: string;
+  createdAt: string | null;
+}
+
+export interface AdminProductDetail extends AdminProductRow {
+  description: string;
+  images: string[];
+  shippingEnabled: boolean;
+  shippingFee: number;
+  shippingLongDistanceNotice: boolean;
+  ar3dStatus: string;
+  visionFlagged: boolean;
+  supplierPhone: string;
+  supplierEmail: string;
+  supplierVerificationStatus: string;
+}
+
+export interface ProductUpdate {
+  name?: string;
+  description?: string;
+  category?: string;
+  designStyle?: string;
+  price?: number;
+  originalPrice?: number | null;
+  stock?: number;
+  isActive?: boolean;
+  isEcoFriendly?: boolean;
+  shippingEnabled?: boolean;
+  shippingFee?: number;
+  shippingLongDistanceNotice?: boolean;
+}
+
+export interface ListProductsResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminProductRow[];
+}
+
+export interface DeleteProductResult {
+  productId: string;
+  deleted: boolean;
+  reviewsDeleted: number;
+}
+
+// ── Orders admin ────────────────────────────────────────────────────────────
+
+export type AdminOrderStatus = 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+
+export interface AdminOrderItem {
+  productId: string;
+  name: string;
+  image: string;
+  unitPrice: number;
+  quantity: number;
+  supplierId: string;
+}
+
+export interface AdminOrderRow {
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  status: AdminOrderStatus;
+  itemCount: number;
+  total: number;
+  paymentMethod: string;
+  createdAt: string | null;
+  nextStatuses: AdminOrderStatus[];
+}
+
+export interface AdminOrderDetail extends AdminOrderRow {
+  customerEmail: string;
+  customerPhone: string;
+  shippingAddress: string;
+  items: AdminOrderItem[];
+  subtotal: number;
+  shippingFee: number;
+  discount: number;
+  tax: number;
+  supplierIds: string[];
+  statusHistory: Record<string, string>;
+  invoiceSupplierIds: string[];
+}
+
+export interface ListOrdersResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminOrderRow[];
 }

@@ -9,13 +9,6 @@ import 'package:interior_design_recommendation/features/supplier/presentation/sc
 import 'package:interior_design_recommendation/models/product.dart';
 import 'package:interior_design_recommendation/shared/widgets/stat_card.dart';
 
-/// Guards the "the whole screen is empty" report on Supplier → Products.
-///
-/// Two things used to blank or gut this page and both are pinned here:
-/// 1. a layout exception anywhere in the ListView children (the themed
-///    `ElevatedButton` with infinite min-width) blanked the ENTIRE body;
-/// 2. an empty catalogue replaced the whole body with a bare EmptyState,
-///    dropping the heading and the stats row with it.
 void main() {
   const me = 'seller-1';
 
@@ -87,18 +80,16 @@ void main() {
       (tester) async {
     await pumpScreen(tester, [
       product('p1', 'Nordic Oak Table', stock: 12),
-      product('p2', 'Velvet Lounge Chair', stock: 3), // low stock
+      product('p2', 'Velvet Lounge Chair', stock: 3),
     ]);
 
     expect(tester.takeException(), isNull,
         reason: 'a child of the products ListView threw during build/layout — '
             'that is what blanks the whole body');
 
-    // The page CONTENT — not an empty state, not a bare Scaffold.
     expect(find.text('Products'), findsOneWidget);
     expect(find.text('Add product'), findsOneWidget);
 
-    // Stats row is present and correct (Total 2, Active 2, Low 1).
     expect(statCards(), findsNWidgets(3));
     expect(tester.widget<StatCard>(statCards().at(0)).label, 'Total products');
     expect(tester.widget<StatCard>(statCards().at(0)).value, '2');
@@ -109,7 +100,6 @@ void main() {
     expect(find.text('Nordic Oak Table'), findsOneWidget);
     expect(find.text('Velvet Lounge Chair'), findsOneWidget);
 
-    // No empty-state copy on a populated catalogue.
     expect(find.text('No products yet'), findsNothing);
     expect(find.text('Not signed in'), findsNothing);
     expect(find.text('Could not load products'), findsNothing);
@@ -123,14 +113,12 @@ void main() {
 
     expect(tester.takeException(), isNull);
 
-    // Heading, stats and the add affordance STAY on screen.
     expect(find.text('Products'), findsOneWidget);
     expect(find.text('Add product'), findsOneWidget);
     expect(statCards(), findsNWidgets(3));
     expect(tester.widget<StatCard>(statCards().at(0)).value, '0');
     expect(find.text('Search your products…'), findsOneWidget);
 
-    // The list area explains WHY it is empty.
     expect(find.text('No products yet'), findsOneWidget);
     expect(find.textContaining('none of them belong to this account'),
         findsOneWidget);
@@ -153,11 +141,9 @@ void main() {
   testWidgets('a filter that matches nothing offers Clear filters',
       (tester) async {
     await pumpScreen(tester, [
-      product('p1', 'Nordic Oak Table', stock: 12), // active, not paused
+      product('p1', 'Nordic Oak Table', stock: 12),
     ]);
 
-    // Tap the "Paused" filter chip (it is the 3rd chip; the 4th is outside
-    // the horizontal ListView's build window until scrolled).
     await tester.tap(find.text('Paused'));
     await tester.pumpAndSettle();
 
@@ -166,7 +152,6 @@ void main() {
     expect(find.text('Clear filters'), findsOneWidget);
     expect(find.text('No products yet'), findsNothing);
 
-    // Clear filters brings the product back.
     await tester.tap(find.text('Clear filters'));
     await tester.pumpAndSettle();
     expect(find.text('Nordic Oak Table'), findsOneWidget);

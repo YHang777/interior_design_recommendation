@@ -21,12 +21,6 @@ import '../../../../../shared/widgets/status_badge.dart';
 import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Buyer-facing single-order view: live status timeline (per-step dates),
-/// itemised totals, delivery info and contextual actions — cancel while
-/// pending, reorder at any time, review each item once the order arrives.
-///
-/// Live: watches the order document (see [orderDetailProvider]) so supplier
-/// status changes and own cancellations appear without a manual refresh.
 class BuyerOrderDetailScreen extends ConsumerStatefulWidget {
   const BuyerOrderDetailScreen({super.key, required this.orderId});
 
@@ -39,8 +33,6 @@ class BuyerOrderDetailScreen extends ConsumerStatefulWidget {
 
 class _BuyerOrderDetailScreenState
     extends ConsumerState<BuyerOrderDetailScreen> {
-  /// True while a cancel/reorder network call is in flight — disables the
-  /// action bar so the same order cannot be cancelled twice.
   bool _working = false;
 
   Future<void> _cancelOrder(Order order) async {
@@ -74,12 +66,6 @@ class _BuyerOrderDetailScreenState
     }
   }
 
-  /// Buyer-side "it arrived" step: advances shipped → delivered so the
-  /// review section unlocks even when the seller never taps their own
-  /// "Mark as delivered" (seeded demo listings have no seller account
-  /// behind them at all). Runs through the same repository state machine
-  /// as the supplier path, so `OrderStatus.ensureAdvance` still rejects
-  /// anything but the single legal next step.
   Future<void> _confirmDelivery(Order order) async {
     final confirmed = await showConfirmDialog(
       context,
@@ -112,9 +98,6 @@ class _BuyerOrderDetailScreenState
     }
   }
 
-  /// Puts every still-available item of the order back into the cart at the
-  /// ordered quantity (clamped to current stock by the cart notifier).
-  /// Unavailable listings are skipped and reported once at the end.
   Future<void> _reorder(Order order) async {
     setState(() => _working = true);
     try {
@@ -204,7 +187,6 @@ class _BuyerOrderDetailScreenState
             top: MediaQuery.viewPaddingOf(context).top + 8,
             left: 8,
             child: FloatingBackButton(
-              // Deep-linked with no pop history → home dashboard fallback.
               onTap: canPop
                   ? null
                   : () => context.goNamed(RouteNames.homeownerDashboard),
@@ -233,8 +215,6 @@ class _BuyerOrderDetailScreenState
               backgroundColor: Colors.transparent,
               shadowColor: Colors.transparent,
               foregroundColor: Colors.white,
-              // Tight 52px wrapper: shrink vertical padding so the label's
-              // line box (and descenders) always fits the 52px button.
               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -269,12 +249,6 @@ class _BuyerOrderDetailScreenState
       );
       buttons.insert(1, const SizedBox(width: 10));
     }
-    // Buyer-side close of the status loop: shipped → delivered is the one
-    // step a customer may take themselves (see _confirmDelivery). Without
-    // it, the review section — gated on delivered — never unlocks unless
-    // the seller taps "Mark as delivered", which is impossible for orders
-    // whose seller is a seeded demo id (s-elegant & co.) with no account
-    // behind it.
     if (order.status == OrderStatus.shipped) {
       buttons.insert(
         0,
@@ -322,9 +296,6 @@ class _BuyerOrderDetailScreenState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Full scrollable content for a loaded order.
 class _OrderBody extends ConsumerWidget {
   const _OrderBody({required this.order});
 
@@ -332,8 +303,6 @@ class _OrderBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Tax label stays consistent with the checkout summary by deriving the
-    // percentage from the same store config.
     final config = ref.watch(configProvider).valueOrNull;
     final taxLabel =
         config == null ? 'Tax' : 'Tax (${taxPercentLabel(config.taxRate)})';
@@ -345,10 +314,6 @@ class _OrderBody extends ConsumerWidget {
       total: order.total,
     );
 
-    // Line items snapshot only `supplierId`; the buyer-facing verified badge
-    // needs the live denormalised `supplier`, which admin approvals keep in
-    // sync on the product doc. Products that were deleted (or re-listed
-    // under another seller) resolve to nothing, so no badge is shown.
     final liveProducts = {
       for (final p
           in ref.watch(marketplaceProductsProvider).valueOrNull ??
@@ -357,7 +322,6 @@ class _OrderBody extends ConsumerWidget {
     };
 
     return ListView(
-      // Top clearance for the pinned floating back button.
       padding: const EdgeInsets.fromLTRB(16, 60, 16, 24),
       children: [
         PageHeading(title: 'Order ${order.orderNumber}'),
@@ -392,8 +356,6 @@ class _OrderBody extends ConsumerWidget {
           ),
         ),
         // ── Invoices: the buyer's receipt — one per seller on a shared
-        // order. Rendered only once a seller has actually issued paperwork,
-        // so there is never a button that leads nowhere.
         if (order.invoices.isNotEmpty) ...[
           const SizedBox(height: 14),
           _sectionCard(
@@ -494,16 +456,12 @@ class _OrderBody extends ConsumerWidget {
   }
 }
 
-/// Live catalogue product behind [item], or null when the listing is gone.
-/// The supplierId must still match the order snapshot so a re-listed or
-/// re-owned product can never lend its verified badge to an old order line.
 Product? _liveProductFor(OrderItem item, Map<String, Product> liveProducts) {
   final product = liveProducts[item.productId];
   if (product == null) return null;
   return product.resolvedSupplierId == item.supplierId ? product : null;
 }
 
-/// Opens one seller's invoice — the buyer's receipt for that shipment.
 void _openInvoice(BuildContext context, OrderInvoice invoice) {
   context.pushNamed(
     RouteNames.orderInvoice,
@@ -514,8 +472,6 @@ void _openInvoice(BuildContext context, OrderInvoice invoice) {
   );
 }
 
-/// Invoice entry point: one button when a single seller issued paperwork, a
-/// tappable per-seller list when the order is shared.
 Widget _invoiceEntry(BuildContext context, Order order) {
   final invoices = order.invoices.values.toList();
   if (invoices.length == 1) {
@@ -550,8 +506,6 @@ Widget _invoiceEntry(BuildContext context, Order order) {
   );
 }
 
-/// Opens the write-review bottom sheet for one line item, then refreshes the
-/// per-item state when the review was actually submitted.
 Future<void> _submitReview(
   BuildContext context,
   WidgetRef ref,
@@ -638,7 +592,6 @@ class _StatusCard extends StatelessWidget {
   }
 }
 
-/// Red banner shown for cancelled orders (replaces the timeline).
 class _CancelledBanner extends StatelessWidget {
   const _CancelledBanner({required this.order});
 
@@ -689,9 +642,6 @@ class _CancelledBanner extends StatelessWidget {
   }
 }
 
-/// Vertical progress: Pending → Confirmed → Shipped → Delivered with a
-/// checkmark and per-step date for every reached stage. Dates come from
-/// [Order.statusHistory]; the first step falls back to the order date.
 class _StatusTimeline extends StatelessWidget {
   const _StatusTimeline({required this.order});
 
@@ -711,7 +661,7 @@ class _StatusTimeline extends StatelessWidget {
       OrderStatus.confirmed => 'Fulfilment in progress',
       OrderStatus.shipped => 'On its way to you',
       OrderStatus.delivered => 'Enjoy your new space!',
-      OrderStatus.cancelled => null, // replaced by the banner
+      OrderStatus.cancelled => null,
     };
   }
 
@@ -722,7 +672,7 @@ class _StatusTimeline extends StatelessWidget {
       OrderStatus.confirmed => 2,
       OrderStatus.shipped => 3,
       OrderStatus.delivered => 4,
-      OrderStatus.cancelled => 0, // banner replaces this timeline
+      OrderStatus.cancelled => 0,
     };
 
     return Column(
@@ -751,7 +701,6 @@ class _StatusTimeline extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Dot + connector column.
           SizedBox(
             width: 26,
             child: Column(
@@ -855,8 +804,6 @@ class _ItemRow extends StatelessWidget {
 
   final OrderItem item;
 
-  /// Live catalogue product behind this line — supplier attribution only.
-  /// Null when the listing is gone; then no verified badge is shown.
   final Product? liveProduct;
 
   @override
@@ -894,8 +841,6 @@ class _ItemRow extends StatelessWidget {
                     height: 1.3,
                   ),
                 ),
-                // Seller + verified pill; renders nothing when unknown or
-                // not admin-verified.
                 if (seller != null)
                   VerifiedSellerLine(
                     supplier: seller,
@@ -1079,8 +1024,6 @@ class _ReviewSheetState extends ConsumerState<_ReviewSheet> {
 
     try {
       final review = Review(
-        // The review doc id IS the order id — one review per (product,
-        // order), and "already reviewed?" stays a cheap doc read.
         id: widget.order.id,
         orderId: widget.order.id,
         userId: widget.userId,
@@ -1228,8 +1171,6 @@ class _ReviewSheetState extends ConsumerState<_ReviewSheet> {
 
 // ── Small building blocks ───────────────────────────────────────────────────
 
-/// One seller's invoice line on a shared order — seller name + invoice
-/// number, tapping opens that supplier's invoice.
 class _InvoiceRow extends StatelessWidget {
   const _InvoiceRow({required this.invoice, required this.onTap});
 
@@ -1335,18 +1276,12 @@ class _OrderSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      // Top clearance for the pinned floating back button.
       padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
       physics: const NeverScrollableScrollPhysics(),
       children: [
         for (var i = 0; i < 4; i++) ...[
           if (i > 0) const SizedBox(height: 14),
           Container(
-            // The fixed height must fit the skeleton Column inside it:
-            // 135px of bars + 32px padding + 2px border. Cards 1–3 used to
-            // be 120 tall — 49px short — so every order-detail load painted
-            // a yellow-striped RenderFlex overflow for its first frames
-            // (pinned by test/product_review_test.dart).
             height: i == 0 ? 200 : 175,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(

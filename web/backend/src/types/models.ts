@@ -22,6 +22,8 @@ export interface AdminUserRow {
   /** `users/{uid}.name` — empty when the profile document is missing. */
   name: string;
   role: UserRole;
+  /** Firebase `admin:true` claim or the ADMIN_UIDS allowlist — display-only. */
+  isAdmin: boolean;
   /** `users/{uid}.verificationStatus`. 'unknown' for Auth-only accounts. */
   verificationStatus: VerificationStatus | 'unknown';
   phone: string;
@@ -69,7 +71,7 @@ export interface AdminStats {
   /** Five newest profile documents, newest first. */
   recentUsers: Pick<
     AdminUserRow,
-    'uid' | 'email' | 'name' | 'role' | 'verificationStatus' | 'createdAt'
+    'uid' | 'email' | 'name' | 'role' | 'isAdmin' | 'verificationStatus' | 'createdAt'
   >[];
 }
 
@@ -173,4 +175,144 @@ export interface ProductFlagRow {
 export interface ProductFlagListResult {
   items: ProductFlagRow[];
   total: number;
+}
+
+// ── Product catalogue admin (products/* routes) ────────────────────────────
+
+/** One listing in the admin table. */
+export interface AdminProductRow {
+  productId: string;
+  name: string;
+  category: string;
+  designStyle: string;
+  /** int RM. */
+  price: number;
+  /** int RM; null when the seller never set a compare-at price. */
+  originalPrice: number | null;
+  stock: number;
+  isActive: boolean;
+  isEcoFriendly: boolean;
+  rating: number;
+  ratingCount: number;
+  supplierId: string;
+  supplierName: string;
+  image: string;
+  createdAt: string | null;
+}
+
+/** Detail payload — adds seller copy, shipping and read-only echoes. */
+export interface AdminProductDetail extends AdminProductRow {
+  description: string;
+  images: string[];
+  shippingEnabled: boolean;
+  shippingFee: number;
+  shippingLongDistanceNotice: boolean;
+  /** products/{id}.ar3d.status — never written by the admin API. */
+  ar3dStatus: string;
+  /** products/{id}.vision.mismatch.flagged — the photo-flag queue's input. */
+  visionFlagged: boolean;
+  supplierPhone: string;
+  supplierEmail: string;
+  supplierVerificationStatus: string;
+}
+
+/** PATCH /products/:id body — the 12 seller-editable fields only. */
+export interface ProductUpdate {
+  name?: string;
+  description?: string;
+  category?: string;
+  designStyle?: string;
+  price?: number;
+  /** null clears the compare-at price; omitted leaves it untouched. */
+  originalPrice?: number | null;
+  stock?: number;
+  isActive?: boolean;
+  isEcoFriendly?: boolean;
+  shippingEnabled?: boolean;
+  shippingFee?: number;
+  shippingLongDistanceNotice?: boolean;
+}
+
+export interface ListProductsQuery {
+  q?: string;
+  category?: string;
+  status: 'all' | 'active' | 'inactive';
+  limit: number;
+  offset: number;
+}
+
+export interface ListProductsResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminProductRow[];
+}
+
+/** DELETE /products/:id response. */
+export interface DeleteProductResult {
+  productId: string;
+  deleted: boolean;
+  /** Best-effort `reviews` subcollection count removed alongside. */
+  reviewsDeleted: number;
+}
+
+// ── Orders admin (orders/* routes) ─────────────────────────────────────────
+
+export type AdminOrderStatus = 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+
+export interface AdminOrderItem {
+  productId: string;
+  name: string;
+  image: string;
+  /** int RM. */
+  unitPrice: number;
+  quantity: number;
+  supplierId: string;
+}
+
+/** One order in the admin table. */
+export interface AdminOrderRow {
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  status: AdminOrderStatus;
+  itemCount: number;
+  /** int RM. */
+  total: number;
+  paymentMethod: string;
+  createdAt: string | null;
+  /** Forward transitions from the current status (empty on terminal). */
+  nextStatuses: AdminOrderStatus[];
+}
+
+/** Detail payload — adds items, money breakdown and history. */
+export interface AdminOrderDetail extends AdminOrderRow {
+  customerEmail: string;
+  customerPhone: string;
+  shippingAddress: string;
+  items: AdminOrderItem[];
+  subtotal: number;
+  shippingFee: number;
+  discount: number;
+  tax: number;
+  supplierIds: string[];
+  /** ISO-8601 values keyed by status name. */
+  statusHistory: Record<string, string>;
+  /** `invoices` map keys only — invoice bodies are never re-serialized. */
+  invoiceSupplierIds: string[];
+}
+
+export interface ListOrdersQuery {
+  status?: AdminOrderStatus;
+  q?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ListOrdersResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminOrderRow[];
 }

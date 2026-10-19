@@ -10,11 +10,6 @@ import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/price_summary.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Order confirmation shown right after a successful checkout.
-///
-/// Receives the created ORDER ID as the GoRouter extra (a `String`) and
-/// re-reads the order so the confirmation reflects what was actually
-/// stored.
 class OrderConfirmationScreen extends ConsumerWidget {
   const OrderConfirmationScreen({super.key});
 
@@ -73,8 +68,6 @@ class _SuccessView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // The tax label stays consistent with the checkout summary by deriving
-    // the percentage from the same store config.
     final config = ref.watch(configProvider).valueOrNull;
     final taxLabel =
         config == null ? 'Tax' : 'Tax (${taxPercentLabel(config.taxRate)})';
@@ -90,7 +83,6 @@ class _SuccessView extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 32),
       children: [
-        // Animated success check.
         Center(
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0.0, end: 1.0),
@@ -155,7 +147,6 @@ class _SuccessView extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 10),
-        // No "we emailed you" claim — the demo does not send email.
         const Text(
           'Your order is confirmed. You can track it anytime in your '
           'orders.',
@@ -168,7 +159,6 @@ class _SuccessView extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
 
-        // Delivery ETA card.
         _InfoCard(
           child: Row(
             children: [
@@ -230,7 +220,6 @@ class _SuccessView extends ConsumerWidget {
         ),
         const SizedBox(height: 28),
 
-        // Actions.
         SizedBox(
           width: double.infinity,
           height: 52,
@@ -250,7 +239,6 @@ class _SuccessView extends ConsumerWidget {
                 backgroundColor: Colors.transparent,
                 shadowColor: Colors.transparent,
                 foregroundColor: Colors.white,
-                // Tight 52px wrapper — keep the label's line box inside.
                 padding: const EdgeInsets.symmetric(
                     vertical: 10, horizontal: 16),
                 shape: RoundedRectangleBorder(
@@ -292,7 +280,6 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-/// Grey placeholder blocks shown while the fresh order is fetched.
 class _ConfirmationSkeleton extends StatelessWidget {
   const _ConfirmationSkeleton();
 

@@ -12,7 +12,6 @@ import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../../shared/widgets/section_header.dart';
 import '../providers/design_providers.dart';
 
-/// Saved Designs + Style Library.
 class SavedDesignsScreen extends ConsumerWidget {
   const SavedDesignsScreen({super.key});
 
@@ -84,7 +83,6 @@ class SavedDesignsScreen extends ConsumerWidget {
         children: [
           const PageHeading(title: 'Saved Designs'),
           const SizedBox(height: 24),
-          // Icon
           Container(
             width: 88,
             height: 88,
@@ -96,14 +94,12 @@ class SavedDesignsScreen extends ConsumerWidget {
                 size: 42, color: AppColors.accent),
           ),
           const SizedBox(height: 24),
-          // Title
           Text('No Saved Designs',
               style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          // Subtitle
           Text(
             'Create a room design and save it\nto see it here',
             textAlign: TextAlign.center,
@@ -111,7 +107,6 @@ class SavedDesignsScreen extends ConsumerWidget {
                 fontSize: 14, color: AppColors.textSecondary, height: 1.5),
           ),
           const SizedBox(height: 28),
-          // CTA
           SizedBox(
             width: double.infinity,
             height: 52,
@@ -124,8 +119,6 @@ class SavedDesignsScreen extends ConsumerWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.white,
-                // Tight 52px wrapper — keep the label's line box
-                // (e.g. the 'g' in "Design") inside the button.
                 padding:
                     const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                 shape: RoundedRectangleBorder(
@@ -135,7 +128,6 @@ class SavedDesignsScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 40),
-          // Style library
           _buildStyleLibrary(),
           const SizedBox(height: 32),
         ],
@@ -189,7 +181,6 @@ class SavedDesignsScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Room icon
               Container(
                 width: 56,
                 height: 56,
@@ -204,7 +195,6 @@ class SavedDesignsScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 14),
-              // Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,7 +230,6 @@ class SavedDesignsScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              // Menu
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert,
                     size: 20, color: AppColors.textHint),
@@ -340,9 +329,6 @@ class SavedDesignsScreen extends ConsumerWidget {
           crossAxisCount: 3,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          // Taller than wide-relative: the card stacks a 44px icon plus up to
-          // two lines of name ("Scandinavian") and two of subtitle, which at
-          // the previous 0.82 ratio overflowed the fixed-height cell.
           childAspectRatio: 0.62,
           children: _styles
               .map((s) => _buildStyleCard(s.$1, s.$2, s.$3))
@@ -373,9 +359,6 @@ class SavedDesignsScreen extends ConsumerWidget {
             child: Icon(icon, size: 22, color: AppColors.accent),
           ),
           const SizedBox(height: 8),
-          // Flexible, not bare Text: a GridView cell has a hard height, so
-          // without this the label block can still push the Column past the
-          // card and paint the overflow banner even with maxLines set.
           Flexible(
             child: Text(name,
                 textAlign: TextAlign.center,

@@ -21,9 +21,6 @@ import '../../../../../shared/widgets/verified_badge.dart';
 import '../providers/marketplace_providers.dart';
 import '../widgets/robot_assistant/robot_assistant_host.dart';
 
-/// Full-screen product detail page: hero gallery with animated dots, real
-/// rating/stock state, quantity stepper, seller card with contact actions,
-/// live reviews and same-category related products.
 class ProductDetailScreen extends ConsumerStatefulWidget {
   const ProductDetailScreen({super.key, required this.productId});
 
@@ -57,8 +54,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     if (!ok && mounted) showAppSnackbar(context, unsupportedMessage);
   }
 
-  /// Live-stock-capped quantity: if stock dropped while the screen was open
-  /// the stepper and snackbar copy never overstate what was actually added.
   int _clampedQty(Product product) =>
       product.stock > 0 ? _qty.clamp(1, product.stock) : 1;
 
@@ -143,8 +138,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           itemCount: images.length,
                           onPageChanged: (i) => setState(() => _page = i),
                           itemBuilder: (_, index) {
-                            // Hero lives on the current page only so it pairs
-                            // with the grid card's `product-{id}` tag.
                             final tag = index == _page
                                 ? 'product-${product.id}'
                                 : 'product-${product.id}-g$index';
@@ -160,7 +153,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           },
                         ),
                       ),
-                      // Animated dot indicator — pill-shaped active dot
                       if (images.length > 1)
                         Positioned(
                           bottom: 14,
@@ -244,7 +236,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ),
                 ),
 
-                // Description
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -282,7 +273,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ),
                 ),
 
-                // Supplier card
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -296,7 +286,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ),
                 ),
 
-                // Reviews
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -304,7 +293,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                   ),
                 ),
 
-                // Related products
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -439,9 +427,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         backgroundColor: Colors.transparent,
                         shadowColor: Colors.transparent,
                         foregroundColor: Colors.white,
-                        // Tight 48px wrapper — shrink vertical padding so
-                        // the label box still fits the line (the 'y' in
-                        // "Buy Now") after the theme's 32px is deducted.
                         padding: const EdgeInsets.symmetric(
                             vertical: 8, horizontal: 16),
                         shape: RoundedRectangleBorder(
@@ -509,8 +494,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Widget _buildPriceRow(Product product) {
-    // Wrap (not Row) so a long price + strike-through + discount badge
-    // folds onto a second line on narrow screens instead of overflowing.
     return Wrap(
       spacing: 8,
       runSpacing: 4,
@@ -555,8 +538,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 6),
-        // Shrink rather than overflow the info column; the label can
-        // carry money ('Shipping: RM X') so ellipsis is not acceptable.
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -573,8 +554,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  /// Delivery line straight from the seller's product-level settings:
-  /// 'Shipping: RM X' when a charge is on, 'Free shipping' otherwise.
   Widget _buildShippingLine(Product product) {
     final charged = product.shippingCharge > 0;
     final color = charged ? AppColors.textSecondary : AppColors.success;
@@ -582,7 +561,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       children: [
         Icon(Icons.local_shipping_outlined, size: 16, color: color),
         const SizedBox(width: 6),
-        // Shrink rather than overflow; this line carries money too.
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -601,9 +579,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  /// Long-distance notice the seller opted into on the product form.
-  /// Rendered from the shared constant so the wording can never drift
-  /// between the seller's preview and this page.
   Widget _buildLongDistanceNotice() {
     return Container(
       width: double.infinity,
@@ -714,8 +689,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         ),
                         if (supplier.isVerified) ...[
                           const SizedBox(width: 6),
-                          // Self-gating: renders nothing unless the admin
-                          // actually approved this supplier.
                           VerifiedBadge(
                               verificationStatus: supplier.verificationStatus),
                         ],
@@ -838,7 +811,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
 // ── Small building blocks ────────────────────────────────────────────────────
 
-/// Round translucent overlay button used for back / wishlist / AR actions.
 class _FloatButton extends StatelessWidget {
   const _FloatButton({
     required this.icon,
@@ -1143,7 +1115,6 @@ class _ReviewTile extends StatelessWidget {
   }
 }
 
-/// Comment clamped to 3 lines with a "more/less" toggle when it overflows.
 class _ExpandableComment extends StatefulWidget {
   const _ExpandableComment({required this.text});
 
@@ -1165,7 +1136,6 @@ class _ExpandableCommentState extends State<_ExpandableComment> {
           color: AppColors.textSecondary,
           height: 1.45,
         );
-        // Cheap overflow probe (3 lines).
         final painter = TextPainter(
           text: TextSpan(text: widget.text, style: style),
           maxLines: 3,

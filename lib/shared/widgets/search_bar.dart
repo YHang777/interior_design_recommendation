@@ -3,11 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Debounced search bar with prefix icon and clear button.
-///
-/// Callers may supply an external [controller] and [focusNode] to observe
-/// keystrokes and focus directly; [onSubmitted] fires on keyboard submit and
-/// [onFocusChanged] reports focus changes.
 class SearchBar extends StatefulWidget {
   const SearchBar({
     super.key,
@@ -67,7 +62,7 @@ class _SearchBarState extends State<SearchBar> {
 
   void _onChanged(String value) {
     _debounce?.cancel();
-    setState(() {}); // refresh the clear (suffix) button as the user types
+    setState(() {});
     _debounce = Timer(Duration(milliseconds: widget.debounceMs), () {
       widget.onChanged?.call(value);
     });

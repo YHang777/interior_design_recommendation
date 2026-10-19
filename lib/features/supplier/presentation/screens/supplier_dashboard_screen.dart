@@ -20,7 +20,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier dashboard — live storefront snapshot with real Firestore data.
 class SupplierDashboardScreen extends ConsumerStatefulWidget {
   const SupplierDashboardScreen({super.key});
 
@@ -39,7 +38,6 @@ class _SupplierDashboardScreenState
         ref.refresh(supplierOrdersProvider(uid).future),
       ]);
     } catch (_) {
-      // Best effort pull-to-refresh.
     }
   }
 
@@ -68,8 +66,6 @@ class _SupplierDashboardScreenState
     final uid = user?.uid ?? '';
     final productsAsync = ref.watch(marketplaceProductsProvider);
     final ordersAsync = ref.watch(supplierOrdersProvider(uid));
-    // Live application document — the stored profile status only refreshes
-    // with the session, so an admin's approval must come from this stream.
     final application =
         ref.watch(myVerificationApplicationProvider).valueOrNull;
     final verificationStatus = user == null
@@ -144,10 +140,6 @@ class _SupplierDashboardScreenState
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      // Edge-to-edge display (SystemChrome in main.dart): the status bar
-      // overlays page content, so the list must start below it — the same
-      // SafeArea + 16 the customer dashboard uses (dashboard_screen.dart).
-      // Bottom stays manual: the floating nav bar overlays the content.
       padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 16,
           16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
@@ -237,16 +229,12 @@ class _SupplierDashboardScreenState
         const SizedBox(height: 16),
 
         // ── Verification callout ──
-        // Sits beside the greeting badge so the only supplier without the
-        // badge always sees the next step (or the review outcome).
         if (verificationStatus != 'verified') ...[
           _verificationBanner(verificationStatus, application),
           const SizedBox(height: 16),
         ],
 
         // ── Quick actions ──
-        // Row + Expanded keeps all 4 in one run at every phone width
-        // (the old Wrap + SizedBox(width: 72) needed 336dp and wrapped below it).
         Row(
           children: [
             Expanded(
@@ -289,8 +277,6 @@ class _SupplierDashboardScreenState
         const SizedBox(height: 18),
 
         // ── Stats ──
-        // 12px gutters (matching the shortcut row) so the gradient cards
-        // read as separate tiles instead of sticking together.
         Row(
           children: [
             Expanded(
@@ -428,9 +414,6 @@ class _SupplierDashboardScreenState
     );
   }
 
-  /// Verification callout under the greeting — same state machine as the
-  /// profile screen: 'none'/'rejected' get the apply button, 'pending' a
-  /// read-only label, and a rejection carries the admin's note.
   Widget _verificationBanner(
       String status, VerificationApplication? application) {
     final rejected = status == 'rejected';
@@ -581,8 +564,6 @@ class _RecentOrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = myLineItemCount(order, supplierId);
-    // What this seller earns on the order: their items + their own shipping
-    // share (matches the revenue helpers' semantics).
     final total = mySubtotal(order, supplierId) + myShipping(order, supplierId);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -788,8 +769,6 @@ class _StatCard extends StatelessWidget {
             child: Icon(icon, color: Colors.white, size: 18),
           ),
           const SizedBox(height: 10),
-          // scaleDown so money like "RM 12,345" shrinks instead of
-          // ellipsizing inside a 1/3-width card.
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -800,8 +779,6 @@ class _StatCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
           ),
-          // Same treatment as the value: the label must stay fully
-          // readable, not 'Reve…'.
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,

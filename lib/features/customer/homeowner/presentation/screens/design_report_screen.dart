@@ -19,12 +19,6 @@ import '../../../marketplace/presentation/providers/marketplace_providers.dart';
 import '../../data/design_report.dart';
 import '../providers/design_providers.dart';
 
-/// Project report for ONE saved room design: Design Overview, Furniture &
-/// Items, Expenses Breakdown, and Share/Print as a PDF.
-///
-/// Opens on the most recently updated design (`savedDesignsProvider` is
-/// sorted newest-first) with a "Change design" picker. Every price is an
-/// estimate derived from the live marketplace — the screen says so.
 class DesignReportScreen extends ConsumerStatefulWidget {
   const DesignReportScreen({super.key});
 
@@ -34,11 +28,8 @@ class DesignReportScreen extends ConsumerStatefulWidget {
 }
 
 class _DesignReportScreenState extends ConsumerState<DesignReportScreen> {
-  /// Explicitly picked design; null → default to the most recent one.
   String? _selectedDesignId;
 
-  /// A share/print call in flight — disables both buttons so one tap
-  /// cannot queue two OS dialogs.
   bool _working = false;
 
   // ── Actions ────────────────────────────────────────────────────────────
@@ -92,12 +83,7 @@ class _DesignReportScreenState extends ConsumerState<DesignReportScreen> {
     ref.invalidate(marketplaceProductsProvider);
   }
 
-  /// House bottom-sheet picker: design name, room type · updated date, and
-  /// a check on the currently shown design.
   Future<void> _openDesignPicker(List<RoomDesign> designs) async {
-    // The design actually on screen right now (a selection id pointing at a
-    // since-removed design falls back to the most recent one, exactly like
-    // the body does).
     final currentId = designs
         .firstWhere((d) => d.id == _selectedDesignId,
             orElse: () => designs.first)
@@ -243,13 +229,6 @@ class _DesignReportScreenState extends ConsumerState<DesignReportScreen> {
         title: 'No saved designs yet',
         subtitle: 'Create a design first, then come back for your report.',
         actionLabel: 'Create a design',
-        // Same full-screen editor route as the dashboard and saved
-        // designs use. Never pushNamed(homeownerScan) here: that
-        // appends a SECOND match of the homeowner shell (whose page
-        // key is derived from the route, not the path), so the
-        // navigator hits `!keyReservation.contains(key)` and the
-        // screen goes red. `push` keeps this report underneath, so
-        // Back returns to it as the subtitle promises.
         onAction: () => context.push('/design-editor'),
       );
     }

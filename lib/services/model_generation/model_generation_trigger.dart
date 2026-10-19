@@ -12,29 +12,6 @@ import '../media/media_store.dart';
 import 'generation_decider.dart';
 import 'tripo_generator.dart';
 
-/// Fire-and-forget entry point of the auto-3D pipeline. Call it with the
-/// product returned by a create/update save, from failure-retry chips and
-/// overflow-menu "Regenerate 3D" actions, and at boot for stuck products.
-///
-/// Tripo is the only model source; the WHOLE decision table lives in
-/// [decideGeneration] (pure — unit-tested in generation_decision_test.dart).
-/// It guarantees, among other things:
-///  - a healthy `ready` model is never re-kicked automatically;
-///  - a persisted Tripo task id is always re-POLLED first — resuming a stuck
-///    or transiently-failed generation never submits a second (paid) task;
-///  - brand-new Tripo submissions are capped at `autoAttemptsCap` for
-///    AUTOMATIC kicks, while explicit seller actions (`force`) may always
-///    submit;
-///  - forcing regeneration of a non-eligible product keeps its current ready
-///    model instead of clobbering it;
-///  - every refusal names the exact missing precondition (API key, photo,
-///    dimensions).
-///
-/// Returns the [GenerationDecision] so the UI can pick its snackbar.
-///
-/// All product-doc writes are PARTIAL `.update({'ar3d': …})` calls — never a
-/// full-document overwrite. Terminal writes carry the FULL ar3d key set
-/// (status/source/url/error/taskId/attempts/submittedAt/generatedAt).
 GenerationDecision kickOffProduct3DGeneration(
   Product product, {
   bool force = false,
@@ -85,16 +62,10 @@ GenerationDecision kickOffProduct3DGeneration(
   final attempts = ar3d?.attempts ?? 0;
   switch (decision.action) {
     case GenerationAction.stampProcedural:
-      // Unreachable — the procedural product-model path was deleted and
-      // decideGeneration never returns this action (kept in the enum only
-      // for the supplier screen's exhaustive switch). Assert-silent no-op.
       debugPrint('[model-3d] BUG: stampProcedural requested for $id — '
           'the procedural model source no longer exists; ignoring.');
       break;
     case GenerationAction.markFailed:
-      // decideGeneration only chooses markFailed when there is no pollable
-      // task left (taskId already absent) — clearing it here is a no-op
-      // in that case and never discards a resumable generation.
       _setAr3d(
         firestore,
         id,
@@ -125,27 +96,11 @@ GenerationDecision kickOffProduct3DGeneration(
     case GenerationAction.none:
     case GenerationAction.submitNewTripo:
     case GenerationAction.pollExistingTask:
-      break; // handled above / nothing to write
+      break;
   }
   return decision;
 }
 
-/// Boot resume: generations interrupted by a crash or an app restart are
-/// stuck as `ar3d.status == 'generating'` (the doc write happens before the
-/// task runs). Re-kick up to 20 of the CURRENT SUPPLIER's products,
-/// fire-and-forget.
-///
-/// Gated to suppliers (fix: boot resume must never trigger paid Tripo work
-/// — or re-run a supplier's task stream — for a signed-in homeowner):
-///  - requires an authenticated Firebase user whose `users/{uid}.role` is
-///    `supplier`; homeowners and anonymous boots skip entirely;
-///  - only that supplier's own products are resumed (`supplierId == uid`).
-///
-/// Decisions still run through [decideGeneration] (force: false): a doc with
-/// a persisted task id is re-polled (free); one without (crash mid-submit)
-/// is re-submitted at most until `autoAttemptsCap`, after which it is marked
-/// failed with the cap message — resume can never bill a seller repeatedly.
-/// Never throws.
 Future<void> resumeStuckGenerations({
   FirebaseFirestore? db,
   MediaStore? mediaStore,

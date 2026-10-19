@@ -9,9 +9,6 @@ import '../../config/app_config.dart';
 import '../../core/utils/user_errors.dart';
 import '../../models/product.dart';
 
-/// A photo-analysis failure already phrased for the seller waiting on a
-/// save: short, plain, free of SDK/HTTP jargon (house rule — same spirit
-/// as `ChatException`).
 class ProductVisionException implements Exception, UserFacingException {
   const ProductVisionException(this.message);
 
@@ -24,12 +21,6 @@ class ProductVisionException implements Exception, UserFacingException {
   String toString() => 'ProductVisionException: $message';
 }
 
-/// Client for `POST {chatApiUrl}/api/ai/analyze-product` — the backend's
-/// upload-time photo analysis.
-///
-/// Same key rule as `ChatDatasource`: the Gemini key exists ONLY in the
-/// backend's environment, never in the app. This client sends a product id
-/// and receives the verdict the server wrote to `products/{id}.vision`.
 class ProductVisionApi {
   ProductVisionApi({
     http.Client? client,
@@ -40,9 +31,6 @@ class ProductVisionApi {
   final http.Client _client;
   final Future<String?> Function() _idTokenProvider;
 
-  // The analysis waits on a photo download plus one vision call — a little
-  // more headroom than chat's 30s since the seller is not staring at a
-  // typing bubble.
   static const Duration _timeout = Duration(seconds: 35);
 
   static Future<String?> _firebaseIdToken() async {
@@ -51,16 +39,11 @@ class ProductVisionApi {
     return user.getIdToken();
   }
 
-  /// Returns the stored verdict (`status: 'ok' | 'failed'`). A `failed`
-  /// vision is a normal result, not an error — only transport/auth problems
-  /// throw, and they are already phrased for a human.
   Future<ProductVision> analyze({required String productId}) async {
     final base = AppConfig.chatApiUrl.trim();
     if (base.isEmpty) {
       throw const ProductVisionException('Photo analysis is not set up yet.');
     }
-    // Fail fast without a token: an unauthenticated call would only earn
-    // a 401 from the proxy.
     final token = await _idTokenProvider();
     if (token == null || token.isEmpty) {
       throw const ProductVisionException('Please sign in to check photos.');
@@ -87,7 +70,6 @@ class ProductVisionApi {
     }
 
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      // Server diagnostics stay in the log; the seller gets our sentence.
       debugPrint('[vision] rejected HTTP ${resp.statusCode}: ${resp.body}');
       throw ProductVisionException(_messageForStatus(resp.statusCode));
     }

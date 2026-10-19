@@ -98,10 +98,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _editing = false);
   }
 
-  /// Runs the two-step delete flow, then — only if the request was actually
-  /// sent — clears local recent searches, refreshes the pending banner and
-  /// tells the person to check their inbox. Failures surface as snackbars
-  /// inside the flow itself.
   Future<void> _deleteAccount(String email) async {
     final ok = await showDeleteAccountFlow(
       context,
@@ -136,7 +132,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             const PageHeading(title: 'Profile'),
             const DeletionPendingBanner(),
             const SizedBox(height: 16),
-            // Avatar with gradient ring
             Center(
               child: Column(
                 children: [
@@ -189,7 +184,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    // Edit profile button
                     SizedBox(
                       height: 38,
                       child: OutlinedButton.icon(
@@ -216,7 +210,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 28),
 
-            // Personal Info Card
             _SectionCard(
               title: 'Personal Information',
               accentColor: AppColors.accent,
@@ -265,7 +258,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Edit actions
             if (_editing) ...[
               Row(
                 children: [
@@ -311,7 +303,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               const SizedBox(height: 16),
             ],
 
-            // Quick Links
             if (!_editing) ...[
               _SectionCard(
                 title: 'Tools',
@@ -328,7 +319,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Settings
               _SectionCard(
                 title: 'Settings',
                 accentColor: AppColors.textHint,
@@ -405,7 +395,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
               const SizedBox(height: 20),
 
-              // Logout with confirmation
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 52),
                 child: OutlinedButton.icon(
@@ -436,7 +425,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
               const SizedBox(height: 10),
 
-              // Delete
               TextButton(
                 onPressed: () => _deleteAccount(user?.email ?? ''),
                 child: Text(
@@ -516,8 +504,6 @@ class _Field extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 72,
-            // One line that scales down: a longer label must not wrap and
-            // crush the row (the fixed 72dp keeps values column-aligned).
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
@@ -564,8 +550,6 @@ class _EditField extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 72,
-            // One line that scales down: a longer label must not wrap and
-            // crush the row (the fixed 72dp keeps values column-aligned).
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
@@ -629,8 +613,6 @@ class _ReadOnlyField extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 72,
-            // One line that scales down: a longer label must not wrap and
-            // crush the row (the fixed 72dp keeps values column-aligned).
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,

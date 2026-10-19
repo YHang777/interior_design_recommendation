@@ -1,9 +1,7 @@
-/// User role enum — determines routing and available features.
 enum UserRole {
   homeowner,
   supplier;
 
-  /// Parses from Firestore string value.
   static UserRole fromString(String role) {
     switch (role.toLowerCase()) {
       case 'supplier':
@@ -17,7 +15,6 @@ enum UserRole {
   String get firestoreValue => name;
 }
 
-/// Domain model representing an authenticated user.
 class AppUser {
   final String uid;
   final String email;
@@ -27,18 +24,8 @@ class AppUser {
   final String? address;
   final String? profilePicture;
 
-  /// Admin-granted supplier verification: 'none' | 'pending' | 'verified' |
-  /// 'rejected'.
-  ///
-  /// Every new account starts at 'none'. Only the admin backend may set
-  /// 'verified', and only after the supplier has uploaded an IC and
-  /// supporting documents and an admin has approved them — `firestore.rules`
-  /// refuses any client write of 'verified', so this cannot be self-granted.
-  /// Homeowners never see verification UI; the value only matters for
-  /// suppliers, where it drives the "Verified" badge buyers see.
   final String verificationStatus;
 
-  /// Supplier business profile (populated when [role] is supplier).
   final String? businessName;
   final String? businessPhone;
   final String? businessAddress;
@@ -66,14 +53,9 @@ class AppUser {
   bool get isSupplier => role == UserRole.supplier;
   bool get isVerified => verificationStatus == 'verified';
 
-  /// Whether the supplier may submit (or re-submit) a verification
-  /// application right now: only from 'none' (never applied) or 'rejected'
-  /// (admin rejected — re-apply allowed). 'pending' is read-only while the
-  /// admin reviews, and 'verified' is terminal.
   bool get canSubmitVerification =>
       verificationStatus == 'none' || verificationStatus == 'rejected';
 
-  /// Creates from Firestore document + Firebase Auth user.
   factory AppUser.fromFirestore({
     required String uid,
     required String email,
@@ -89,11 +71,6 @@ class AppUser {
       phone: data['phone'] as String?,
       address: data['address'] as String?,
       profilePicture: data['profilePicture'] as String?,
-      // A stored status is always honoured — accounts written before this
-      // feature keep whatever value they have (including 'verified' from
-      // the old signup stamp). Only a doc that never got the field falls
-      // back, and it falls back to 'none': never claim a verification that
-      // was not granted.
       verificationStatus: data['verificationStatus']?.toString() ?? 'none',
       businessName: data['businessName']?.toString() ??
           (role == UserRole.supplier ? name : null),
@@ -104,7 +81,6 @@ class AppUser {
     );
   }
 
-  /// Serializes to Firestore document.
   Map<String, dynamic> toFirestore() {
     return {
       'name': name,

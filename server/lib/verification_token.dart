@@ -3,14 +3,6 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
-/// Stateless HMAC-SHA256 verification token.
-///
-/// Format: `base64url(payloadJson) + '.' + base64url(hmacSha256(secret, payloadB64))`
-/// where payloadJson is `{"uid": ..., "email": ..., "exp": <epochSeconds>}`.
-///
-/// No server-side storage is involved — the token is unforgeable without
-/// [secret] and self-expiring via `exp`, so a still-valid link can always be
-/// retried (idempotent) and an old one can never be replayed past its TTL.
 const Duration defaultTokenTtl = Duration(hours: 24);
 
 String createVerificationToken({
@@ -31,8 +23,6 @@ String createVerificationToken({
   return '$payloadB64.$sigB64';
 }
 
-/// Decodes and validates [token]. Returns `{uid, email, exp}` or null when
-/// the token is malformed, tampered with, or expired.
 Map<String, dynamic>? verifyVerificationToken(
   String token,
   String secret, {
@@ -44,7 +34,6 @@ Map<String, dynamic>? verifyVerificationToken(
   final sig = parts[1];
   if (payloadB64.isEmpty || sig.isEmpty) return null;
 
-  // Recompute-and-compare (no early return on length/byte mismatch).
   final expected = _sign(payloadB64, secret);
   Uint8List actual;
   try {
@@ -85,8 +74,6 @@ List<int> _sign(String payloadB64, String secret) {
 String _b64url(List<int> bytes) =>
     base64Url.encode(bytes).replaceAll('=', '');
 
-/// base64Url.decode is lenient about padding in recent SDKs; re-padding keeps
-/// it unambiguous across versions.
 String _padB64(String s) {
   final rem = s.length % 4;
   return rem == 0 ? s : s + ('=' * (4 - rem));

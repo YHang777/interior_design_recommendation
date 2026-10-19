@@ -1,26 +1,6 @@
-// Tests for the pure pipeline decision table (decideGeneration).
-//
-// Tripo is the ONLY model source — there is no procedural generator and no
-// bundled-catalog fallback to decide between anymore. The table decides what
-// the SINGLE pipeline does right now: submit a new Tripo task, re-poll a
-// persisted one, wait, or record a loud failure / no-model state. The
-// billing protections are unit-tested here headlessly:
-//  - auto kicks never re-submit for a healthy `ready` model;
-//  - a persisted task id always means poll-first (never a second paid task);
-//  - brand-new Tripo submissions are capped at autoAttemptsCap for AUTOMATIC
-//    kicks while explicit seller actions (force) always may submit;
-//  - every refusal names the EXACT missing precondition (service, photo,
-//    dimensions) — never a vague "no model available";
-//  - stampProcedural is never produced (the action only survives as a
-//    legacy enum value for the supplier screen's exhaustive switch).
-//
-// Pure Dart — no widgets, no Firebase, no filesystem.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/services/model_generation/generation_decider.dart';
 
-/// decideGeneration with convenient defaults (every precondition missing)
-/// so each test only names what matters.
 GenerationDecision decide({
   String status = 'none',
   bool hasTaskId = false,
@@ -41,8 +21,6 @@ GenerationDecision decide({
   );
 }
 
-/// A product that satisfies every precondition (key + photo + at least one
-/// seller dimension).
 GenerationDecision decideEligible({
   String status = 'none',
   bool hasTaskId = false,
@@ -204,9 +182,6 @@ void main() {
 
     test('capped auto kick with missing dims -> markNoModel naming the dims',
         () {
-      // The cap only guards SUBMISSIONS. With no seller dimensions nothing
-      // could be submitted anyway, so the honest outcome is "no model" plus
-      // the exact missing precondition — not a vague cap failure.
       final d = decide(
         status: 'none',
         attempts: autoAttemptsCap,
@@ -241,8 +216,6 @@ void main() {
         tripoConfigured: false,
       );
       expect(d.action, GenerationAction.markFailed);
-      // The message is the constant plus a "Missing: …" tail naming the
-      // precondition(s) precisely.
       expect(d.message, startsWith(tripoUnavailableMessage));
       expect(d.message, contains('Missing: the 3D generation service'));
     });

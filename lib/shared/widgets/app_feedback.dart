@@ -2,19 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Uniform floating-snackbar helpers used across the marketplace screens.
-/// Every mutation gives feedback (design rule) — these keep the look
-/// consistent and replace any stale snackbar before showing a new one.
-///
-/// Both variants render identically; [showAppSnackbarOn] exists for call
-/// sites that must show feedback AFTER popping the screen that owns the
-/// (now unmounted) BuildContext — pass the captured ScaffoldMessengerState
-/// there.
-
-/// Shows a floating [SnackBar] with [message]. Themed via [color] (default
-/// accent); an optional [actionLabel]/[onAction] pair renders a
-/// SnackBarAction. [isError] paints the bar with [AppColors.error] and wins
-/// over [color]; [detail] is appended to the message ("... (detail)").
 void showAppSnackbar(
   BuildContext context,
   String message, {
@@ -37,8 +24,6 @@ void showAppSnackbar(
   );
 }
 
-/// [showAppSnackbar] against an already-captured [ScaffoldMessengerState] —
-/// for contexts that are no longer mounted by the time feedback is shown.
 void showAppSnackbarOn(
   ScaffoldMessengerState messenger,
   String message, {
@@ -52,7 +37,6 @@ void showAppSnackbarOn(
   final effectiveColor = isError ? AppColors.error : color;
   final text = detail == null ? message : '$message ($detail)';
 
-  // Pick icon prefix based on type
   final iconData = isError ? Icons.error : Icons.check_circle;
 
   messenger.hideCurrentSnackBar();
@@ -129,7 +113,6 @@ void showAppSnackbarOn(
   );
 }
 
-/// "Added to cart" feedback with a "View cart" shortcut action.
 void showAddedToCartSnack(
   BuildContext context,
   String message, {

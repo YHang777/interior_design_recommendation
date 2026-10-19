@@ -16,14 +16,6 @@ import '../widgets/page_heading.dart';
 import '../widgets/price_summary.dart';
 import '../widgets/status_badge.dart';
 
-/// Tax invoice for ONE supplier's portion of an order — the seller's
-/// paperwork and the buyer's receipt for that shipment, opened from the
-/// supplier's order detail (accept / view) and the buyer's order detail.
-///
-/// Live: resolves the order through the signed-in user's own order stream —
-/// the supplier stream for the seller, the customer stream for the buyer —
-/// with the same find-by-id pattern as the two order detail screens, so an
-/// invoice issued moments ago is already here on arrival.
 class OrderInvoiceScreen extends ConsumerStatefulWidget {
   const OrderInvoiceScreen({
     super.key,
@@ -33,7 +25,6 @@ class OrderInvoiceScreen extends ConsumerStatefulWidget {
 
   final String orderId;
 
-  /// The seller this invoice belongs to — a shared order has one per seller.
   final String supplierId;
 
   @override
@@ -42,8 +33,6 @@ class OrderInvoiceScreen extends ConsumerStatefulWidget {
 }
 
 class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
-  /// A share/print call in flight — disables both buttons so one tap cannot
-  /// queue two OS dialogs.
   bool _working = false;
 
   // ── Actions ────────────────────────────────────────────────────────────
@@ -94,7 +83,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
     }
   }
 
-  /// Re-subscribes to whichever order stream this role resolves through.
   void _retry() {
     if (ref.read(currentUserProvider)?.uid == widget.supplierId) {
       ref.invalidate(supplierOrdersProvider(widget.supplierId));
@@ -108,8 +96,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
   @override
   Widget build(BuildContext context) {
     final uid = ref.watch(currentUserProvider)?.uid ?? '';
-    // Seller resolves through their supplier stream, buyer through theirs —
-    // Firestore only lets each role read their own list anyway.
     final ordersAsync = uid == widget.supplierId
         ? ref.watch(supplierOrdersProvider(widget.supplierId))
         : ref.watch(customerOrdersProvider);
@@ -144,8 +130,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
                             onAction: () =>
                                 Navigator.of(context).maybePop(),
                           )
-                    // Never a crash and never a dead Share/Print: the seller
-                    // simply has not issued this shipment's paperwork yet.
                     : invoice == null
                         ? EmptyState(
                             icon: Icons.request_page_outlined,
@@ -202,8 +186,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
                   Formatters.formatOrderNumber(invoice.orderNumber)),
               _refRow('Order placed',
                   Formatters.shortDateTime(invoice.orderCreatedAt)),
-              // The invoice freezes the raw payment code; the order holds the
-              // same value, so its label getter can pretty-print it here.
               if (invoice.paymentMethod.trim().isNotEmpty)
                 _refRow('Payment', order.paymentMethodLabel),
             ],
@@ -250,9 +232,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
                 Formatters.myr(invoice.total),
                 bold: true,
               ),
-              // Order-level discount/tax are not attributable to one seller,
-              // so they are stated for reference and never summed into the
-              // shipment total.
               if (invoice.orderDiscount > 0 || invoice.orderTax > 0) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -326,7 +305,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
     );
   }
 
-  /// One from/to block. Empty fields are dropped rather than shown blank.
   Widget _partyBlock({required String name, required List<String> lines}) {
     final details = <String>[
       for (final raw in lines)

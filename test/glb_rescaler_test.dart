@@ -1,16 +1,3 @@
-// Tests for the GLB rescaler: downloaded AI models (arbitrary baked scale,
-// e.g. a 0.70 m mesh for a product the seller declared as 0.50 m) must be
-// re-baked to the SELLER's declared size and grounded at y = 0 so AR
-// placement can use a uniform scale of 1.0.
-//
-// Two layers:
-//  * rescaleGlbToDimensions — the per-axis engine (exact W×H×D targets);
-//  * rescaleGlbToSellerSize — the decision layer the pipeline calls:
-//    all three dims → per-axis; some dims → uniform (height preferred);
-//    no dims → MissingDimensionsException (never a guessed size).
-//
-// Pure Dart tests (no widgets / platform channels) — fast and deterministic.
-
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -20,14 +7,10 @@ import 'package:interior_design_recommendation/features/customer/ar/data/glb_gen
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_rescaler.dart';
 import 'package:interior_design_recommendation/models/product.dart';
 
-/// A deterministic mesh from the (still-supported) finish generator: a wall
-/// panel 2.4 × 2.7 × 0.05 m before any rescale.
 Uint8List wallSource() => generateWallGlb(
     finish: const WallFinish(
         type: WallFinishType.paint, colorArgb: 0xFFE9E4DA));
 
-/// A mesh at a known arbitrary scale: 0.6 × 0.7 × 0.4 m — the 0.70 m
-/// height of the spec's "seller 0.50 m vs Tripo 0.70 m" example.
 Uint8List meshAt070Height() => rescaleGlbToDimensions(
       wallSource(),
       targetWidthM: 0.6,
@@ -35,7 +18,6 @@ Uint8List meshAt070Height() => rescaleGlbToDimensions(
       targetDepthM: 0.4,
     );
 
-/// Parses [bytes] and verifies the GLB container header.
 GlbBounds parseGlb(Uint8List bytes) {
   final data = ByteData.sublistView(bytes);
   expect(data.getUint32(0, Endian.little), 0x46546C67,
@@ -52,7 +34,6 @@ void expectNear(double actual, double expected, double tolerance,
       reason: reason ?? 'expected ≈ $expected, got $actual');
 }
 
-/// Decodes the GLB JSON chunk and returns it.
 Map<String, dynamic> jsonChunkOf(Uint8List bytes) {
   final headerLen = 12 + 8;
   final jsonLen = ByteData.sublistView(bytes).getUint32(12, Endian.little);
@@ -60,8 +41,6 @@ Map<String, dynamic> jsonChunkOf(Uint8List bytes) {
   return jsonDecode(utf8.decode(jsonBytes)) as Map<String, dynamic>;
 }
 
-/// The POSITION accessor whose min/max match [bounds] (there may be several
-/// accessors — normals/UVs — so we locate the position one by value).
 Map<String, dynamic> positionAccessor(Map<String, dynamic> json, GlbBounds b) {
   final accessors = json['accessors'] as List<dynamic>;
   for (final a in accessors) {
@@ -129,15 +108,12 @@ void main() {
     });
 
     test('non-zero source minY is grounded to y = 0 (floor slab)', () {
-      // Generated floor slab: top at y = 0, bottom at y = −0.01.
       final floor = generateFloorGlb(
           finish: const FloorFinish(
               type: FloorFinishType.woodPlanks, colorArgb: 0xFFB08D6B));
       final src = parseGlb(floor);
       expectNear(src.minY, -0.01, 1e-6, 'floor slab starts below 0');
 
-      // Stretch it to a 4 × 0.2 × 4 slab — grounding must lift the bottom
-      // face to y = 0 while keeping the full requested thickness.
       final rescaled = rescaleGlbToDimensions(
         floor,
         targetWidthM: 4.0,
@@ -149,7 +125,6 @@ void main() {
       expectNear(bounds.heightM, 0.2, 0.01, 'height preserved after ground');
       expectNear(bounds.widthM, 4.0, 0.01, 'width');
       expectNear(bounds.depthM, 4.0, 0.01, 'depth');
-      // X/Z kept the model's own centering: −2 … +2.
       expectNear(bounds.minX, -2.0, 0.01, 'minX centered');
       expectNear(bounds.maxX, 2.0, 0.01, 'maxX centered');
     });
@@ -190,8 +165,6 @@ void main() {
         targetHeightM: 0.6,
         targetDepthM: 2.1,
       );
-      // A second rescale of an already-ground model must behave (idempotent
-      // grounding — minY is already 0, so it must NOT shift Y up).
       final twice = rescaleGlbToDimensions(
         once,
         targetWidthM: 1.9,
@@ -219,7 +192,6 @@ void main() {
       );
       final bounds = parseGlb(out);
       expectNear(bounds.heightM, 0.50, 0.005, 'output height is 0.50 m');
-      // Uniform: the other axes scale by the same 50/70 factor.
       expectNear(bounds.widthM, 0.6 * 50 / 70, 0.005, 'width follows');
       expectNear(bounds.depthM, 0.4 * 50 / 70, 0.005, 'depth follows');
       expectNear(bounds.minY, 0.0, 1e-6, 'grounded');
@@ -241,7 +213,7 @@ void main() {
     test('only width given → uniform scale driven by the width', () {
       final out = rescaleGlbToSellerSize(
         meshAt070Height(),
-        const ProductDimensions(widthM: 1.2), // 0.6 → 1.2, factor 2
+        const ProductDimensions(widthM: 1.2),
       );
       final bounds = parseGlb(out);
       expectNear(bounds.widthM, 1.2, 0.01, 'width honored');
@@ -252,7 +224,7 @@ void main() {
     test('only depth given → uniform scale driven by the depth', () {
       final out = rescaleGlbToSellerSize(
         meshAt070Height(),
-        const ProductDimensions(depthM: 0.2), // 0.4 → 0.2, factor 0.5
+        const ProductDimensions(depthM: 0.2),
       );
       final bounds = parseGlb(out);
       expectNear(bounds.depthM, 0.2, 0.01, 'depth honored');
@@ -263,7 +235,7 @@ void main() {
     test('height wins when several axes are given but not all three', () {
       final out = rescaleGlbToSellerSize(
         meshAt070Height(),
-        const ProductDimensions(widthM: 9.9, heightM: 0.35), // 0.7 → 0.35
+        const ProductDimensions(widthM: 9.9, heightM: 0.35),
       );
       final bounds = parseGlb(out);
       expectNear(bounds.heightM, 0.35, 0.005, 'height drives the scale');
@@ -310,8 +282,6 @@ void main() {
     });
 
     test('dims stored in cm (> 10 m cap) are normalized to meters', () {
-      // 120/70/40 are cm slips for a 1.2 × 0.7 × 0.4 m product — without
-      // the guard the model would render 100× too big.
       final out = rescaleGlbToSellerSize(
         meshAt070Height(),
         const ProductDimensions(widthM: 120, heightM: 70, depthM: 40),
@@ -324,7 +294,6 @@ void main() {
   });
 
   group('bakeGlbNodeTransforms (accessor space == world space)', () {
-    /// Rewrites [source]'s JSON chunk through [mutate], keeping the BIN.
     Uint8List rewriteJson(
         Uint8List source, void Function(Map<String, dynamic>) mutate) {
       final json = jsonChunkOf(source);
@@ -384,10 +353,6 @@ void main() {
     });
 
     test('Z-up→Y-up root matrix is folded into the vertices', () {
-      // Sketchfab-style root rotation (x,y,z) → (x,z,−y): the wall's thin
-      // axis (Z, 0.05 m) becomes world Y; its height (Y, 2.7 m) becomes
-      // world −Z. Accessor-only measurement used to see 2.4×2.7×0.05 and
-      // per-axis rescale scrambled the seller's W/H/D across axes.
       final wrapped = rewriteJson(wallSource(), (json) {
         final node = (json['nodes'] as List)[0] as Map<String, dynamic>;
         node['matrix'] = <double>[1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
@@ -416,7 +381,6 @@ void main() {
       });
       final baked = bakeGlbNodeTransforms(wrapped);
       final bounds = GlbBounds.fromGlbBytes(baked);
-      // Source X spans [−1.2, 1.2] → ×2 → [−2.4, 2.4] → +10 → [7.6, 12.4].
       expectNear(bounds.minX, 7.6, 0.01, 'translated + scaled minX');
       expectNear(bounds.widthM, 4.8, 0.01, 'doubled width');
       expectNear(bounds.heightM, 5.4, 0.01, 'doubled height');

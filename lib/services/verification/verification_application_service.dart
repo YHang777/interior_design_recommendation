@@ -8,10 +8,6 @@ import '../../core/utils/user_errors.dart';
 import '../media/media_store.dart';
 import 'verification_application_model.dart';
 
-/// Raised when a verification submission cannot proceed.
-///
-/// [message] is the full technical form (logged); [userMessage] is the short
-/// sentence the supplier actually sees.
 class VerificationException implements Exception, UserFacingException {
   const VerificationException(this.message, {String? userMessage})
       : _userMessage = userMessage;
@@ -27,21 +23,6 @@ class VerificationException implements Exception, UserFacingException {
   String toString() => 'VerificationException: $message';
 }
 
-/// Supplier-side verification application pipeline.
-///
-/// Writes exactly two Firestore locations (full contract in
-/// `verification_application_model.dart`), in this order:
-///  1. upload every file to `verification/{uid}/{documentId}.{ext}`,
-///  2. `set` `verification_applications/{uid}` with status `'pending'`,
-///  3. update `users/{uid}` to `verificationStatus: 'pending'` +
-///     `verificationSubmittedAt` (ISO-8601 UTC).
-///
-/// Storage note: Firebase Storage was removed from this project (Sep 2026 —
-/// Cloud Storage for Firebase became Blaze-only), so the bytes go through
-/// [MediaStore] (Cloudinary) at the same `verification/{uid}/{id}.{ext}`
-/// path the contract specifies — the remote path doubles as the Cloudinary
-/// public_id, which is what each document's `storagePath` records. The app
-/// never reads the bytes back; only the admin console does.
 class VerificationApplicationService {
   VerificationApplicationService({
     FirebaseFirestore? firestore,
@@ -56,13 +37,6 @@ class VerificationApplicationService {
   static const String _usersCol = 'users';
   static final Random _rng = Random();
 
-  /// Submits (or re-submits after rejection) the supplier's application.
-  ///
-  /// The current status is deliberately NOT a caller parameter: the gate
-  /// reads the live `users/{uid}` document, so a stale screen snapshot
-  /// cannot sneak a second submission past `'pending'`. The state machine
-  /// only ever moves towards `'pending'` — `'verified'` is written by the
-  /// admin backend alone.
   Future<void> submitApplication({
     required String uid,
     required String email,
@@ -98,9 +72,6 @@ class VerificationApplicationService {
           : 'Your account is already verified.');
     }
 
-    // Uploads happen before any Firestore write so a refused write never
-    // leaves a half-created application document; a failure mid-way may
-    // orphan earlier blobs, which Cloudinary tolerates.
     final documents = <VerificationDocument>[
       await _uploadDocument(
           uid: uid, file: icFront, kind: kVerificationDocIcFront),
@@ -122,11 +93,6 @@ class VerificationApplicationService {
     );
 
     try {
-      // set() = create on first application, full replace on re-apply after
-      // rejection. `firestore.rules` currently allows the owner to CREATE
-      // only (updates are admin-backend-only) — if a re-apply is refused,
-      // the permission-denied branch below surfaces it instead of failing
-      // silently.
       await _db.collection(_applicationsCol).doc(uid).set(application.toJson());
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
@@ -142,19 +108,13 @@ class VerificationApplicationService {
       await _db.collection(_usersCol).doc(uid).update({
         'verificationStatus': 'pending',
         'verificationSubmittedAt': now.toIso8601String(),
-        // The old rejection note belongs to the previous review round —
-        // keeping it while pending would read as a live decision.
         'verificationReviewNote': null,
       });
     } on FirebaseException catch (e) {
-      // The application document is already stored, and the UI resolves
-      // status from its live stream — the supplier still lands in the
-      // pending state even if this profile write fails.
       debugPrint('[verify] users/$uid status update failed: ${e.code}');
     }
   }
 
-  /// Live view of the supplier's application — null until one exists.
   Stream<VerificationApplication?> watchMyApplication(String uid) {
     return _db
         .collection(_applicationsCol)
@@ -163,7 +123,6 @@ class VerificationApplicationService {
         .map(_fromSnapshot);
   }
 
-  /// One-shot read (for callers that need no stream).
   Future<VerificationApplication?> loadMyApplication(String uid) async {
     return _fromSnapshot(
         await _db.collection(_applicationsCol).doc(uid).get());
@@ -176,7 +135,6 @@ class VerificationApplicationService {
     return VerificationApplication.fromJson(data);
   }
 
-  /// Validates and uploads one file, returning the contract record for it.
   Future<VerificationDocument> _uploadDocument({
     required String uid,
     required File file,
@@ -203,14 +161,8 @@ class VerificationApplicationService {
     final ext = _extensionFor(file.path);
     final storagePath = 'verification/$uid/$id.$ext';
     try {
-      // remotePath doubles as the Cloudinary public_id, mirroring the
-      // contract's Storage path so the admin console can resolve the file
-      // from `storagePath` alone. The returned URL is deliberately unused:
-      // the app only previews local picks, never downloads.
       await _media.uploadImageFile(file, storagePath);
     } catch (e) {
-      // Keep the technical cause for logs; the supplier only ever sees the
-      // short clause below.
       throw VerificationException(
         'Could not upload the $label: $e',
         userMessage: 'Could not upload the $label. Please try again.',
@@ -228,7 +180,6 @@ class VerificationApplicationService {
     );
   }
 
-  /// `{epochMillis}_{6 hex}` — unique, sortable, safe as a filename stem.
   static String _newDocumentId() {
     final millis = DateTime.now().millisecondsSinceEpoch;
     final suffix = _rng.nextInt(0xFFFFFF).toRadixString(16).padLeft(6, '0');
@@ -241,9 +192,6 @@ class VerificationApplicationService {
         _ => 'supporting document',
       };
 
-  /// Sane extension from the local path — image_picker writes `.jpg`/`.png`,
-  /// but a share-intent path may lack one, so fall back rather than build a
-  /// filename with a dangling dot.
   static String _extensionFor(String path) {
     final slash = path.lastIndexOf(RegExp(r'[/\\]'));
     final dot = path.lastIndexOf('.');

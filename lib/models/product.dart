@@ -1,7 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-/// Real-world dimensions of a product in meters — the source of truth for
-/// auto-generating 3D models and for placing them in AR at true size.
 class ProductDimensions {
   final double widthM;
   final double heightM;
@@ -13,11 +11,8 @@ class ProductDimensions {
     this.depthM = 0,
   });
 
-  /// Whether all three dimensions are known (> 0). A product without
-  /// complete dimensions cannot be modeled or AR-placed at true scale.
   bool get isComplete => widthM > 0 && heightM > 0 && depthM > 0;
 
-  /// Human-readable form, e.g. "W 1.0 × H 1.5 × D 0.6 m".
   String get label => 'W ${_fmt(widthM)} × H ${_fmt(heightM)} × D ${_fmt(depthM)} m';
 
   static String _fmt(double v) {
@@ -26,7 +21,7 @@ class ProductDimensions {
     while (s.endsWith('0')) {
       s = s.substring(0, s.length - 1);
     }
-    if (s.endsWith('.')) s = '${s}0'; // 1.00 → 1.0
+    if (s.endsWith('.')) s = '${s}0';
     return s;
   }
 
@@ -55,34 +50,21 @@ class ProductDimensions {
   String toString() => 'ProductDimensions($label)';
 }
 
-/// State of a product's auto-generated 3D model.
 class Ar3dInfo {
-  /// 'none' (not requested yet) | 'generating' | 'ready' | 'failed'.
   final String status;
 
-  /// '' | 'procedural' (our GLB generator) | 'tripo' (uploaded Tripo GLB).
   final String source;
 
-  /// Storage URL of the GLB (Tripo-produced models are downloaded and kept
-  /// in Firestore storage).
   final String url;
 
-  /// Human-readable failure reason when [status] == 'failed'.
   final String error;
 
   final DateTime? generatedAt;
 
-  /// Tripo task id of the most recent submission ('' when none). Persisted
-  /// BEFORE polling starts so a crash/resume re-polls the SAME — already
-  /// paid for — task instead of submitting a brand-new one.
   final String taskId;
 
-  /// Number of NEW Tripo tasks submitted so far. Hard cap: generators stop
-  /// submitting new tasks once attempts >= 2 (an auto-resume must never bill
-  /// a seller repeatedly).
   final int attempts;
 
-  /// When the current task was submitted (diagnostics + resume decisions).
   final DateTime? submittedAt;
 
   const Ar3dInfo({
@@ -99,7 +81,6 @@ class Ar3dInfo {
   bool get isReady => status == 'ready';
   bool get isNone => status == 'none';
 
-  /// Whether the info holds a task id worth re-polling.
   bool get hasTaskId => taskId.trim().isNotEmpty;
 
   Ar3dInfo copyWith({
@@ -156,39 +137,23 @@ class Ar3dInfo {
       'taskId: "${taskId.isEmpty ? '' : taskId.substring(0, taskId.length < 8 ? taskId.length : 8)}")';
 }
 
-/// Server-owned verdict of what a product's photos ACTUALLY show — written
-/// only by the backend's photo analysis (`POST /api/ai/analyze-product`,
-/// `products/{id}.vision`), never by the app. A seller's name/description is
-/// a claim; this is what the chat assistant treats as truth.
-///
-/// [Product.toJson] deliberately does NOT emit it: the client must never
-/// write this key (firestore.rules blocks it, and `preserveStoredVision`
-/// re-attaches the stored map around full-document seller writes).
 class ProductVision {
-  /// 'ok' (parsed a verdict) | 'failed' (no usable photo / model hiccup).
-  /// A failure is informational — never an error, never a flag.
   final String status;
 
-  /// ≤ 8 short noun phrases of what is visible.
   final List<String> labels;
 
-  /// What the photo actually is (may contradict the seller's category).
   final String visualCategory;
 
   final String visualStyle;
 
-  /// One sentence (≤ 200 chars) describing the photo.
   final String summary;
 
-  /// True only when the photo clearly shows a different product type than
-  /// the seller claims (per the model's narrow instruction).
   final bool mismatchFlagged;
 
   final String mismatchReason;
 
   final DateTime? analyzedAt;
 
-  /// Model id — diagnostics only.
   final String model;
 
   const ProductVision({
@@ -218,8 +183,6 @@ class ProductVision {
       visualCategory: json['visualCategory']?.toString() ?? '',
       visualStyle: json['visualStyle']?.toString() ?? '',
       summary: json['summary']?.toString() ?? '',
-      // Never coerce truthy garbage into a flag — the same rule the
-      // server's lenient parser applies.
       mismatchFlagged: mismatch is Map && mismatch['flagged'] == true,
       mismatchReason:
           mismatch is Map ? mismatch['reason']?.toString() ?? '' : '',
@@ -251,10 +214,6 @@ class Supplier {
   final String phone;
   final String address;
   final String email;
-  /// Admin-granted verification: 'none' | 'pending' | 'verified' | 'rejected'.
-  /// Denormalised onto each product so the buyer's feed can badge a seller
-  /// without a second read. Defaults to 'none' — never claim a verification
-  /// that was not granted.
   final String verificationStatus;
 
   const Supplier({
@@ -302,15 +261,10 @@ class Product {
   final String category;
   final Supplier supplier;
 
-  /// Top-level owning supplier uid — mirrors `supplier.id` for cheap
-  /// ownership queries. Defaults to `supplier.id` during (de)serialization.
   final String supplierId;
 
-  /// Gallery of additional images. `image` remains the primary/first image.
   final List<String> images;
 
-  /// Whether the listing is live on the marketplace. Sellers can pause
-  /// a listing by setting this to false.
   final bool isActive;
 
   // ── Optional fields (defaults for backward compatibility) ──
@@ -319,41 +273,22 @@ class Product {
   final bool isEcoFriendly;
   final int? originalPrice;
 
-  /// Nullable for backward compatibility with legacy records.
-  /// Sorting must treat null as the OLDEST.
   final DateTime? createdAt;
 
-  /// Seller-provided real-world size in meters (nullable = not filled in).
   final ProductDimensions? dimensions;
 
-  /// Auto-generated 3D state (nullable = never requested / legacy record).
   final Ar3dInfo? ar3d;
 
-  /// Photo-analysis verdict (nullable = never analyzed / legacy record).
-  /// Server-owned: read for chat context, never emitted by [toJson].
   final ProductVision? vision;
 
   // ── Shipping (Task B: seller-configured delivery charges) ──
-  // Defaults are deliberately conservative: products written before these
-  // fields existed load as FREE shipping (no charge, no notice), matching
-  // how they behaved for buyers at the time they were listed.
 
-  /// Whether this product adds a delivery charge at checkout. When false,
-  /// [shippingFee] is ignored and the product ships free.
   final bool shippingEnabled;
 
-  /// Seller-set delivery charge in whole ringgit. Charged once per order
-  /// for this product line regardless of quantity (see
-  /// [shippingBySupplierFor]).
   final int shippingFee;
 
-  /// Whether the product page shows [longDistanceNotice] to buyers
-  /// ("deliveries over 30 km incur extra charges").
   final bool shippingLongDistanceNotice;
 
-  /// Buyer-facing copy for [shippingLongDistanceNotice]. Kept as a constant
-  /// so the supplier form preview and the customer product page can never
-  /// drift apart.
   static const String longDistanceNotice =
       'Deliveries over 30 km incur extra charges.';
 
@@ -388,17 +323,11 @@ class Product {
   bool get isOutOfStock => stock <= 0;
   bool get isLowStock => stock > 0 && stock < 5;
 
-  /// Resolved supplier id — prefers the top-level field, falls back to the
-  /// nested supplier object.
   String get resolvedSupplierId =>
       supplierId.isNotEmpty ? supplierId : supplier.id;
 
-  /// Whether the primary image is served over the network (http/https)
-  /// rather than bundled as an asset.
   bool get hasNetworkImage => image.startsWith('http');
 
-  /// All gallery images; falls back to the primary image when no gallery
-  /// has been recorded.
   List<String> get resolvedImages =>
       images.isNotEmpty ? images : [image];
 
@@ -407,10 +336,6 @@ class Product {
     return ((originalPrice! - price) / originalPrice! * 100).round();
   }
 
-  /// What this product actually adds to an order's shipping fee: the
-  /// seller-set [shippingFee] when the charge is switched on, else 0.
-  /// Single gate every consumer (checkout, order attribution, UI) uses so
-  /// "disabled" can never leak a stored fee.
   int get shippingCharge => shippingEnabled ? shippingFee : 0;
 
   // ─── copyWith ──────────────────────────────────────────────────────────
@@ -530,7 +455,6 @@ class Product {
       vision: json['vision'] is Map<String, dynamic>
           ? ProductVision.fromJson(json['vision'] as Map<String, dynamic>)
           : null,
-      // Legacy docs predate these keys → free shipping, notice off.
       shippingEnabled: json['shippingEnabled'] == true,
       shippingFee: _parseShippingFee(json['shippingFee']),
       shippingLongDistanceNotice: json['shippingLongDistanceNotice'] == true,
@@ -553,7 +477,6 @@ class Product {
         'rating': rating,
         'ratingCount': ratingCount,
         'isEcoFriendly': isEcoFriendly,
-        // Always written (even defaults) so every product doc is explicit.
         'shippingEnabled': shippingEnabled,
         'shippingFee': shippingFee,
         'shippingLongDistanceNotice': shippingLongDistanceNotice,
@@ -561,11 +484,9 @@ class Product {
         if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
         if (dimensions != null) 'dimensions': dimensions!.toJson(),
         if (ar3d != null) 'ar3d': ar3d!.toJson(),
-        // `vision` is intentionally omitted: server-owned, see ProductVision.
       };
 }
 
-/// Parses a date that may be an ISO-8601 string or a Firestore Timestamp.
 DateTime? _parseDate(dynamic value) {
   if (value == null) return null;
   if (value is DateTime) return value;
@@ -579,8 +500,6 @@ DateTime? _parseDate(dynamic value) {
   return DateTime.tryParse(value.toString());
 }
 
-/// Delivery fee in whole ringgit; non-numeric/negative values clamp to 0
-/// so a corrupt doc can never produce a negative charge at checkout.
 int _parseShippingFee(dynamic value) {
   if (value is num) {
     final fee = value.toInt();
@@ -591,13 +510,6 @@ int _parseShippingFee(dynamic value) {
   return parsed;
 }
 
-/// Re-attaches the server-owned `vision` map to a seller's full-document
-/// product write — the product-side twin of `preserveStoredInvoices`
-/// (lib/models/order.dart). `Product.toJson()` never emits `vision` (the
-/// client cannot write that key), so a plain `txn.set(doc, toJson())` would
-/// silently erase the photo verdict on every seller edit. Returns [json]
-/// unchanged when the stored doc carries no vision map (legacy product or
-/// never analyzed).
 Map<String, dynamic> preserveStoredVision(
   Map<String, dynamic> json,
   Map<String, dynamic>? stored,
@@ -607,22 +519,7 @@ Map<String, dynamic> preserveStoredVision(
 }
 
 // ── Product-level shipping math (checkout + order attribution) ─────────────
-//
-// The multi-supplier shipping rule, kept in ONE place:
-//   1. Each distinct product line adds its `shippingCharge` to the order
-//      exactly ONCE — quantity never multiplies shipping (carts merge by
-//      productId, so there is one line per product).
-//   2. Per-supplier shipping = sum of that supplier's product charges.
-//   3. Order shipping = sum of the per-supplier charges.
-//   4. The store free-shipping threshold in `computePriceBreakdown` may
-//      zero the WHOLE order's fee (binary 0-or-full). When it does, every
-//      supplier's share is zeroed too — so shares always sum to
-//      `Order.shippingFee` (see `Order.shippingShareFor`).
 
-/// Groups the shipping charges of [products] by their resolved supplier:
-/// `{supplierUid: shareOfOrderShipping}`. Products with no charge are
-/// skipped (their supplier's share reads as 0); a product id appearing
-/// twice still bills once.
 Map<String, int> shippingBySupplierFor(Iterable<Product> products) {
   final bySupplier = <String, int>{};
   final seenProductIds = <String>{};
@@ -637,8 +534,5 @@ Map<String, int> shippingBySupplierFor(Iterable<Product> products) {
   return bySupplier;
 }
 
-/// Order-level shipping fee derived from [products] — the sum of
-/// [shippingBySupplierFor] shares. Pass this to
-/// `computePriceBreakdown(shippingFee: …)` instead of any store constant.
 int totalShippingFor(Iterable<Product> products) =>
     shippingBySupplierFor(products).values.fold(0, (sum, v) => sum + v);

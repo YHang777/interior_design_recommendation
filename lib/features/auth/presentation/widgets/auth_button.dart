@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 
-/// Reusable styled button for auth screens.
-/// Gradient background with scale animation on press for tactile feedback.
 class AuthButton extends StatefulWidget {
   const AuthButton({
     super.key,

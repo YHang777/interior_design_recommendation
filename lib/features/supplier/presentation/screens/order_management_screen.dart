@@ -15,10 +15,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier's incoming orders. Totals shown per order are for THIS supplier
-/// only — their line items plus their own shipping share — so shared
-/// (multi-seller) orders never leak other sellers' money figures into the
-/// summary row.
 class OrderManagementScreen extends ConsumerStatefulWidget {
   const OrderManagementScreen({super.key});
 
@@ -98,7 +94,6 @@ class _OrderManagementScreenState
     try {
       final _ = await ref.refresh(supplierOrdersProvider(uid).future);
     } catch (_) {
-      // Best effort — the stream reports errors on its own.
     }
   }
 
@@ -195,8 +190,6 @@ class _OrderTile extends StatelessWidget {
   final int myCount;
   final int myTotal;
 
-  /// This supplier's delivery-charge share on the order (0 = they charge
-  /// no shipping); shown under the items total when non-zero.
   final int myShipping;
   final VoidCallback onTap;
 

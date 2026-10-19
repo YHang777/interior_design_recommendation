@@ -1,7 +1,3 @@
-// Tests for the customer dashboard stats layer (pure functions + model).
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_plan.dart';
@@ -210,7 +206,6 @@ void main() {
         limit: 3,
       );
       expect(entries, hasLength(3));
-      // Newest first: the Sep-5 order survives the cut.
       expect(entries.first.title, 'Order ORD-4 placed');
     });
 

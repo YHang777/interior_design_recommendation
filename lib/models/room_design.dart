@@ -1,13 +1,12 @@
-/// A furniture item placed on a room floor plan.
 class FurniturePlacement {
   final String id;
   final String name;
   final String iconName;
-  final double x; // cm offset from left
-  final double y; // cm offset from top
-  final double width; // cm
-  final double height; // cm
-  final double rotation; // degrees (0–360)
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final double rotation;
   final String? imageAsset;
 
   const FurniturePlacement({
@@ -79,11 +78,10 @@ class FurniturePlacement {
   }
 }
 
-/// A saved room design with furniture layout.
 class RoomDesign {
   final String id;
   final String name;
-  final String roomType; // living_room, bedroom, kitchen, bathroom, dining_room, home_office
+  final String roomType;
   final double widthCm;
   final double heightCm;
   final List<FurniturePlacement> furniture;
@@ -183,7 +181,6 @@ class RoomDesign {
     );
   }
 
-  /// Human-readable room type label.
   String get roomTypeLabel {
     switch (roomType) {
       case 'living_room':
@@ -204,7 +201,6 @@ class RoomDesign {
   }
 }
 
-/// A single entry in the furniture catalog.
 class FurnitureCatalogItem {
   final String name;
   final String iconName;

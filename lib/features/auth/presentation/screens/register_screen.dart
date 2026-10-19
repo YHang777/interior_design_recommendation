@@ -100,8 +100,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      // Header-less: in-body PageHeading + pinned FloatingBackButton replace
-      // the old AppBar (same pattern as other pushed screens).
       body: Stack(
         children: [
           SafeArea(
@@ -118,7 +116,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     ),
                     const SizedBox(height: 20),
 
-              // -- Role selector --
               SegmentedButton<UserRole>(
                 segments: const [
                   ButtonSegment(
@@ -159,7 +156,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
               ],
 
-              // -- Account section --
               _sectionLabel('Account Details'),
               TextFormField(
                 controller: _nameCtrl,
@@ -174,7 +170,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               const SizedBox(height: 16),
 
-              // -- Supplier-only business contact fields --
               if (_isSupplier) ...[
                 TextFormField(
                   controller: _phoneCtrl,
@@ -198,7 +193,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
               ],
 
-              // -- Contact section --
               _sectionLabel('Login Credentials'),
               TextFormField(
                 controller: _emailCtrl,
@@ -238,8 +232,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     prefixIcon: Icon(Icons.lock_outlined)),
               ),
               const SizedBox(height: 32),
-              // Min-height only — a tight 52px clipped the label's descenders
-              // (see login_screen.dart); this grows with text scale instead.
               ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 52),
                 child: ElevatedButton(

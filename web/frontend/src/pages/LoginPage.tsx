@@ -3,7 +3,6 @@ import { useAuth } from '../state/AuthContext';
 import { ApiError } from '../api/client';
 import {
   IconAlertTriangle,
-  IconCheck,
   IconEye,
   IconEyeOff,
   IconLock,
@@ -12,26 +11,26 @@ import {
 
 /** Map the backend's structured `{error:{code}}` to plain-language copy. */
 function describeLoginError(err: unknown): string {
-  if (!(err instanceof ApiError)) return 'Sign-in failed unexpectedly. Try again.';
+  if (!(err instanceof ApiError)) return 'Sign-in failed. Try again.';
   switch (err.code) {
     case 'BAD_CREDENTIALS':
-      return 'Incorrect email or password. Check both fields and try again.';
+      return 'Incorrect email or password.';
     case 'NOT_ADMIN':
-      return 'This account is valid but doesn’t have admin access. See “Getting access” below.';
+      return 'This account has no admin access.';
     case 'UNAUTHENTICATED':
-      return 'Your credentials couldn’t be verified. Please try signing in again.';
+      return 'Could not verify your credentials.';
     case 'LOGIN_NOT_CONFIGURED':
-      return 'Password sign-in isn’t set up on the server. The FIREBASE_WEB_API_KEY environment variable is missing — whoever deployed this console must add it (see the deploy README) and restart the API.';
+      return 'Password sign-in is not set up. Set FIREBASE_WEB_API_KEY.';
     case 'FIREBASE_NOT_CONFIGURED':
-      return 'The server has no Firebase credentials configured (FIREBASE_SERVICE_ACCOUNT_JSON / SERVICE_ACCOUNT_PATH). Ask whoever deployed this console to set them.';
+      return 'Firebase credentials are missing on the server.';
     case 'ACCOUNT_DISABLED':
-      return 'This account has been disabled. Contact an administrator.';
+      return 'This account is disabled.';
     case 'RATE_LIMITED':
-      return 'Too many sign-in attempts. Wait a minute before trying again.';
+      return 'Too many attempts. Wait a minute.';
     case 'NETWORK_ERROR':
-      return 'Can’t reach the admin API. Check your internet connection — or the backend may be down.';
+      return 'Cannot reach the admin API.';
     case 'IDENTITY_TOOLKIT_ERROR':
-      return 'Sign-in failed upstream at Firebase. Try again in a moment.';
+      return 'Sign-in failed at Firebase. Try again.';
     case 'VALIDATION_ERROR':
       return err.message;
     default:
@@ -98,24 +97,10 @@ export function LoginPage() {
           </span>
         </div>
         <div className="login-aside-copy">
-          <h1>The marketplace, under watch.</h1>
-          <p>
-            Monitor customers and suppliers, approve sellers, and keep accounts healthy — one
-            calm console for the whole interior-design marketplace.
-          </p>
-          <ul>
-            <li>
-              <IconCheck size={15} /> Approve or reject suppliers in one click
-            </li>
-            <li>
-              <IconCheck size={15} /> Help users recover or reset passwords
-            </li>
-            <li>
-              <IconCheck size={15} /> Guarded account deletion with type-to-confirm
-            </li>
-          </ul>
+          <h1>Marketplace admin.</h1>
+          <p>Users, sellers, catalog and orders.</p>
         </div>
-        <div className="login-foot">Interior Design Marketplace · Admin operations</div>
+        <div className="login-foot">Intellar · Admin console</div>
       </aside>
 
       <main className="login-main">
@@ -131,7 +116,7 @@ export function LoginPage() {
           </div>
 
           <h1>Sign in</h1>
-          <p className="login-sub">Use an administrator account to enter the console.</p>
+          <p className="login-sub">Administrator account required.</p>
 
           <div className="login-form">
             <div className="field">
@@ -223,13 +208,6 @@ export function LoginPage() {
                 'Sign in'
               )}
             </button>
-          </div>
-
-          <div className="login-help">
-            <strong>Getting access.</strong> This console isn’t self-serve — only accounts on the
-            admin allowlist can enter. Ask an existing administrator to add your Firebase UID to{' '}
-            <code>ADMIN_UIDS</code>, or to grant the custom claim with{' '}
-            <code>npm run claim-admin -- &lt;uid&gt;</code> (then sign out and back in).
           </div>
         </form>
       </main>

@@ -7,14 +7,12 @@ import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
 import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
 
-// Type definitions to enforce a consistent use of the API
 typedef ARViewCreatedCallback = void Function(
     ARSessionManager arSessionManager,
     ARObjectManager arObjectManager,
     ARAnchorManager arAnchorManager,
     ARLocationManager arLocationManager);
 
-/// Factory method for creating a platform-dependent AR view
 abstract class PlatformARView {
   factory PlatformARView(TargetPlatform platform) {
     switch (platform) {
@@ -32,11 +30,9 @@ abstract class PlatformARView {
       @required ARViewCreatedCallback arViewCreatedCallback,
       @required PlaneDetectionConfig planeDetectionConfig});
 
-  /// Callback function that is executed once the view is established
   void onPlatformViewCreated(int id);
 }
 
-/// Instantiates [ARSessionManager], [ARObjectManager] and returns them to the widget instantiating the [ARView] using the [arViewCreatedCallback]
 createManagers(
     int id,
     BuildContext? context,
@@ -51,8 +47,6 @@ createManagers(
       ARObjectManager(id), ARAnchorManager(id), ARLocationManager());
 }
 
-/// Android-specific implementation of [PlatformARView]
-/// Uses Hybrid Composition to increase peformance on Android 9 and below (https://flutter.dev/docs/development/platform-integration/platform-views)
 class AndroidARView implements PlatformARView {
   late BuildContext? _context;
   late ARViewCreatedCallback? _arViewCreatedCallback;
@@ -72,9 +66,7 @@ class AndroidARView implements PlatformARView {
     _context = context;
     _arViewCreatedCallback = arViewCreatedCallback;
     _planeDetectionConfig = planeDetectionConfig;
-    // This is used in the platform side to register the view.
     final String viewType = 'ar_flutter_plugin_2';
-    // Pass parameters to the platform side.
     final Map<String, dynamic> creationParams = <String, dynamic>{};
 
     return AndroidView(
@@ -87,7 +79,6 @@ class AndroidARView implements PlatformARView {
   }
 }
 
-/// iOS-specific implementation of [PlatformARView]
 class IosARView implements PlatformARView {
   BuildContext? _context;
   ARViewCreatedCallback? _arViewCreatedCallback;
@@ -107,9 +98,7 @@ class IosARView implements PlatformARView {
     _context = context;
     _arViewCreatedCallback = arViewCreatedCallback;
     _planeDetectionConfig = planeDetectionConfig;
-    // This is used in the platform side to register the view.
     final String viewType = 'ar_flutter_plugin_2';
-    // Pass parameters to the platform side.
     final Map<String, dynamic> creationParams = <String, dynamic>{};
 
     return UiKitView(
@@ -122,24 +111,15 @@ class IosARView implements PlatformARView {
   }
 }
 
-/// If camera permission is granted, [ARView] creates a platform-dependent view from the factory method [PlatformARView]. To instantiate an [ARView],
-/// the calling widget needs to pass the callback function [onARViewCreated] to which the function [createManagers] returns managers such as the
-/// [ARSessionManager] and the [ARObjectManager]. [planeDetectionConfig] is passed to the constructor to determine which types of planes the underlying
-/// AR frameworks should track (defaults to none).
-/// If camera permission is not given, the user is prompted to grant it. To modify the UI of the prompts, the following named parameters can be used:
-/// [permissionPromptDescription], [permissionPromptButtonText] and [permissionPromptParentalRestriction].
 class ARView extends StatefulWidget {
   final String permissionPromptDescription;
   final String permissionPromptButtonText;
   final String permissionPromptParentalRestriction;
 
-  /// Function to be called when the AR View is created
   final ARViewCreatedCallback onARViewCreated;
 
-  /// Configures the type of planes ARCore and ARKit should track. defaults to none
   final PlaneDetectionConfig planeDetectionConfig;
 
-  /// Configures whether or not to display the device's platform type above the AR view. Defaults to false
   final bool showPlatformType;
 
   ARView(
@@ -206,7 +186,7 @@ class _ARViewState extends State<ARView> {
   build(BuildContext context) {
     switch (_cameraPermission) {
       case (PermissionStatus
-          .limited): //iOS-specific: permissions granted for this specific application
+          .limited):
       case (PermissionStatus.granted):
         {
           return Column(children: [
@@ -231,7 +211,7 @@ class _ARViewState extends State<ARView> {
           ));
         }
       case (PermissionStatus
-          .permanentlyDenied): //Android-specific: User needs to open Settings to give permissions
+          .permanentlyDenied):
         {
           return Center(
               child: Column(
@@ -246,7 +226,6 @@ class _ARViewState extends State<ARView> {
         }
       case (PermissionStatus.restricted):
         {
-          //iOS only
           return Center(child: Text(permissionPromptParentalRestriction));
         }
       default:

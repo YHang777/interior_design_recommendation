@@ -17,8 +17,6 @@ import '../../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../homeowner/presentation/widgets/chat_suggestion_card.dart';
 import '../../providers/marketplace_providers.dart';
 
-/// Quick-question chips for the product-detail panel — one per fact the
-/// focused product carries.
 const List<String> kProductDetailQuickQuestions = [
   'Is it in stock?',
   'What are the dimensions?',
@@ -27,30 +25,14 @@ const List<String> kProductDetailQuickQuestions = [
   'Is it eco-friendly?',
 ];
 
-/// Quick-question chips for the marketplace listing panel — browse-shaped
-/// questions over the visible catalogue.
 const List<String> kMarketplaceQuickQuestions = [
   "What's on sale?",
   'Show me eco-friendly picks',
   'What fits a small living room?',
 ];
 
-/// The household-fit question, always offered first. The panel also ships
-/// the buyer's saved style/room from the AI tab with every request, so the
-/// model judges the listing against their actual home, not a guess.
 const String kFitHomeQuestion = 'Does it fit my home?';
 
-/// The compact Q&A sheet the floating robot opens.
-///
-/// Holds no history of its own: the host owns the [messages] list, so the
-/// transcript survives the sheet closing and reopening within a screen
-/// visit without ever touching the AI tab's saved-chat store. Chips fill
-/// the input and never auto-send (house convention). Every request rides
-/// the same backend proxy as the AI tab (Gemini key stays server-side)
-/// and carries the catalogue plus the buyer's saved style/room, so the
-/// model can answer "does this fit my home?" against their real context.
-/// Failures land as a model bubble via `userMessage` — short plain
-/// sentences, never raw SDK text.
 class RobotChatPanel extends ConsumerStatefulWidget {
   const RobotChatPanel({
     super.key,
@@ -64,19 +46,14 @@ class RobotChatPanel extends ConsumerStatefulWidget {
 
   final String title;
 
-  /// Non-null on the product-detail screen: shows the focus banner and
-  /// switches the chips/hints to the single-product phrasing.
   final Product? focusProduct;
 
-  /// Catalogue context sent with every request.
   final List<Product> products;
 
   final List<String> quickQuestions;
 
-  /// Shared transcript, owned by the host — mutated in place.
   final List<ChatMessage> messages;
 
-  /// Called after every mutation so the host can rebuild if it needs to.
   final VoidCallback onMessagesChanged;
 
   @override
@@ -87,7 +64,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
 
-  /// Render-time only — drives the typing bubble, never a transcript entry.
   bool _sending = false;
 
   @override
@@ -105,11 +81,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
     });
   }
 
-  /// The buyer's saved design-chat context: the open session's shortcut if
-  /// it carries one, else the newest saved session that does. This is the
-  /// app's on-device signal for how their home is styled — the proxy folds
-  /// it into the system prompt, so "does this fit my home?" questions have
-  /// something real to judge against. Read at send time, never watched.
   ChatSession? _householdSession() {
     final history = ref.read(chatHistoryProvider);
     final active = history.activeSession;
@@ -126,9 +97,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _sending) return;
 
-    // Transcript oldest → newest for the proxy, built before the typing
-    // bubble exists (no '...' sentinel ever ships) and capped so a long
-    // chat stays a small request.
     var transcript = <ChatTurn>[
       for (final m in widget.messages) ChatTurn(role: m.role, text: m.text),
       ChatTurn(role: 'user', text: text),
@@ -147,11 +115,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
 
     try {
       final home = _householdSession();
-      // The panel's list is the buyer's filtered browse on the marketplace
-      // and the single focused listing on a product page. That scope is
-      // deliberate — the filter is what the buyer asked to see — so the
-      // mapper's newest-first window is what surfaces a new listing that
-      // matches, rather than splicing in things the filter ruled out.
       final result = await ref.read(chatDatasourceProvider).send(
             messages: transcript,
             style: home?.style,
@@ -159,8 +122,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
             products: productsToChatContext(widget.products),
           );
       if (!mounted) return;
-      // Re-read after the await: suggestions hydrate against the freshest
-      // catalogue, not the snapshot the request was built from.
       final live =
           ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
       widget.messages.add(ChatMessage(
@@ -198,8 +159,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
     });
   }
 
-  /// Add-to-cart from a suggestion card — same live-check the AI screen
-  /// uses: the snapshot may have aged, so the LIVE catalogue decides.
   void _addToCart(ChatSuggestionSnapshot suggestion) {
     final products =
         ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
@@ -225,9 +184,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
 
   @override
   Widget build(BuildContext context) {
-    // Watched (not just read at send) so the history's async load starts
-    // when the sheet opens — the household style/room is then ready well
-    // before anyone finishes typing a question.
     ref.watch(chatHistoryProvider);
     final messages = widget.messages;
     final focus = widget.focusProduct;
@@ -306,9 +262,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 FilterChipBar<String>(
-                  // Fit question first — it's the headline ask, and the
-                  // horizontal chip row only guarantees the first chip is
-                  // on-screen at phone width.
                   options: [kFitHomeQuestion, ...widget.quickQuestions],
                   selected: null,
                   onSelected: _fillInput,
@@ -329,9 +282,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
                           key: const ValueKey('robot-chat-input'),
                           controller: _msgCtrl,
                           style: GoogleFonts.poppins(fontSize: 14),
-                          // Opt out of the theme's filled grey box — inside
-                          // the rounded pill it painted as a square-around-
-                          // the-hint.
                           decoration: InputDecoration(
                             hintText: focus != null
                                 ? 'Ask about this product...'
@@ -474,7 +424,6 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
   }
 }
 
-/// Compact "which product am I asking about" banner on the detail screen.
 class _FocusBanner extends StatelessWidget {
   const _FocusBanner({required this.product});
 

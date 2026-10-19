@@ -1,24 +1,6 @@
-// Tests for the pure Tripo poll-loop state machine (nextPollStep).
-//
-// The generator's poll loop calls nextPollStep once per iteration with the
-// observed facts (deadline / transient failure / server status) and maps the
-// returned PollOutcome onto the product doc:
-//  - the 5-minute deadline is checked FIRST and leaves the doc `generating`
-//    with its task id (server-side task may still finish; boot-resume re-polls
-//    the same task — free);
-//  - consecutive transient failures count and, after
-//    maxConsecutiveTransientErrors, stop the loop (task id survives so an
-//    explicit Retry re-polls the same — already paid for — task);
-//  - any well-formed reply resets the transient streak;
-//  - `success` / `failed` / `cancelled` are terminal; everything else keeps
-//    polling.
-//
-// Pure Dart — no widgets, no Firebase, no filesystem.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/services/model_generation/tripo_poll_state.dart';
 
-/// nextPollStep with convenient defaults for a healthy iteration.
 PollStep step({
   int consecutiveTransients = 0,
   bool deadlineReached = false,

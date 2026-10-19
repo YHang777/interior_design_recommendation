@@ -1,9 +1,15 @@
 import { apiBlob, apiDelete, apiGet, apiPatch, apiPost } from './client';
 import type {
+  AdminOrderDetail,
+  AdminOrderStatus,
+  AdminProductDetail,
   AdminStats,
   AdminUserDetail,
   ApplicationFilter,
+  DeleteProductResult,
   DeleteResult,
+  ListOrdersResult,
+  ListProductsResult,
   ListUsersResult,
   LoginResponse,
   MeResponse,
@@ -11,6 +17,7 @@ import type {
   ProductFlagListResult,
   ProductFlagRow,
   ProductFlagStatusFilter,
+  ProductUpdate,
   ReviewDecisionResult,
   VerificationApplication,
   VerificationListResult,
@@ -96,4 +103,51 @@ export const productFlagsApi = {
       status,
       ...(note !== undefined && note.length > 0 ? { note } : {}),
     }),
+};
+
+export interface ProductsQuery {
+  q?: string;
+  category?: string;
+  status?: 'all' | 'active' | 'inactive';
+  limit?: number;
+  offset?: number;
+}
+
+export const productsApi = {
+  list: (query: ProductsQuery) => {
+    const params = new URLSearchParams();
+    if (query.q) params.set('q', query.q);
+    if (query.category) params.set('category', query.category);
+    params.set('status', query.status ?? 'all');
+    params.set('limit', String(query.limit ?? 50));
+    params.set('offset', String(query.offset ?? 0));
+    return apiGet<ListProductsResult>(`/products?${params.toString()}`);
+  },
+  get: (productId: string) =>
+    apiGet<{ product: AdminProductDetail }>(`/products/${encodeURIComponent(productId)}`),
+  update: (productId: string, patch: ProductUpdate) =>
+    apiPatch<{ product: AdminProductDetail }>(`/products/${encodeURIComponent(productId)}`, patch),
+  remove: (productId: string) =>
+    apiDelete<DeleteProductResult>(`/products/${encodeURIComponent(productId)}`, undefined),
+};
+
+export interface OrdersQuery {
+  status?: AdminOrderStatus | '';
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const ordersApi = {
+  list: (query: OrdersQuery) => {
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    if (query.q) params.set('q', query.q);
+    params.set('limit', String(query.limit ?? 50));
+    params.set('offset', String(query.offset ?? 0));
+    return apiGet<ListOrdersResult>(`/orders?${params.toString()}`);
+  },
+  get: (orderId: string) => apiGet<{ order: AdminOrderDetail }>(`/orders/${encodeURIComponent(orderId)}`),
+  setStatus: (orderId: string, status: AdminOrderStatus) =>
+    apiPatch<{ order: AdminOrderDetail }>(`/orders/${encodeURIComponent(orderId)}`, { status }),
 };

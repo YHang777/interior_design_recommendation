@@ -32,34 +32,34 @@ import { useToast } from '../state/ToastContext';
 
 /* ── Honest error copy (same house style as LoginPage.describeLoginError) ── */
 function describeVerificationError(err: unknown): string {
-  if (!(err instanceof ApiError)) return 'Something went wrong while loading verification data. Try again.';
+  if (!(err instanceof ApiError)) return 'Could not load verification data.';
   switch (err.code) {
     case 'UNAUTHENTICATED':
-      return 'Your session has expired. Sign in again to keep reviewing applications.';
+      return 'Session expired. Sign in again.';
     case 'NOT_ADMIN':
-      return 'This account doesn’t have admin access — only administrators can review verification applications.';
+      return 'Admin access required.';
     case 'HTTP_403':
-      return 'Access denied — this account isn’t an administrator.';
+      return 'Admin access required.';
     case 'NETWORK_ERROR':
       return apiBaseConfigured
-        ? 'Can’t reach the admin API. Check your internet connection — or the backend may be down.'
-        : `Can’t reach the admin API at ${apiBaseUrl}. VITE_API_BASE_URL isn’t set for this build, so the console fell back to the local default — whoever deployed it must set that variable and rebuild.`;
+        ? 'Cannot reach the admin API.'
+        : `Cannot reach the admin API at ${apiBaseUrl}. Set VITE_API_BASE_URL and rebuild.`;
     case 'FIREBASE_NOT_CONFIGURED':
-      return 'The server has no Firebase credentials configured (FIREBASE_SERVICE_ACCOUNT_JSON / SERVICE_ACCOUNT_PATH), so documents can’t be read. Ask whoever deployed this console to set them.';
+      return 'Server Firebase credentials are missing (FIREBASE_SERVICE_ACCOUNT_JSON / SERVICE_ACCOUNT_PATH).';
     case 'APPLICATION_NOT_FOUND':
-      return 'This application doesn’t exist — the supplier hasn’t submitted documents yet.';
+      return 'Application not found.';
     case 'DOCUMENT_NOT_FOUND':
-      return 'That document isn’t part of this application.';
+      return 'Document not found.';
     case 'STORAGE_OBJECT_MISSING':
-      return 'The uploaded file is missing from Storage. Ask the supplier to submit their documents again.';
+      return 'File missing from storage. Ask the supplier to re-upload.';
     case 'INVALID_DOCUMENT_PATH':
-      return 'This application declared an unexpected file location and was refused — re-check the upload before approving.';
+      return 'Unexpected file location. Check the upload.';
     case 'STORAGE_READ_ERROR':
-      return 'The document couldn’t be read from Storage. Try opening it again.';
+      return 'Could not read the document. Try again.';
     case 'USER_NOT_FOUND':
-      return 'No user profile exists for this applicant — restore the profile before deciding.';
+      return 'No profile for this applicant.';
     case 'NOT_SUPPLIER':
-      return 'Only supplier accounts can be verified; this account’s role is not “supplier”.';
+      return 'Only supplier accounts can be verified.';
     case 'VALIDATION_ERROR':
       return err.message;
     default:
@@ -409,14 +409,12 @@ export function VerificationPage({ query = '' }: Props) {
   };
 
   const noteError =
-    rejectAttempted && !note.trim()
-      ? 'A note is required when rejecting — the supplier sees it and needs to know what to fix.'
-      : null;
+    rejectAttempted && !note.trim() ? 'A note is required when rejecting.' : null;
 
   const emptyMessage = debouncedQuery
-    ? 'No applications match your search.'
+    ? 'No matches.'
     : filter === 'pending'
-      ? 'No applications awaiting review — the queue is clear.'
+      ? 'Queue is clear.'
       : `No ${filter} applications.`;
 
   const orderedDocs = detail ? orderDocuments(detail.documents) : [];
@@ -425,12 +423,8 @@ export function VerificationPage({ query = '' }: Props) {
     <div className="page">
       <div className="page-intro">
         <div>
-          <h2>Supplier verification queue</h2>
-          <p className="subtitle">
-            Suppliers submit IC (identity card) images and supporting documents to earn the
-            Verified badge. Inspect every file, then approve or reject — your decision updates the
-            supplier&apos;s status and every one of their listings.
-          </p>
+          <h2>Supplier verification</h2>
+          <p className="subtitle">Inspect identity documents, then approve or reject.</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={refresh} disabled={loading}>
           <IconRefresh size={14} />
@@ -573,7 +567,7 @@ export function VerificationPage({ query = '' }: Props) {
                   <section className="doc-section">
                     <div className="doc-section-head">
                       <h3>Submitted documents</h3>
-                      <span className="panel-note">Click a file to view it full size</span>
+                      <span className="panel-note">Click a file to view</span>
                     </div>
                     <div className="doc-grid">
                       {orderedDocs.map((doc) => {
@@ -613,7 +607,7 @@ export function VerificationPage({ query = '' }: Props) {
                       {orderedDocs.length === 0 && (
                         <div className="doc-empty">
                           <IconBox size={20} />
-                          No documents were attached to this application.
+                          No documents attached.
                         </div>
                       )}
                     </div>
@@ -636,13 +630,12 @@ export function VerificationPage({ query = '' }: Props) {
                           setNote(e.target.value);
                           if (noteError) setRejectAttempted(false);
                         }}
-                        placeholder="e.g. IC photo is blurry — please re-upload a sharper scan."
+                        placeholder="e.g. IC photo is blurry — re-upload."
                         aria-invalid={noteError ? true : undefined}
                         aria-describedby={noteError ? 'review-note-error' : 'review-note-hint'}
                       />
                       <span className="field-hint" id="review-note-hint">
-                        Required when rejecting — the supplier sees this note. Optional when
-                        approving.
+                        Required when rejecting. Optional when approving.
                       </span>
                       {noteError && (
                         <span className="field-error" id="review-note-error" role="alert">
@@ -709,9 +702,8 @@ export function VerificationPage({ query = '' }: Props) {
           width={520}
         >
           <p className="confirm-copy">
-            <strong>{detail.businessName || detail.email}</strong> will be marked{' '}
-            <strong>rejected</strong>: they lose the Verified badge, their listings are unverified
-            for buyers, and they see the note below. They can fix the issue and re-apply.
+            <strong>{detail.businessName || detail.email}</strong> will be{' '}
+            <strong>rejected</strong>. They lose the Verified badge and see the note below.
           </p>
           <div className="note-preview">{note.trim()}</div>
           <div className="modal-actions">
@@ -777,7 +769,7 @@ function DocumentViewer({ url, document: doc }: { url?: string; document: Verifi
     return (
       <div className="viewer-state error-state">
         <IconAlertTriangle size={22} />
-        <span>This file couldn’t be rendered in the browser.</span>
+        <span>This file could not be rendered.</span>
         <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noreferrer">
           Open in a new tab
         </a>
@@ -800,7 +792,7 @@ function DocumentViewer({ url, document: doc }: { url?: string; document: Verifi
     return (
       <object className="viewer-frame" data={url} type="application/pdf">
         <div className="viewer-state">
-          <span>Your browser can’t display this PDF inline.</span>
+          <span>PDF cannot be shown here.</span>
           <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noreferrer">
             Open in a new tab
           </a>
@@ -813,7 +805,7 @@ function DocumentViewer({ url, document: doc }: { url?: string; document: Verifi
     <div className="viewer-state">
       <IconBox size={22} />
       <span>
-        {doc.fileName} ({doc.contentType}) can’t be previewed inline.
+        {doc.fileName} ({doc.contentType}) cannot be previewed.
       </span>
       <a className="btn btn-secondary btn-sm" href={url} download={doc.fileName}>
         Download file

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Shimmer-animated skeleton placeholder cards matching the product grid shape.
-/// Use during async loading instead of a raw spinner.
 class SkeletonLoader extends StatefulWidget {
   const SkeletonLoader({
     super.key,
@@ -78,7 +76,6 @@ class _ShimmerCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image placeholder with shimmer
               Expanded(
                 flex: 3,
                 child: ClipRRect(
@@ -97,7 +94,6 @@ class _ShimmerCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Info placeholders with shimmer
               Expanded(
                 flex: 2,
                 child: Padding(
@@ -188,7 +184,6 @@ class _ShimmerCard extends StatelessWidget {
   }
 }
 
-/// A linear gradient that sweeps left-to-right to create a shimmer effect.
 class _ShimmerOverlay extends StatelessWidget {
   const _ShimmerOverlay({required this.progress});
 

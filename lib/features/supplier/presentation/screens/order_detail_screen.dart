@@ -21,9 +21,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Full order view for a supplier — buyer details, status timeline, the
-/// supplier's own line items (highlighted) next to other sellers' items
-/// (muted), and contextual status actions.
 class SupplierOrderDetailScreen extends ConsumerStatefulWidget {
   const SupplierOrderDetailScreen({super.key, required this.orderId});
 
@@ -36,7 +33,6 @@ class SupplierOrderDetailScreen extends ConsumerStatefulWidget {
 
 class _SupplierOrderDetailScreenState
     extends ConsumerState<SupplierOrderDetailScreen> {
-  /// Status action currently being executed (confirm/ship/deliver/cancel).
   bool _working = false;
 
   // ── Actions ────────────────────────────────────────────────────────────
@@ -93,12 +89,6 @@ class _SupplierOrderDetailScreenState
     }
   }
 
-  /// Accept (pending) or create (a co-seller with no paperwork yet on a
-  /// confirmed/shipped order). Both call the repository's idempotent
-  /// `acceptOrderAndIssueInvoice`: it issues this supplier's invoice, advances
-  /// pending→confirmed only while the order is still pending, and returns the
-  /// existing invoice untouched when one is already there — so Create never
-  /// moves the status. On success the invoice screen opens straight away.
   Future<void> _issueInvoice(Order order, {required bool accepting}) async {
     final confirmed = await showConfirmDialog(
       context,
@@ -115,8 +105,6 @@ class _SupplierOrderDetailScreenState
 
     final supplier = ref.read(currentSupplierProvider);
     if (supplier == null) {
-      // No profile to bill from — same user-facing wording as the failure
-      // path below, never the underlying error.
       if (mounted) {
         showAppSnackbar(
             context,
@@ -172,9 +160,6 @@ class _SupplierOrderDetailScreenState
   }
 
   Future<void> _cancel(Order order) async {
-    // One order can span several sellers: the repository cancels the WHOLE
-    // document (restocking every item), so say that out loud before the
-    // seller commits to a decision that hits their peers too.
     final sharedOrder = order.resolvedSupplierIds.length > 1;
     final confirmed = await showConfirmDialog(
       context,
@@ -287,8 +272,6 @@ class _SupplierOrderDetailScreenState
     final myItems = orderItemsForSupplier(order, uid);
     final others = order.items.where((i) => i.supplierId != uid).toList();
     final myTotal = mySubtotal(order, uid);
-    // Named distinctly from the `myShipping` helper — a local of the same
-    // name would shadow it.
     final shippingShare = myShipping(order, uid);
 
     return ListView(
@@ -349,8 +332,6 @@ class _SupplierOrderDetailScreenState
                 ),
               ),
               const SizedBox(height: 8),
-              // Seller-scoped breakdown: items + THIS seller's delivery share
-              // (never the whole order's fee on a shared order).
               SummaryLine('Your items', Formatters.myr(myTotal)),
               SummaryLine(
                 'Shipping (your charge)',
@@ -524,22 +505,13 @@ class _SupplierOrderDetailScreenState
     final myId = ref.read(currentUserProvider)?.uid ?? '';
 
     // ── Button matrix ──────────────────────────────────────────────────
-    // pending:    [Accept & create invoice]   [Cancel order]
-    // confirmed:  [View invoice]   [Mark as shipped]   [Cancel]
-    // shipped:    [View invoice]   [Mark as delivered]
-    // Terminal states never reach here (build hides the bar).
     if (order.status == OrderStatus.pending) {
-      // Accept IS the forward step: one call confirms the order and issues
-      // this supplier's invoice in the same transaction.
       actions.add(_actionButton(
         label: 'Accept & create invoice',
         filled: true,
         onTap: _working ? null : () => _issueInvoice(order, accepting: true),
       ));
     } else {
-      // Multi-seller fallback: the first seller to accept confirms the order
-      // for everyone, so a later seller may still have no paperwork — offer
-      // Create (idempotent, never moves the status) instead of a dead View.
       final hasInvoice = order.invoiceFor(myId) != null;
       actions.add(_actionButton(
         label: hasInvoice ? 'View invoice' : 'Create invoice',
@@ -559,10 +531,6 @@ class _SupplierOrderDetailScreenState
         ));
       }
     }
-    // Cancellation is offered until the order SHIPS (pending/confirmed) —
-    // the repository rejects it after that (and for terminal states). On a
-    // shared multi-seller order it cancels the entire document; `_cancel`
-    // spells that out in its confirmation dialog.
     if (order.status == OrderStatus.pending ||
         order.status == OrderStatus.confirmed) {
       actions.add(_actionButton(
@@ -629,9 +597,6 @@ class _SupplierOrderDetailScreenState
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.transparent,
                   disabledForegroundColor: AppColors.textHint,
-                  // Tight 52px wrapper — vertical padding stays small because
-                  // three-button bars wrap labels like "Mark as shipped" onto
-                  // a second line.
                   padding:
                       const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                   shape: RoundedRectangleBorder(
@@ -654,8 +619,6 @@ class _SupplierOrderDetailScreenState
           : OutlinedButton(
               onPressed: onTap,
               style: OutlinedButton.styleFrom(
-                // Neutral outline for invoice shortcuts; danger red stays
-                // reserved for Cancel (which passes `danger: true`).
                 foregroundColor:
                     danger ? AppColors.error : AppColors.textPrimary,
                 side: BorderSide(
@@ -710,10 +673,6 @@ class _StatusTimeline extends StatelessWidget {
       (OrderStatus.shipped, 'Shipped', 'On its way to the buyer'),
       (OrderStatus.delivered, 'Delivered', 'Order complete'),
     ];
-    // Per-step dates come from `statusHistory` (the repository writes one
-    // entry per transition); the pending step falls back to `createdAt` for
-    // orders stored before history existed. Steps not yet reached show no
-    // date at all — never a fabricated one.
     return Column(
       children: [
         for (var i = 0; i < steps.length; i++)
@@ -729,9 +688,6 @@ class _StatusTimeline extends StatelessWidget {
     );
   }
 
-  /// Date under a reached step: 'Placed …' for the first node, 'Reached …'
-  /// for later ones, null while the step is ahead of the current status or
-  /// when no timestamp was ever recorded for it.
   String? _stepCaption(int index, OrderStatus status, int currentIndex) {
     if (index > currentIndex) return null;
     final when = index == 0

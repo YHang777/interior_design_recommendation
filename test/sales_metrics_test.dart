@@ -1,8 +1,3 @@
-// Tests for the supplier sales report's pure metric helpers — top products,
-// customer insights, average rating and conversion rate.
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/supplier/presentation/providers/supplier_providers.dart';
 import 'package:interior_design_recommendation/models/order.dart';
@@ -87,20 +82,15 @@ void main() {
   group('topProductsByUnits', () {
     test('sorts by units desc, then revenue desc, and applies the limit', () {
       final orders = [
-        // p1: 2 units × RM50 = RM100
         _order(id: 'o1', items: [
           _item(productId: 'p1', name: 'Chair', unitPrice: 50, quantity: 2),
         ]),
-        // p2: 5 units × RM20 = RM100
         _order(id: 'o2', items: [
           _item(productId: 'p2', name: 'Lamp', unitPrice: 20, quantity: 5),
         ]),
-        // p3: 1 unit × RM300 = RM300 — more revenue but fewer units,
-        // so it must stay behind p1/p2 in a units-first sort.
         _order(id: 'o3', items: [
           _item(productId: 'p3', name: 'Sofa', unitPrice: 300, quantity: 1),
         ]),
-        // p4: 1 unit — beyond the limit.
         _order(id: 'o4', items: [
           _item(productId: 'p4', name: 'Mat', unitPrice: 30, quantity: 1),
         ]),
@@ -134,7 +124,7 @@ void main() {
       expect(top.single.productId, 'p1');
       expect(top.single.name, 'Chair');
       expect(top.single.units, 5);
-      expect(top.single.revenue, 5 * 50); // lineTotal summed, not unit price
+      expect(top.single.revenue, 5 * 50);
     });
 
     test('cancelled orders never count', () {
@@ -181,8 +171,8 @@ void main() {
       expect(insights.repeatCustomers, 0);
       expect(insights.retentionRate, 0);
       expect(insights.repeatPurchaseRate, 0);
-      expect(insights.avgOrderValue, 50); // subtotal + no shipping ÷ 1
-      expect(insights.newCustomers, 1); // first order inside the window
+      expect(insights.avgOrderValue, 50);
+      expect(insights.newCustomers, 1);
     });
 
     test('two orders, same customer → retention 1.0 and repeat 1.0', () {
@@ -203,7 +193,6 @@ void main() {
     });
 
     test('mixed: repeat rate weights orders, not customers', () {
-      // c1 orders twice, c2 once → retention 1/2, repeat 2/3.
       final insights = customerInsights(
         [
           _order(id: 'o1', customerId: 'c1'),
@@ -222,7 +211,6 @@ void main() {
 
     test('new-customer window: last 6 calendar months from now', () {
       final now = DateTime.utc(2026, 9, 5);
-      // Window start = 1 Apr 2026 (current month + the 5 before it).
       final orders = [
         _order(
           id: 'oNew',
@@ -344,7 +332,6 @@ void main() {
         ),
       ];
 
-      // Only o1 involves s1, and it is delivered → 1.0, not 0.5.
       expect(conversionRate(orders, _supplier), 1.0);
       expect(deliveredCount(orders, _supplier), 1);
     });

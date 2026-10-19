@@ -1,9 +1,3 @@
-// Shared Product → chat-proxy mapping: the compact facts line (stock,
-// dims, delivery, seller, eco, sale) travels first inside description so
-// it survives the 200-char clip, hard clips keep a long listing from 400ing
-// the request, vision fields only ship on a verified verdict, and the
-// catalogue/suggestion helpers stay on live active products.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/chat_product_mapper.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/chat_datasource.dart';
@@ -71,7 +65,6 @@ void main() {
             shippingLongDistanceNotice: true)),
         contains('Deliveries over 30 km incur extra charges.'),
       );
-      // A stored fee behind a disabled switch never leaks.
       expect(
         productFactsLine(_product(shippingEnabled: false, shippingFee: 10)),
         contains('Free delivery'),
@@ -131,7 +124,6 @@ void main() {
       expect(mapped.description, hasLength(kChatDescriptionClip));
       expect(
           mapped.description, startsWith('In stock. Free delivery. '));
-      // A fact-dense product still leads with its facts.
       final dense = productToChatProduct(_product(
         stock: 2,
         shippingEnabled: true,
@@ -189,9 +181,6 @@ void main() {
     });
 
     test('newest listing wins a slot even against a price-sorted input', () {
-      // As if the buyer sorted cheap-first: the brand-new piece sits at the
-      // end of the list, which is exactly where the old take(limit) dropped
-      // it and made "what's new?" unanswerable.
       final cheapFirst = [
         _product(id: 'old-a', price: 10, createdAt: DateTime(2026, 1, 1)),
         _product(id: 'old-b', price: 20, createdAt: DateTime(2026, 1, 2)),
@@ -212,9 +201,6 @@ void main() {
     });
 
     test('a new listing inside a filtered browse is still suggested', () {
-      // The robot sends the buyer's filtered view. A product that matches
-      // the filter and was published today must lead the window even though
-      // the list also holds older matches.
       final filteredBrowsed = [
         _product(id: 'sofa-old', createdAt: DateTime(2026, 8, 1)),
         _product(id: 'sofa-new', createdAt: DateTime(2026, 10, 17)),
@@ -227,8 +213,6 @@ void main() {
     });
 
     test('never invents a product the caller did not pass', () {
-      // Scope is the caller's list. A filter that rules a listing out is
-      // doing its job — the mapper must not widen the scope on its own.
       final filteredBrowsed = [_product(id: 'sofa')];
       final ctx = productsToChatContext(filteredBrowsed);
       expect(ctx.map((p) => p.id), ['sofa']);

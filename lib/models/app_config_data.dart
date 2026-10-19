@@ -1,4 +1,3 @@
-/// Membership tier as defined by admin in server config.
 class MembershipTier {
   final String name;
   final int discountPercent;
@@ -25,7 +24,6 @@ class MembershipTier {
       };
 }
 
-/// App-wide configuration loaded from server `/config` endpoint.
 class AppConfigData {
   final int shippingFee;
   final int freeShippingThreshold;
@@ -41,9 +39,6 @@ class AppConfigData {
     required this.membershipTiers,
   });
 
-  /// The highest tier whose `minOrders` threshold the given [orderCount]
-  /// satisfies (tiers sorted by threshold). Falls back to the lowest tier
-  /// (minOrders 0) when none match.
   MembershipTier tierForOrderCount(int orderCount) {
     if (membershipTiers.isEmpty) {
       return const MembershipTier(

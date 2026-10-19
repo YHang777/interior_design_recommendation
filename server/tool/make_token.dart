@@ -1,7 +1,3 @@
-/// Dev helper: prints a valid verification token for curl testing.
-///
-/// Usage (from server/):
-///   VERIFY_TOKEN_SECRET=dev-secret dart run tool/make_token.dart `<uid>` `<email>`
 library;
 
 import 'dart:io';

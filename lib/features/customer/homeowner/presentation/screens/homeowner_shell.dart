@@ -3,8 +3,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../shared/widgets/floating_nav_bar.dart';
 
-/// Homeowner shell with a 6-tab floating pill nav bar.
-/// Uses GoRouter's StatefulNavigationShell for tab persistence.
 class HomeownerShell extends StatelessWidget {
   const HomeownerShell({super.key, required this.navigationShell});
 

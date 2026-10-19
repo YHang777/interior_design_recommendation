@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// Where an AR furniture item should be placed.
 enum PlacementType {
-  /// Must be placed on a horizontal (floor/table) surface.
   floor,
 
-  /// Must be placed on a vertical (wall) surface.
   wall,
 
-  /// Can be placed on any detected surface.
   any,
 }
 
-/// An AR-placeable furniture item backed by a bundled .glb model.
 class ArFurnitureItem {
   const ArFurnitureItem({
     required this.name,
@@ -22,44 +17,19 @@ class ArFurnitureItem {
     this.placement = PlacementType.floor,
   });
 
-  /// Display name (shown in the AR catalog bar).
   final String name;
 
-  /// File name under `assets/models/` (bundled Flutter assets).
-  /// Models are MIT-licensed, sourced from github.com/chayanforyou/ARFurniture.
   final String modelFile;
 
-  /// Target max dimension of the model in meters.
-  /// The plugin passes this as SceneView's `scaleToUnits`, i.e. the model's
-  /// bounding box is normalized to this size when placed.
   final double widthMeters;
 
   final IconData icon;
 
-  /// Which surface type this item should be placed on.
   final PlacementType placement;
 
-  /// URI used with `NodeType.localGLTF2`. The plugin (`ArView.kt`) resolves
-  /// these URIs through Flutter's `getLookupKeyForAsset`, which expects the
-  /// FULL pubspec-relative asset key — the same string used with
-  /// `rootBundle.load`, including the leading `assets/` segment. The files
-  /// live in `assets/models/` (registered in pubspec.yaml under
-  /// `flutter: assets:`), so the key — and therefore the URI — is
-  /// `assets/models/<file>.glb`; at runtime it resolves to
-  /// `flutter_assets/assets/models/<file>.glb` inside the packaged app.
-  /// Do NOT drop the `assets/` prefix: `models/<file>.glb` is not a
-  /// registered asset key and the plugin fails to load the model.
-  /// Paths are case-sensitive at runtime.
   String get uri => 'assets/models/$modelFile';
 }
 
-/// Bundled 3D models for the ROOM SCANNER / SAVED-DESIGNS browsing catalog.
-///
-/// This library is a BROWSING feature only: the room planner lets users pick
-/// a bundled model to place in a scanned room. It is NOT a model source for
-/// marketplace products — a product's AR model is its Tripo AI model
-/// rescaled to the seller's dimensions (see ModelGlbResolver), and no
-/// category-based lookup exists for products anymore.
 class ArFurnitureLibrary {
   ArFurnitureLibrary._();
 
@@ -127,7 +97,6 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
   ];
 
-  /// Placeholder used when no matching 3D model exists for an item.
   static const ArFurnitureItem _fallback = ArFurnitureItem(
       name: 'Furniture',
       modelFile: 'folding_table.glb',
@@ -135,9 +104,6 @@ class ArFurnitureLibrary {
       icon: Icons.chair,
       placement: PlacementType.floor);
 
-  /// Maps the room-scanner catalog `iconName`s to 3D models.
-  /// Entries marked (placeholder) have no exact model and reuse the closest
-  /// available shape — the chip still shows the real item name.
   static const Map<String, ArFurnitureItem> _byIconName = {
     'sofa': ArFurnitureItem(
         name: 'Sofa',
@@ -175,7 +141,6 @@ class ArFurnitureLibrary {
         widthMeters: 1.4,
         icon: Icons.desk,
         placement: PlacementType.floor),
-    // Placeholders — no exact model bundled yet
     'cabinet': ArFurnitureItem(
         name: 'Cabinet',
         modelFile: 'folding_table.glb',
@@ -214,14 +179,11 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
   };
 
-  /// Returns the AR model for a room-scanner catalog `iconName`.
   static ArFurnitureItem forIconName(String? iconName) {
     if (iconName == null) return _fallback;
     return _byIconName[iconName.toLowerCase()] ?? _fallback;
   }
 
-  /// Builds the AR catalog for a list of catalog icon names
-  /// (e.g. the furniture of a saved design), in order, without duplicates.
   static List<ArFurnitureItem> fromIconNames(List<String> iconNames) {
     final result = <ArFurnitureItem>[];
     final seen = <String>{};

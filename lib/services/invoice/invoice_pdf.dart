@@ -7,14 +7,9 @@ import 'package:printing/printing.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/order.dart';
 
-/// Renders a supplier invoice as a PDF and hands it to the OS.
-///
-/// [bytes] is pure document generation (no IO, no plugins) so it can be
-/// unit-tested headless; [share] and [print] wrap the `printing` plugin.
 class InvoicePdf {
   const InvoicePdf._();
 
-  /// Renders [invoice] as PDF bytes. Pure — no IO, no plugins.
   static Future<Uint8List> bytes(OrderInvoice invoice) async {
     final doc = pw.Document();
     doc.addPage(
@@ -22,8 +17,6 @@ class InvoicePdf {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(40),
         build: (context) => _body(invoice),
-        // Long item lists spill onto a second page; the running footer ties
-        // every page back to one invoice number.
         footer: (context) => pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
@@ -37,7 +30,6 @@ class InvoicePdf {
     return doc.save();
   }
 
-  /// Opens the system share sheet for the invoice as `<invoiceNumber>.pdf`.
   static Future<void> share(OrderInvoice invoice) async {
     await Printing.sharePdf(
       bytes: await bytes(invoice),
@@ -45,7 +37,6 @@ class InvoicePdf {
     );
   }
 
-  /// Opens the OS print dialog for [invoice].
   static Future<void> print(OrderInvoice invoice) async {
     await Printing.layoutPdf(
       name: invoice.invoiceNumber,
@@ -54,8 +45,6 @@ class InvoicePdf {
   }
 }
 
-// Column flexes for the items table: item name gets the room, the three
-// numeric columns stay wide enough for "RM 1,250" without wrapping.
 const List<int> _itemFlex = [6, 1, 2, 2];
 
 final pw.TextStyle _cell =
@@ -132,8 +121,6 @@ pw.Widget _parties(OrderInvoice invoice) {
   );
 }
 
-/// One address block. Empty fields are dropped rather than printed blank,
-/// because this copy gets taped to a parcel and read at arm's length.
 pw.Widget _party(String title, String name, List<String> details) {
   final lines = <pw.Widget>[];
   for (final raw in details) {
@@ -157,8 +144,6 @@ pw.Widget _party(String title, String name, List<String> details) {
   );
 }
 
-/// Order/payment reference in one strip so a reader can match the paper to
-/// the app without hunting through the table.
 pw.Widget _referenceStrip(OrderInvoice invoice) {
   final parts = <String>[
     if (invoice.orderNumber.trim().isNotEmpty)
@@ -289,8 +274,6 @@ pw.Widget _totalLine(String label, String value, {bool strong = false}) {
   );
 }
 
-/// Order-level discount/tax exist, but they are not attributable to a single
-/// supplier, so they are stated for reference and never enter [OrderInvoice.total].
 String _adjustmentNote(OrderInvoice invoice) {
   final parts = <String>[
     if (invoice.orderDiscount > 0)

@@ -20,8 +20,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier profile — matching homeowner design with centered avatar,
-/// left-border section cards, and edit/view toggle.
 class SupplierProfileScreen extends ConsumerStatefulWidget {
   const SupplierProfileScreen({super.key});
 
@@ -111,10 +109,6 @@ class _SupplierProfileScreenState
     setState(() => _editing = false);
   }
 
-  /// Runs the two-step delete flow, then — only if the request was actually
-  /// sent — clears local recent searches, refreshes the pending banner and
-  /// tells the person to check their inbox. Failures surface as snackbars
-  /// inside the flow itself.
   Future<void> _deleteAccount(String email) async {
     final ok = await showDeleteAccountFlow(
       context,
@@ -138,9 +132,6 @@ class _SupplierProfileScreenState
       showAppSnackbar(context, 'No email on file', isError: true);
       return;
     }
-    // Same shared helper as Log out / Delete: long half-width buttons,
-    // centered pair, 16px gap (a bespoke AlertDialog here once again
-    // produced narrow, touching buttons).
     final confirmed = await showConfirmDialog(
       context,
       title: 'Reset Password?',
@@ -195,9 +186,6 @@ class _SupplierProfileScreenState
 
   void _goVerification() => pushOnce(context, '/supplier/verification');
 
-  /// Badge action for the current verification status — the one place the
-  /// "what can I do now" choice lives, so it always matches the state
-  /// machine (`none`/`rejected` may apply, `pending` is read-only).
   Widget _verificationAction(AppUser user, VerificationApplication? application) {
     final status =
         resolveVerificationStatus(user.verificationStatus, application);
@@ -240,13 +228,11 @@ class _SupplierProfileScreenState
             _verificationButton(label: 'Re-apply'),
           ],
         );
-      default: // 'none' — never applied
+      default:
         return _verificationButton(label: 'Apply for verification');
     }
   }
 
-  /// Rendered only for statuses the state machine allows ('none'/'rejected'),
-  /// so the button is always live.
   Widget _verificationButton({required String label}) {
     return OutlinedButton.icon(
       onPressed: _goVerification,
@@ -270,8 +256,6 @@ class _SupplierProfileScreenState
     final user = ref.watch(currentUserProvider);
     final productsAsync = ref.watch(marketplaceProductsProvider);
     final supplier = user == null ? null : supplierFromUser(user);
-    // Live application document: the stored profile status only refreshes
-    // with the session, so the admin's decision lands here first.
     final application =
         ref.watch(myVerificationApplicationProvider).valueOrNull;
     final verificationStatus = user == null
@@ -350,7 +334,6 @@ class _SupplierProfileScreenState
                           if (user.isSupplier)
                             _verificationAction(user, application),
                           const SizedBox(height: 14),
-                          // Edit profile button
                           SizedBox(
                             height: 38,
                             child: OutlinedButton.icon(

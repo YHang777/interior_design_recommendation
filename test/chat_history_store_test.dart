@@ -1,7 +1,3 @@
-// On-device chat history store: round-trip fidelity, corruption tolerance,
-// and the size caps that keep the SharedPreferences blob under Android's
-// binder limit.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/chat_session.dart';
 import 'package:interior_design_recommendation/services/chat_history_store.dart';
@@ -90,7 +86,6 @@ void main() {
     final loaded = await store.load();
 
     expect(loaded, hasLength(ChatHistoryStore.maxSessions));
-    // Newest kept: s19..s5; oldest (s0..s4) dropped.
     expect(loaded.first.id, 's19');
     expect(loaded.last.id, 's5');
   });
@@ -108,7 +103,7 @@ void main() {
     final kept = loaded.first.messages;
 
     expect(kept, hasLength(ChatHistoryStore.maxMessagesPerSession));
-    expect(kept.first.text, 'msg 10'); // 0..9 dropped, 10..49 kept
+    expect(kept.first.text, 'msg 10');
     expect(kept.last.text, 'msg 49');
   });
 
@@ -159,7 +154,6 @@ void main() {
     expect(reply.suggestions!.single.price, 1299);
     expect(reply.suggestions!.single.reason, 'Matches your grey floor.');
 
-    // A legacy message with no cards still parses as null/absent.
     final legacy = ChatMessage.fromJson(
         const {'role': 'model', 'text': 'plain', 'createdAt': '2026-10-01T12:00:00Z'});
     expect(legacy.suggestions, isNull);

@@ -1,12 +1,8 @@
-// Automatic FlutterFlow imports
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'index.dart'; // Imports other custom widgets
+import 'index.dart';
 import 'package:flutter/material.dart';
-// Begin custom widget code
-// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-//AR Flutter Plugin
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
@@ -19,7 +15,6 @@ import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 
-//Other custom imports
 import 'package:vector_math/vector_math_64.dart';
 
 class Screenshot extends StatefulWidget {
@@ -100,10 +95,7 @@ class _ScreenshotState extends State<Screenshot> {
   }
 
   Future<void> onRemoveEverything() async {
-    /*nodes.forEach((node) {
-      this.arObjectManager.removeNode(node);
-    });*/
-    // anchors.forEach((anchor)
+
     for (var anchor in anchors) {
       arAnchorManager!.removeAnchor(anchor);
     }
@@ -141,7 +133,6 @@ class _ScreenshotState extends State<Screenshot> {
       bool? didAddAnchor = await arAnchorManager!.addAnchor(newAnchor);
       if (didAddAnchor != null && didAddAnchor) {
         anchors.add(newAnchor);
-        // Add note to anchor
         var newNode = ARNode(
             type: NodeType.webGLB,
             uri:
@@ -166,17 +157,7 @@ class _ScreenshotState extends State<Screenshot> {
           content: Text("Adding Anchor failed"),
         );
       }
-      /*
-      // To add a node to the tapped position without creating an anchor, use the following code (Please mind: the function onRemoveEverything has to be adapted accordingly!):
-      var newNode = ARNode(
-          type: NodeType.localGLTF2,
-          uri: "Models/Chicken_01/Chicken_01.gltf",
-          scale: Vector3(0.2, 0.2, 0.2),
-          transformation: singleHitTestResult.worldTransform);
-      bool didAddWebNode = await this.arObjectManager.addNode(newNode);
-      if (didAddWebNode) {
-        this.nodes.add(newNode);
-      }*/
+
     }
   }
 }

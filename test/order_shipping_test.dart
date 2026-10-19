@@ -1,8 +1,3 @@
-// Tests for product-level shipping settings and order status transitions
-// (the pure logic behind the supplier order management + shipping work).
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/order.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -124,7 +119,7 @@ void main() {
         () {
       final off = _product(id: 'p', supplierId: 's', shippingFee: 12);
       expect(off.shippingEnabled, isFalse);
-      expect(off.shippingCharge, 0); // stored fee must never bill buyers
+      expect(off.shippingCharge, 0);
 
       final on = _product(
           id: 'p', supplierId: 's', shippingEnabled: true, shippingFee: 12);
@@ -136,7 +131,6 @@ void main() {
           .copyWith(shippingEnabled: true, shippingFee: 8);
       expect(p.shippingEnabled, isTrue);
       expect(p.shippingFee, 8);
-      // untouched fields survive
       final notice = p.copyWith(shippingLongDistanceNotice: true);
       expect(notice.shippingEnabled, isTrue);
       expect(notice.shippingLongDistanceNotice, isTrue);
@@ -149,7 +143,7 @@ void main() {
         _product(id: 'a1', supplierId: 's1', shippingEnabled: true, shippingFee: 10),
         _product(id: 'a2', supplierId: 's1', shippingEnabled: true, shippingFee: 5),
         _product(id: 'b1', supplierId: 's2', shippingEnabled: true, shippingFee: 20),
-        _product(id: 'f1', supplierId: 's3'), // free — no share entry
+        _product(id: 'f1', supplierId: 's3'),
       ]);
       expect(shares, {'s1': 15, 's2': 20});
       expect(shares.containsKey('s3'), isFalse);
@@ -165,7 +159,7 @@ void main() {
 
     test('disabled products never contribute', () {
       final shares = shippingBySupplierFor([
-        _product(id: 'a1', supplierId: 's1', shippingFee: 99), // enabled=false
+        _product(id: 'a1', supplierId: 's1', shippingFee: 99),
       ]);
       expect(shares, isEmpty);
       expect(totalShippingFor([
@@ -202,7 +196,7 @@ void main() {
       final o = _order(
         shippingFee: 20,
         supplierIds: ['s1', 's2'],
-        shippingBySupplier: {'s2': 20}, // s1 charges no shipping
+        shippingBySupplier: {'s2': 20},
       );
       expect(o.shippingShareFor('s1'), 0);
       expect(o.shippingShareFor('s2'), 20);
@@ -256,7 +250,7 @@ void main() {
         ..remove('shippingBySupplier');
       final back = Order.fromJson(json);
       expect(back.shippingBySupplier, isEmpty);
-      expect(back.shippingShareFor('s1'), 25); // legacy fallback still works
+      expect(back.shippingShareFor('s1'), 25);
     });
 
     test('malformed share entries are dropped, never invented', () {

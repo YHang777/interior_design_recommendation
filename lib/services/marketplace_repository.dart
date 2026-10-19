@@ -14,14 +14,6 @@ import '../models/review.dart';
 import 'media/media_store.dart';
 import 'model_generation/model_glb_resolver.dart';
 
-/// Firestore-backed marketplace repository — the single source of truth for
-/// products, orders, carts, wishlists and reviews.
-///
-/// Layout:
-/// - `products`        (doc id = product id; `products/{id}/reviews` nested)
-/// - `orders`
-/// - `users/{uid}/cart/{productId}`      → {product: Product json, quantity}
-/// - `users/{uid}/wishlist/{productId}`  → {productId, addedAt}
 class MarketplaceRepository {
   MarketplaceRepository(this._db, {MediaStore? mediaStore})
       : _media = mediaStore ?? MediaStore.instance;
@@ -88,17 +80,6 @@ class MarketplaceRepository {
 
   // ── Products ────────────────────────────────────────────────────────────
 
-  /// Real-time snapshot of all products, newest first.
-  ///
-  /// Sorted in memory, NOT with a Firestore `orderBy`. A server-side sort
-  /// silently excludes every document that does not carry the sort field, and
-  /// older product documents predate the `createdAt` stamp added in
-  /// [createProduct] — no write path backfills it, so an `orderBy('createdAt')`
-  /// query would drop those products from the buyer catalogue *and* from the
-  /// seller's own management list while they still show in the console.
-  ///
-  /// Each document is parsed independently: one malformed document must not
-  /// take the whole catalogue down with it.
   Stream<List<Product>> watchProducts() {
     return _products.snapshots().map((snap) {
       final products = <Product>[];
@@ -115,9 +96,6 @@ class MarketplaceRepository {
     });
   }
 
-  /// Creates a product. Never leaves the id empty (F1): an id is generated
-  /// when the incoming product has none. Also stamps `createdAt` (F6),
-  /// resolves `supplierId` and zeroes fabricated ratings on brand-new items.
   Future<Product> createProduct(Product p) async {
     final isNew = p.id.isEmpty;
     final id = isNew ? _newId() : p.id;
@@ -126,7 +104,6 @@ class MarketplaceRepository {
       supplierId: p.resolvedSupplierId,
       isActive: p.isActive,
       createdAt: p.createdAt ?? DateTime.now(),
-      // F6: new products start at 0.0 rating / 0 count — never fabricate.
       rating: isNew ? 0.0 : p.rating,
       ratingCount: isNew ? 0 : p.ratingCount,
     );
@@ -134,16 +111,6 @@ class MarketplaceRepository {
     return product;
   }
 
-  /// Saves a seller's edits without clobbering concurrent activity:
-  ///
-  /// - The seller's intended stock CHANGE (`p.stock - originalStock`) is
-  ///   applied to the CURRENT document stock (read inside the transaction),
-  ///   so sales that land between the form being opened and the save are
-  ///   preserved instead of being overwritten.
-  /// - Server-side rating/ratingCount aggregates and the original
-  ///   `createdAt` are always kept — callers cannot overwrite them.
-  /// - [removedImageUrls] (network blobs the seller dropped from the
-  ///   gallery) are deleted from Storage best-effort AFTER the doc write.
   Future<Product> updateProduct(
     Product p, {
     required int originalStock,
@@ -166,15 +133,8 @@ class MarketplaceRepository {
         ratingCount: existing.ratingCount,
         supplierId: p.resolvedSupplierId,
         createdAt: p.createdAt ?? existing.createdAt,
-        // Editing a product must never clobber its auto-3D state: ar3d is
-        // owned by the generation pipeline, so the LIVE document's record
-        // (which a running Tripo poll may have advanced to 'ready' between
-        // the form opening and this save) always wins over the form copy.
         ar3d: existing.ar3d,
       );
-      // vision is server-owned (backend photo analysis writes it; the client
-      // never serializes it — see preserveStoredVision), so a full toJson()
-      // write would erase the verdict exactly like it would ar3d above.
       txn.set(doc, preserveStoredVision(updated.toJson(), snapshot.data()));
       return updated;
     });
@@ -184,12 +144,6 @@ class MarketplaceRepository {
     return product;
   }
 
-  /// Deletes a product and, best-effort, the remote media blobs behind its
-  /// network images plus its 3D artifacts (the published model blob and the
-  /// locally cached GLB). Blob failures are logged and swallowed: the
-  /// document delete is authoritative. Note: Cloudinary unsigned uploads
-  /// cannot be deleted client-side, so [MediaStore.deleteByUrl] is a no-op
-  /// today — orphans are reclaimable from the Cloudinary console.
   Future<void> deleteProduct(String id) async {
     final snapshot = await _products.doc(id).get();
     if (snapshot.exists) {
@@ -209,7 +163,6 @@ class MarketplaceRepository {
     await ModelGlbResolver.pruneCacheForProduct(id);
   }
 
-  /// Best-effort deletion for product image blobs.
   Future<void> _deleteRemoteImages(List<String> urls) async {
     for (final url in urls) {
       await _deleteRemoteBlob(url);
@@ -255,20 +208,8 @@ class MarketplaceRepository {
         .map((snap) => snap.docs.map((d) => Order.fromJson(d.data())).toList());
   }
 
-  /// Generates a deterministic order id for idempotent re-submits. Callers
-  /// that may re-try a placement (e.g. after an ambiguous network failure)
-  /// must generate the id ONCE and reuse it, so a retried
-  /// [createOrder] sees the already-committed document and returns it
-  /// instead of charging/decrementing stock a second time.
   static String newOrderId() => _newId();
 
-  /// Creates an order atomically: validates availability/stock inside a
-  /// transaction and decrements stock per item (F1/F2-safe by design).
-  ///
-  /// Idempotent per [Order.id]: an order carrying a non-empty `id` whose
-  /// document already exists (a previous attempt committed before the
-  /// client noticed) is returned as-is — stock is NOT decremented again.
-  /// Orders with an empty `id` fall back to a generated id.
   Future<Order> createOrder(Order order) async {
     final id = order.id.isNotEmpty ? order.id : _newId();
     final orderNumber =
@@ -278,15 +219,11 @@ class MarketplaceRepository {
     return _db.runTransaction((txn) async {
       final doc = _orders.doc(id);
 
-      // Idempotency check first: a doc with this id already exists when a
-      // previous submit committed but its response was lost. Return it
-      // without touching any stock.
       final existing = await txn.get(doc);
       if (existing.exists) {
         return Order.fromJson(existing.data()!);
       }
 
-      // Phase 1 — read product docs to validate.
       final productDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
       for (final item in order.items) {
         final ref = _products.doc(item.productId);
@@ -305,7 +242,6 @@ class MarketplaceRepository {
               '(only ${product.stock} left).');
         }
       }
-      // Phase 2 — apply writes.
       productDocs.forEach((productId, snapshot) {
         final product = Product.fromJson(snapshot.data()!);
         final item = order.items.firstWhere((i) => i.productId == productId);
@@ -317,7 +253,6 @@ class MarketplaceRepository {
         id: id,
         orderNumber: orderNumber,
         createdAt: now,
-        // New orders always start life in the Pending step.
         statusHistory: {OrderStatus.pending.name: now},
       );
       txn.set(doc, toWrite.toJson());
@@ -325,7 +260,6 @@ class MarketplaceRepository {
     });
   }
 
-  /// One-shot fetch of a single order document; null when it does not exist.
   Future<Order?> fetchOrder(String orderId) async {
     if (orderId.isEmpty) return null;
     final snapshot = await _orders.doc(orderId).get();
@@ -333,8 +267,6 @@ class MarketplaceRepository {
     return Order.fromJson(snapshot.data()!);
   }
 
-  /// Real-time stream of a single order document. Emits null while the
-  /// document does not exist (e.g. deleted) so UI can render a fallback.
   Stream<Order?> watchOrder(String orderId) {
     return _orders.doc(orderId).snapshots().map((snapshot) {
       if (!snapshot.exists) return null;
@@ -342,16 +274,6 @@ class MarketplaceRepository {
     });
   }
 
-  /// Read-modify-write of the FULL order document (F2): never a partial
-  /// `{'status': ...}` overwrite.
-  ///
-  /// Runs inside a transaction so concurrent status changes (e.g. two
-  /// suppliers acting on the same order) cannot both win, and validates the
-  /// transition against the CURRENT stored status via the shared pure guard
-  /// `OrderStatus.ensureAdvance`:
-  /// - terminal orders (delivered/cancelled) are immutable;
-  /// - the requested status must be the exact next step of the stored
-  ///   status — illegal jumps are rejected with a readable StateError.
   Future<Order> updateOrderStatus(String orderId, OrderStatus status) async {
     final doc = _orders.doc(orderId);
     return _db.runTransaction((txn) async {
@@ -364,28 +286,13 @@ class MarketplaceRepository {
       OrderStatus.ensureAdvance(current.status, status);
       final updated = current.copyWith(
         status: status,
-        // Record when this step was reached so timelines can date each stage.
         statusHistory: {...current.statusHistory, status.name: now},
       );
-      // Status changes never touch paperwork: the rules only let a customer
-      // update an order while `invoices` is byte-identical, so the stored map
-      // is written back verbatim (see preserveStoredInvoices).
       txn.set(doc, preserveStoredInvoices(updated.toJson(), snapshot.data()!));
       return updated;
     });
   }
 
-  /// Issues [supplierId]'s invoice for [orderId] and — only when the order is
-  /// still `pending` — accepts it (pending → confirmed) in the SAME Firestore
-  /// transaction. An accepted order therefore never exists without paperwork,
-  /// and on a multi-seller order where one seller already accepted, the other
-  /// sellers still issue their own invoices without moving the status again.
-  ///
-  /// Idempotent per supplier: if this supplier already has an invoice, it is
-  /// returned unchanged (invoice number preserved) and nothing is written.
-  ///
-  /// Throws [StateError] when the order is already `cancelled` or `delivered`.
-  /// Returns the new or pre-existing invoice.
   Future<OrderInvoice> acceptOrderAndIssueInvoice({
     required String orderId,
     required String supplierId,
@@ -403,8 +310,6 @@ class MarketplaceRepository {
       final now = DateTime.now();
       final order = Order.fromJson(snapshot.data()!);
 
-      // This supplier already accepted — their invoice is the record, so
-      // return it as-is rather than reissuing a new number.
       final existing = order.invoiceFor(supplierId);
       if (existing != null) return existing;
 
@@ -413,7 +318,6 @@ class MarketplaceRepository {
             'A ${order.status.label.toLowerCase()} order cannot be accepted.');
       }
 
-      // Defaults issuedAt/invoiceNumber so the factory stamps both.
       final invoice = OrderInvoice.issue(
         order: order,
         supplierId: supplierId,
@@ -423,9 +327,6 @@ class MarketplaceRepository {
         supplierEmail: supplierEmail,
       );
 
-      // Only a pending order advances: the first accepting supplier confirms
-      // it, while later suppliers on an already-confirmed/shipped order add
-      // paperwork without touching the status (or re-running ensureAdvance).
       final accepts = order.status == OrderStatus.pending;
       final invoices = {...order.invoices, supplierId: invoice};
       final updated = accepts
@@ -441,12 +342,6 @@ class MarketplaceRepository {
     });
   }
 
-  /// Cancels an order and restores stock for every item, atomically.
-  ///
-  /// Idempotent for an already-cancelled order; any other terminal state
-  /// (delivered) is rejected by the shared `OrderStatus.ensureCancellable`
-  /// guard. Allowed from pending/confirmed/shipped — a multi-supplier order
-  /// is cancelled in FULL for every seller (surfaced in the UI dialog).
   Future<Order> cancelOrder(String orderId) async {
     return _db.runTransaction((txn) async {
       final orderRef = _orders.doc(orderId);
@@ -462,13 +357,11 @@ class MarketplaceRepository {
       for (final item in order.items) {
         productRefs[item.productId] = _products.doc(item.productId);
       }
-      // Read products before writing anything.
       final productSnaps =
           <String, DocumentSnapshot<Map<String, dynamic>>>{};
       for (final entry in productRefs.entries) {
         productSnaps[entry.key] = await txn.get(entry.value);
       }
-      // Restore stock (skip items whose product has since been deleted).
       for (final entry in productSnaps.entries) {
         final snap = entry.value;
         if (!snap.exists) continue;
@@ -483,8 +376,6 @@ class MarketplaceRepository {
         status: OrderStatus.cancelled,
         statusHistory: {...order.statusHistory, OrderStatus.cancelled.name: now},
       );
-      // Cancellation is the customer's own action and must never look like an
-      // invoice edit to the rules — see preserveStoredInvoices.
       txn.set(orderRef, preserveStoredInvoices(updated.toJson(), orderSnap.data()!));
       return updated;
     });
@@ -544,14 +435,6 @@ class MarketplaceRepository {
         .map((snap) => snap.docs.map((d) => Review.fromJson(d.data())).toList());
   }
 
-  /// Adds a review and updates the product's rolling rating atomically.
-  ///
-  /// When [Review.id] is non-empty it is used as the review DOCUMENT id —
-  /// callers in the order flow set `review.id = orderId` so a buyer can
-  /// review each product of an order at most once, and "has this order
-  /// reviewed product X?" becomes a cheap doc read (see
-  /// [fetchReviewForOrder]). Empty ids fall back to a generated id (standalone
-  /// reviews not tied to an order).
   Future<void> addReview(String productId, Review review) async {
     await _db.runTransaction((txn) async {
       final productRef = _products.doc(productId);
@@ -560,10 +443,6 @@ class MarketplaceRepository {
         throw StateError('Product not found: $productId');
       }
 
-      // Order-tied reviews use the ORDER id as their review document id. If
-      // that document already exists this (product, order) pair has been
-      // reviewed — abort BEFORE the aggregate update so a retried submit can
-      // never double-count the rating.
       if (review.id.isNotEmpty) {
         final reviewDoc = _reviews(productId).doc(review.id);
         final reviewSnap = await txn.get(reviewDoc);
@@ -590,12 +469,6 @@ class MarketplaceRepository {
     });
   }
 
-  /// Whether/how the buyer of [orderId] has reviewed [productId].
-  ///
-  /// Review docs written through the order flow carry the ORDER id as their
-  /// document id (see [addReview]), so this is a direct document read on
-  /// `products/{productId}/reviews/{orderId}` rather than a query. Returns
-  /// null when the product has not been reviewed within this order yet.
   Future<Review?> fetchReviewForOrder(String productId, String orderId) async {
     if (productId.isEmpty || orderId.isEmpty) return null;
     final snapshot = await _reviews(productId).doc(orderId).get();
@@ -610,8 +483,6 @@ class MarketplaceRepository {
     return snap.count ?? 0;
   }
 
-  /// One-time bootstrap: seeds the products collection from
-  /// assets/data/products.json when it is empty. Never overwrites data.
   Future<void> seedMarketplaceIfEmpty() async {
     final count = await getProductCount();
     if (count > 0) return;
@@ -634,14 +505,8 @@ class MarketplaceRepository {
             '',
         images: [json['image']?.toString() ?? ''],
         isActive: true,
-        // F6, seed edition: a freshly-seeded collection has zero reviews,
-        // so every seeded row starts at 0.0 rating / 0 count. The old
-        // `?? 4.5` / `?? 12` fallbacks stamped fake social proof on every
-        // demo listing, which then poisoned the rolling aggregate on the
-        // first real review (see backfillRatingsFromReviews).
         rating: 0.0,
         ratingCount: 0,
-        // Stagger createdAt so "Newest" ordering is meaningful at boot.
         createdAt: now.subtract(Duration(days: 3 * i)),
       );
       batch.set(_products.doc(id), product.toJson());
@@ -649,19 +514,6 @@ class MarketplaceRepository {
     await batch.commit();
   }
 
-  /// Recomputes every product's denormalized (rating, ratingCount) from the
-  /// reviews that actually exist, writing only the rows that differ.
-  ///
-  /// The catalogue seed used to stamp fabricated 4.5/12 defaults on every
-  /// demo listing. Those values live on in already-seeded databases, and
-  /// [addReview] builds its rolling aggregate on top of them — a first real
-  /// five-star review would still read as "4.5 (13)". Erasing the fiction
-  /// (no reviews → 0.0 / 0) makes the stored aggregate honest again, and
-  /// every later review rolls up from a truthful baseline.
-  ///
-  /// Idempotent and read-only until a difference is found, so the caller
-  /// gates it behind a one-shot preference flag (see `lib/main.dart`).
-  /// Returns how many product documents were rewritten.
   Future<int> backfillRatingsFromReviews() async {
     final products = await _products.get();
     var batch = _db.batch();
@@ -669,8 +521,6 @@ class MarketplaceRepository {
     var repaired = 0;
     for (final doc in products.docs) {
       final stored = doc.data();
-      // A plain get() (no orderBy) — every review doc counts, including
-      // legacy ones missing the createdAt field a listing query would drop.
       final reviews = await _reviews(doc.id).get();
       final target = aggregateForRatings([
         for (final review in reviews.docs) Review.fromJson(review.data()).rating,
@@ -687,7 +537,6 @@ class MarketplaceRepository {
       });
       repaired++;
       staged++;
-      // Firestore batches cap at 500 writes; ship early and start a new one.
       if (staged == 400) {
         await batch.commit();
         batch = _db.batch();

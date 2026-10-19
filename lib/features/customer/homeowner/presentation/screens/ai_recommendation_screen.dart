@@ -32,12 +32,8 @@ class _AiRecommendationScreenState
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
 
-  /// True while a reply is on the way — drives the typing bubble at render
-  /// time only, so no placeholder is ever persisted in the history.
   bool _sending = false;
 
-  /// Quick-shortcut slots: the chips fill the input with their composed
-  /// phrase; they are also sent as optional context to the proxy.
   String? _chipStyle;
   String? _chipRoom;
 
@@ -72,8 +68,6 @@ class _AiRecommendationScreenState
     super.dispose();
   }
 
-  /// Composed chip phrase shown in the input: 'Modern' + 'Living Room'
-  /// → 'Modern Living Room'.
   String get _composedPhrase =>
       [_chipStyle, _chipRoom].whereType<String>().join(' ').trim();
 
@@ -131,9 +125,6 @@ class _AiRecommendationScreenState
       room: _chipRoom,
     );
 
-    // Transcript oldest → newest for the proxy, built before the typing
-    // bubble exists (no '...' sentinel ever ships) and capped so a long
-    // chat stays a small request.
     final session = ref.read(chatHistoryProvider).activeSession;
     var transcript = <ChatTurn>[
       for (final m in session?.messages ?? const <ChatMessage>[])
@@ -201,9 +192,6 @@ class _AiRecommendationScreenState
   void _openHistorySheet() {
     showModalBottomSheet<void>(
       context: context,
-      // Without this Flutter caps the sheet at 9/16 of the screen, which
-      // beats the sheet's own 0.7-height budget and squeezes the empty
-      // state until it overflows on short windows.
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
@@ -215,13 +203,9 @@ class _AiRecommendationScreenState
 
   @override
   Widget build(BuildContext context) {
-    // Subscribe here rather than in callbacks (Riverpod forbids watch in
-    // callbacks) so the catalogue is loaded and current by first send.
     ref.watch(marketplaceProductsProvider);
     final history = ref.watch(chatHistoryProvider);
 
-    // Re-seed the chip slots whenever another chat is opened (or the active
-    // one is closed) so a reopened session keeps its style/room context.
     ref.listen(chatHistoryProvider, (previous, next) {
       if (previous?.activeSessionId != next.activeSessionId) {
         _chipStyle = next.activeSession?.style;
@@ -370,11 +354,6 @@ class _AiRecommendationScreenState
   // ─── Composer: quick shortcuts above the input ─────────────────────────────
 
   Widget _buildComposer(BuildContext context) {
-    // The shell body's SafeArea already ends exactly at the floating nav
-    // pill's top edge (pinned by ai_composer_nav_geometry_test), so the
-    // composer only needs its own breathing room above the pill — no
-    // extra system-inset math, which used to stack on top of the pill
-    // clearance and pushed the whole composer too high.
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Column(
@@ -406,8 +385,6 @@ class _AiRecommendationScreenState
                   child: TextField(
                     controller: _msgCtrl,
                     style: GoogleFonts.poppins(fontSize: 14),
-                    // Opt out of the theme's filled grey box — inside the
-                    // rounded pill it painted as a square-around-the-hint.
                     decoration: InputDecoration(
                       hintText: 'Ask about designs...',
                       hintStyle: GoogleFonts.poppins(
@@ -452,8 +429,6 @@ class _AiRecommendationScreenState
 
   Widget _buildBubble(ChatMessage msg) {
     final isAI = msg.role == 'model';
-    // Product cards ride under the prose; a message without them renders
-    // exactly as the old plain-text bubble.
     final cards = msg.suggestions ?? const <ChatSuggestionSnapshot>[];
 
     return Align(
@@ -502,11 +477,6 @@ class _AiRecommendationScreenState
     );
   }
 
-  /// Add-to-cart from a suggestion card.
-  ///
-  /// The snapshot may have aged: the listing could be gone or sold out
-  /// since the reply landed, so the LIVE catalogue decides — a stale card
-  /// says so instead of quietly carting dead stock.
   void _addToCart(ChatSuggestionSnapshot suggestion) {
     final products =
         ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
@@ -622,9 +592,6 @@ class _ChatHistorySheet extends ConsumerWidget {
             ),
             if (sessions.isEmpty)
               Flexible(
-                // Scrollable so the fixed-height EmptyState can never
-                // overflow a squeezed sheet; the sheet sizes to its
-                // content instead of force-filling like Expanded did.
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: const EmptyState(

@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Large in-body page title replacing the removed AppBar header.
-///
-/// Carries no horizontal padding of its own — place it as the first child of a
-/// screen's padded scroll column so it lines up with the rest of the content.
 class PageHeading extends StatelessWidget {
   const PageHeading({
     super.key,
@@ -18,11 +14,8 @@ class PageHeading extends StatelessWidget {
   final String title;
   final String? subtitle;
 
-  /// Trailing controls (former `AppBar.actions`) — icon buttons, text buttons,
-  /// gradient chips.
   final List<Widget>? actions;
 
-  /// Rare override for dynamic titles (e.g. wishlist count, AI style name).
   final TextStyle? titleStyle;
 
   @override

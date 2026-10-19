@@ -9,13 +9,7 @@ import 'package:interior_design_recommendation/core/utils/user_errors.dart';
 import 'package:interior_design_recommendation/features/auth/data/datasources/account_deletion_datasource.dart';
 import 'package:interior_design_recommendation/shared/widgets/delete_account_dialogs.dart';
 
-/// Covers the Flutter side of account deletion: the type-to-confirm rule,
-/// the user-facing error surface, the backend contract (paths, headers,
-/// body, status parsing), and the progressive dialog flow.
 void main() {
-  // -------------------------------------------------------------------------
-  // Phrase matching
-  // -------------------------------------------------------------------------
   group('kDeleteAccountPhrase matching', () {
     test('exact phrase passes', () {
       expect(deletionPhraseMatches(kDeleteAccountPhrase), isTrue);
@@ -40,9 +34,6 @@ void main() {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Error surface
-  // -------------------------------------------------------------------------
   group('AccountDeletionException', () {
     test('userMessage returns the short message', () {
       const e = AccountDeletionException('That email does not match.');
@@ -63,9 +54,6 @@ void main() {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // DeletionStatus parsing
-  // -------------------------------------------------------------------------
   group('DeletionStatus.fromJson', () {
     test('parses status and dates (UTC converted to local)', () {
       final status = DeletionStatus.fromJson({
@@ -100,9 +88,6 @@ void main() {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Datasource — backend contract
-  // -------------------------------------------------------------------------
   group('AccountDeletionDatasource', () {
     AccountDeletionDatasource build(
       Future<http.Response> Function(http.Request request) handler, {
@@ -238,9 +223,6 @@ void main() {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Dialog flow
-  // -------------------------------------------------------------------------
   group('showDeleteAccountFlow', () {
     Future<void> pumpHost(
       WidgetTester tester, {
@@ -272,7 +254,6 @@ void main() {
       );
     }
 
-    /// Drives dialog 1 → dialog 2 and returns the confirm finder.
     Future<Finder> openConfirmDialog(WidgetTester tester) async {
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
@@ -298,7 +279,6 @@ void main() {
         onSubmit: (email) async => submittedEmail = email,
       );
 
-      // Dialog 1 content: what is kept, how long recovery lasts.
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       expect(find.text('Delete your account?'), findsOneWidget);
@@ -312,7 +292,6 @@ void main() {
       await tester.tap(find.widgetWithText(ElevatedButton, 'Continue'));
       await tester.pumpAndSettle();
 
-      // Dialog 2 — armed only by the exact phrase.
       expect(find.text('Confirm deletion'), findsOneWidget);
       final confirm = find.widgetWithText(ElevatedButton, 'Request deletion');
       expect(find.byType(TextField), findsOneWidget);
@@ -327,7 +306,6 @@ void main() {
       expect(tester.widget<ElevatedButton>(confirm).onPressed, isNull,
           reason: 'a wrong phrase must not arm confirm');
 
-      // Mixed case + surrounding whitespace still counts.
       await tester.enterText(find.byType(TextField), '  delete my account ');
       await tester.pump();
       expect(
@@ -378,7 +356,7 @@ void main() {
       expect(find.text('No email on file.'), findsOneWidget);
       expect(await flow, isFalse);
 
-      await tester.pumpWidget(const SizedBox()); // dispose the snackbar timer
+      await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets('submission failure shows a friendly snackbar, resolves false',
@@ -405,7 +383,7 @@ void main() {
       );
       expect(find.textContaining('Exception'), findsNothing);
 
-      await tester.pumpWidget(const SizedBox()); // dispose the snackbar timer
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }

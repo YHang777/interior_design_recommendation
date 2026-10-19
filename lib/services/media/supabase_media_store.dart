@@ -8,23 +8,6 @@ import 'package:http/http.dart' as http;
 import '../../config/app_config.dart';
 import 'media_store.dart';
 
-/// Supabase Storage-backed [MediaStore] for GLB models in the hybrid setup
-/// (see [HybridMediaStore]): the free plan's 50 MB per-file cap fits large
-/// textured Tripo output, where Cloudinary's 10 MB cap could reject it.
-///
-/// Uses the Supabase Storage REST API over plain [http] — no SDK needed:
-///  - upload: POST `{url}/storage/v1/object/{bucket}/{path}` with the raw
-///    GLB bytes, `Authorization: Bearer {anon key}` and `x-upsert: true`
-///    (regenerating a product overwrites the previous blob);
-///  - public URL: `{url}/storage/v1/object/public/{bucket}/{path}` — served
-///    to the AR viewer and stored in `product.ar3d.url`;
-///  - delete: DELETE by the path parsed out of the public URL (works when
-///    the bucket's storage policy grants anon DELETE — unlike Cloudinary's
-///    signed-only destroy).
-///
-/// The anon key is public BY DESIGN (like a Firebase API key) — access is
-/// governed by the bucket's storage policies. A demo bucket with public
-/// read and anon write is the intended setup; see the repo README steps.
 class SupabaseMediaStore implements MediaStore {
   SupabaseMediaStore({http.Client? client}) : _client = client ?? http.Client();
 
@@ -74,7 +57,6 @@ class SupabaseMediaStore implements MediaStore {
             headers: {
               'Authorization': 'Bearer $_anonKey',
               'Content-Type': 'model/gltf-binary',
-              // Regenerating a product must overwrite the previous blob.
               'x-upsert': 'true',
             },
             body: bytes,
@@ -102,7 +84,6 @@ class SupabaseMediaStore implements MediaStore {
     final marker = '/storage/v1/object/public/$_bucket/';
     final idx = url.indexOf(marker);
     if (idx < 0) {
-      // Not one of our public URLs — nothing to delete here (best effort).
       debugPrint('[media] Supabase delete skipped (foreign URL): $url');
       return;
     }
@@ -116,7 +97,6 @@ class SupabaseMediaStore implements MediaStore {
           .timeout(_timeout);
       debugPrint('[media] Supabase delete $path: HTTP ${resp.statusCode}');
     } catch (e) {
-      // Best effort — the doc delete is authoritative.
       debugPrint('[media] Supabase delete failed for $path: $e');
     }
   }

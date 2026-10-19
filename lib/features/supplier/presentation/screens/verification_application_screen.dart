@@ -18,15 +18,6 @@ import '../../../auth/data/models/app_user.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier verification application — the only place a supplier submits the
-/// IC + supporting documents an admin later reviews.
-///
-/// Four states, driven by the resolved status (profile field merged with the
-/// live application stream):
-///  - `'none'` / `'rejected'` → the form (rejected shows the admin's note
-///    first so the re-application actually addresses it);
-///  - `'pending'`            → read-only submitted summary;
-///  - `'verified'`           → success state.
 class VerificationApplicationScreen extends ConsumerStatefulWidget {
   const VerificationApplicationScreen({super.key});
 
@@ -43,8 +34,6 @@ class _VerificationApplicationScreenState
   File? _icBack;
   final List<File> _supporting = [];
 
-  // Inline validation — set on submit when a required image is missing,
-  // cleared as soon as the image is picked.
   String? _icFrontError;
   String? _icBackError;
   bool _submitting = false;
@@ -82,16 +71,12 @@ class _VerificationApplicationScreenState
     );
   }
 
-  /// Runs the picker; returns null for every "no file" outcome (dismissed
-  /// sheet, cancelled picker, oversize) after telling the user what
-  /// happened — the caller simply keeps its previous state.
   Future<File?> _pickFile() async {
     final source = await _chooseSource();
     if (source == null) return null;
 
     XFile? picked;
     try {
-      // Light quality trim only — IC text must stay legible, so no maxWidth.
       picked = await _picker.pickImage(source: source, imageQuality: 90);
     } catch (e) {
       if (mounted) {
@@ -168,8 +153,6 @@ class _VerificationApplicationScreenState
             supporting: List.of(_supporting),
           );
       if (!mounted) return;
-      // The live application stream flips this screen to the read-only
-      // "under review" summary — no navigation needed.
       setState(() {
         _icFront = null;
         _icBack = null;
@@ -230,8 +213,6 @@ class _VerificationApplicationScreenState
 
     final application = applicationAsync.valueOrNull;
     if (application == null && applicationAsync.hasError) {
-      // Resolving the status needs this document — guessing one would risk
-      // rendering the form over a pending application.
       return EmptyState(
         icon: Icons.cloud_off_outlined,
         title: 'Could not load your application',
@@ -634,8 +615,6 @@ class _VerificationApplicationScreenState
                 color: AppColors.textPrimary)),
         const SizedBox(height: 8),
         if (application == null)
-          // The profile says pending but no application document exists —
-          // say so instead of rendering an empty list as if nothing was sent.
           Text(
             'No document details are on file for this application. If this '
             'persists, contact support.',

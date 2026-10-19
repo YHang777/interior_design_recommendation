@@ -13,11 +13,6 @@ import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/rating_stars.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Wishlist — favorite products in list rows with move-to-cart.
-///
-/// Sources from the same real-time product stream as the marketplace, so a
-/// product a seller deletes disappears here too; dangling ids (no longer in
-/// the stream) are pruned from the wishlist automatically.
 class WishlistScreen extends ConsumerWidget {
   const WishlistScreen({super.key});
 
@@ -40,12 +35,11 @@ class WishlistScreen extends ConsumerWidget {
     for (final product in addable) {
       ref.read(cartProvider.notifier).addItem(product);
     }
-    // Drop everything that went into the cart; out-of-stock favorites stay.
     ref
         .read(wishlistProvider.notifier)
         .removeAll(addable.map((p) => p.id).toList());
 
-    if (addable.isEmpty) return; // guarded by disabled button; no-op safety.
+    if (addable.isEmpty) return;
     final message = skipped == 0
         ? '${addable.length} item${addable.length == 1 ? '' : 's'} added to cart'
         : '${addable.length} item${addable.length == 1 ? '' : 's'} added to cart · '
@@ -84,7 +78,6 @@ class WishlistScreen extends ConsumerWidget {
         data: (products) {
           final byId = {for (final p in products) p.id: p};
 
-          // Prune ids that no longer exist in the catalogue (fire-and-forget).
           final missing =
               wishlist.where((id) => !byId.containsKey(id)).toList();
           if (missing.isNotEmpty) {
@@ -99,8 +92,6 @@ class WishlistScreen extends ConsumerWidget {
           ];
 
           if (items.isEmpty) {
-            // Wishlist ids hydrate from Firestore asynchronously — wait a
-            // beat before declaring the screen empty to avoid a flash.
             return const _DeferredEmpty();
           }
 
@@ -110,7 +101,6 @@ class WishlistScreen extends ConsumerWidget {
           return Column(
             children: [
               Expanded(
-                // 60px top inset clears the pinned FloatingBackButton.
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
                   children: [
@@ -142,7 +132,6 @@ class WishlistScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              // Pinned "add all" bar
               Container(
                 decoration: BoxDecoration(
                   color: AppColors.surface,
@@ -179,8 +168,6 @@ class WishlistScreen extends ConsumerWidget {
                             ? ElevatedButton.icon(
                                 onPressed: null,
                                 style: ElevatedButton.styleFrom(
-                                  // Tight 52px wrapper: keep the label's line
-                                  // box (e.g. the 'g' in "Nothing") inside.
                                   padding: const EdgeInsets.symmetric(
                                       vertical: 10, horizontal: 16),
                                 ),
@@ -239,8 +226,6 @@ class WishlistScreen extends ConsumerWidget {
   }
 }
 
-/// Waits a short moment for the wishlist ids to hydrate from Firestore,
-/// then shows the real empty state. Replaced instantly if items stream in.
 class _DeferredEmpty extends StatefulWidget {
   const _DeferredEmpty();
 
@@ -272,7 +257,6 @@ class _DeferredEmptyState extends State<_DeferredEmpty> {
   }
 }
 
-/// One wishlist row: image, name, rating, price + move-to-cart / remove.
 class _WishlistRow extends StatelessWidget {
   const _WishlistRow({
     required this.product,
@@ -310,9 +294,6 @@ class _WishlistRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image (no hero — this route lives on the root navigator
-              // while the grid lives in the shell; cross-navigator flights
-              // don't animate, so a plain image keeps things predictable).
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: ProductImage(
@@ -377,8 +358,6 @@ class _WishlistRow extends StatelessWidget {
                         ),
                         if (product.originalPrice != null) ...[
                           const SizedBox(width: 5),
-                          // Shrink rather than ellipsize: a cut price
-                          // ('RM 12,3…') reads as a different number.
                           Flexible(
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
@@ -456,7 +435,6 @@ class _WishlistRow extends StatelessWidget {
   }
 }
 
-/// Grey placeholder row shown while the stream first loads.
 class _RowSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

@@ -1,11 +1,3 @@
-// Unit tests for the pure, headless piece of the AR viewer's product mode:
-// the catalog-entry model (ArProductEntry). No Flutter widgets, no Firebase.
-//
-// Tripo is the only model source: there is no bundled-catalog fallback for
-// products anymore, so these tests cover the entry's strict contract —
-// resolved file drives the placement scale (StateError otherwise), the
-// badge is always 'AI', and a failure reason is carried verbatim.
-
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -46,8 +38,6 @@ Product _product({
 
 const _dims = ProductDimensions(widthM: 1.0, heightM: 1.5, depthM: 0.6);
 
-/// A real GLB on disk whose geometry is exactly the seller's size — what
-/// ModelGlbResolver hands to the viewer after download + rescale.
 File _resolvedGlb(ProductDimensions dims) {
   final bytes = rescaleGlbToDimensions(
     generateWallGlb(
@@ -175,8 +165,6 @@ void main() {
         ArProductEntry(product: _product(ar3d: ready)).badgeText,
         'AI',
       );
-      // No ar3d record yet → still the AI badge (the slot describes what
-      // the model WILL be; there is no other kind anymore).
       expect(
         ArProductEntry(product: _product()).badgeText,
         'AI',
@@ -199,7 +187,6 @@ void main() {
 
     test('productError is carried verbatim and flags the slot as failed',
         () {
-      // Sample of the short customer copy the resolver now produces.
       const reason = "This product's size hasn't been set yet, so it "
           "can't be shown in AR.";
       final entry = ArProductEntry(
@@ -220,14 +207,6 @@ void main() {
   });
 
   // ─── NodeType.fileSystemAppFolderGLB URI form (SceneView contract) ───
-  //
-  // _buildNode passes Uri.file(path).toString() for product GLBs. SceneView
-  // 2.2.1's FileLoader branches on Uri.parse(fileLocation).scheme:
-  //   * scheme == "file"  → reads File(uri.path) from disk  (what we want)
-  //   * no scheme         → context.assets.open(fileLocation) — an Android
-  //     ASSET lookup that can never find a cached file under app_flutter/.
-  // So the file:// scheme is load-bearing; a "simplified" bare path would
-  // break every product model. This guard exists so nobody swaps it.
   group('product GLB URI form', () {
     test('Uri.file(...).toString() carries the file scheme SceneView needs',
         () {
@@ -248,8 +227,6 @@ void main() {
 
     test('a bare filesystem path carries NO file scheme (would hit assets)',
         () {
-      // Dart reports '' (Kotlin's Uri.parse reports null) — either way it
-      // is NOT "file", so SceneView falls into its assets.open() branch.
       expect(Uri.parse('/data/user/0/app_flutter/ar_models/p1.glb').scheme,
           isNot('file'),
           reason: 'documents why _buildNode must NOT pass a raw path');

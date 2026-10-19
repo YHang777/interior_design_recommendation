@@ -12,9 +12,6 @@ import '../../../../../shared/widgets/product_image.dart';
 import '../../../../../shared/widgets/status_badge.dart';
 import '../providers/marketplace_providers.dart';
 
-/// Buyer's order history — live list grouped into status tabs:
-/// All / Processing / Delivered / Cancelled. Cards open the buyer order
-/// detail screen (`/marketplace/orders/:id`).
 class OrderHistoryScreen extends ConsumerWidget {
   const OrderHistoryScreen({super.key});
 
@@ -74,8 +71,6 @@ class OrderHistoryScreen extends ConsumerWidget {
                             ref.invalidate(customerOrdersProvider),
                       ),
                       data: (orders) {
-                        // Newest first; live status changes move cards
-                        // across tabs.
                         final sorted = [...orders]
                           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
                         return TabBarView(
@@ -137,8 +132,6 @@ class OrderHistoryScreen extends ConsumerWidget {
   }
 }
 
-/// One status tab: pull-to-refresh list of order cards, or the tab's own
-/// empty state (empty tabs offer a "Browse" shortcut where useful).
 class _OrdersTab extends ConsumerWidget {
   const _OrdersTab({
     required this.orders,
@@ -183,8 +176,6 @@ class _OrdersTab extends ConsumerWidget {
   }
 }
 
-/// One order: order number + status, date, thumbnail strip, total and any
-/// refund badge. Tap opens the buyer order detail screen.
 class _OrderCard extends StatelessWidget {
   const _OrderCard({required this.order});
 
@@ -223,9 +214,6 @@ class _OrderCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    // The status badge is intrinsic-width, so the id is
-                    // what would get cut — shrink it instead: a truncated
-                    // order number is useless.
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
@@ -314,7 +302,6 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-/// Placeholder cards while the Firestore order stream hydrates.
 class _OrdersSkeleton extends StatelessWidget {
   const _OrdersSkeleton();
 

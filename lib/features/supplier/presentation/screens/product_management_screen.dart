@@ -1,4 +1,3 @@
-// The app's SearchBar (shared/widgets) shadows Flutter's material SearchBar.
 import 'package:flutter/material.dart' hide SearchBar;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,8 +24,6 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../customer/marketplace/presentation/providers/marketplace_providers.dart';
 import '../providers/supplier_providers.dart';
 
-/// Supplier's product catalogue screen: stats, search, status filters and
-/// per-product lifecycle actions (pause/resume, stock edit, edit, delete).
 class ProductManagementScreen extends ConsumerStatefulWidget {
   const ProductManagementScreen({super.key});
 
@@ -44,11 +41,8 @@ class _ProductManagementScreenState
   String _query = '';
   _ProductFilter _filter = _ProductFilter.all;
 
-  /// Optimistic active-state overrides keyed by product id. While an entry
-  /// is present the UI shows this value instead of the streamed one.
   final Map<String, bool> _activeOverride = {};
 
-  /// Product ids with a toggle/stock/delete request in flight.
   final Set<String> _busy = {};
 
   // ── Navigation ─────────────────────────────────────────────────────────
@@ -71,8 +65,6 @@ class _ProductManagementScreenState
     final repo = ref.read(marketplaceRepositoryProvider);
     try {
       await repo.setProductActive(p.id, next);
-      // The stream now reflects the change — drop the override once it
-      // matches the real value.
       if (mounted) {
         setState(() => _activeOverride.remove(p.id));
       }
@@ -167,9 +159,6 @@ class _ProductManagementScreenState
     setState(() => _busy.add(p.id));
     final repo = ref.read(marketplaceRepositoryProvider);
     try {
-      // The stock dialog was seeded from THIS streamed snapshot, so the
-      // seller's change is `stock − p.stock`; the repository applies that
-      // delta to the live document stock inside a transaction.
       await repo.updateProduct(p.copyWith(stock: stock),
           originalStock: p.stock);
       if (mounted) {
@@ -225,27 +214,16 @@ class _ProductManagementScreenState
     }
   }
 
-  /// Retry from the red "3D failed — retry" chip.
   void _retry3D(Product p) => _run3DGeneration(p, force: true);
 
-  /// "Regenerate 3D" overflow action for a product with a healthy model —
-  /// `force` re-submits a fresh Tripo task (or re-stamps the procedural
-  /// ready state), which is exactly what the seller asked for.
   void _regenerate3D(Product p) => _run3DGeneration(p, force: true);
 
-  /// Runs the kick-off and surfaces a snackbar driven by the [GenerationDecision]
-  /// it returned. The decision enum is what guarantees the message matches
-  /// reality: a Retry on a transient failure says the SAME task is being
-  /// re-checked (no extra charge); "Regenerate 3D" on a ready Tripo product
-  /// that is not AI-eligible says the current AI model was KEPT instead of
-  /// silently overwriting it with the procedural model.
   void _run3DGeneration(Product p, {required bool force}) {
     final decision = kickOffProduct3DGeneration(p, force: force);
     if (!mounted) return;
     switch (decision.action) {
       case GenerationAction.submitNewTripo:
       case GenerationAction.stampProcedural:
-        // Work is in flight / a new model will appear shortly.
         showAppSnackbar(
           context,
           decision.message.isEmpty
@@ -256,7 +234,6 @@ class _ProductManagementScreenState
         );
         break;
       case GenerationAction.pollExistingTask:
-        // Free re-check of the already-paid task — no new submission.
         showAppSnackbar(
           context,
           decision.message.isEmpty
@@ -267,7 +244,6 @@ class _ProductManagementScreenState
         );
         break;
       case GenerationAction.none:
-        // Nothing was (re)written — explain why.
         showAppSnackbar(
           context,
           decision.message.isEmpty
@@ -326,9 +302,6 @@ class _ProductManagementScreenState
     final lowCount = lowStockProducts(mine, supplierId).length;
     final visible = _visible(mine);
 
-    // Which empty state is shown is itself diagnostic. Every cause used to
-    // collapse into the same bare page, so "the products page is empty" could
-    // mean five different things with no way to tell them apart from the UI.
     final Widget body;
     if (isLoading) {
       body = const _ProductsSkeletonList();
@@ -347,10 +320,6 @@ class _ProductManagementScreenState
         onAction: _refresh,
       ));
     } else {
-      // An empty catalogue is NOT a separate page: keep the heading, stats,
-      // search and filters and let _content() explain the emptiness in the
-      // list area. Replacing the whole body with a bare EmptyState is what
-      // made this screen look completely empty (no heading, no stats).
       body = _content(
         mine.length,
         activeCount,
@@ -363,11 +332,6 @@ class _ProductManagementScreenState
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      // This screen's Scaffold has no bottomNavigationBar of its own — the
-      // floating pill belongs to the outer supplier shell, which paints it
-      // OVER the body (`extendBody: true`). Scaffold therefore parks the FAB
-      // at the very bottom of the full-height body, i.e. behind the pill.
-      // Lift it by the documented nav clearance so it stays tappable.
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: kFloatingNavBarClearance),
         child: FloatingActionButton(
@@ -390,19 +354,13 @@ class _ProductManagementScreenState
     try {
       final _ = await ref.refresh(marketplaceProductsProvider.future);
     } catch (_) {
-      // Pull-to-refresh is best effort; the stream surfaces errors itself.
     }
   }
 
   Widget _content(
       int total, int active, int low, List<Product> visible, List<Product> allMine,
       {int marketplaceCount = 0}) {
-    // Shown in the LIST AREA when nothing matches — never replaces the page
-    // chrome (heading, stats, search, filters) above it.
     final Widget emptyListArea = total == 0
-        // Nothing of this seller's exists yet. Distinguish "the catalogue is
-        // empty" from "the catalogue is full of products that are not yours" —
-        // the second is not a load failure and must not look like one.
         ? EmptyState(
             icon: Icons.storefront_outlined,
             title: 'No products yet',
@@ -415,8 +373,6 @@ class _ProductManagementScreenState
             actionLabel: 'Add your first product',
             onAction: _goNew,
           )
-        // The catalogue has products but the current filter/search matched
-        // none of them.
         : Padding(
             padding: const EdgeInsets.only(top: 32),
             child: Column(
@@ -473,12 +429,6 @@ class _ProductManagementScreenState
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
                   foregroundColor: Colors.white,
-                  // The theme's ElevatedButton is a full-width 52px CTA
-                  // (`minimumSize: Size(double.infinity, 52)`). PageHeading
-                  // actions sit in a Row, whose non-flex children get
-                  // unbounded main-axis width — an infinite min-width there
-                  // asserts "BoxConstraints forces an infinite width". Size
-                  // this compact chip to its content instead.
                   minimumSize: Size.zero,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -578,7 +528,6 @@ class _ProductManagementScreenState
     );
   }
 
-  /// Keeps empty/error states inside a scrollable so pull-to-refresh works.
   Widget _scrollableState(Widget child) {
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
@@ -614,10 +563,8 @@ class _ProductTile extends StatelessWidget {
   final ValueChanged<bool> onToggleActive;
   final VoidCallback onEditStock;
 
-  /// Retry tap from the red "3D failed" chip.
   final VoidCallback onRetry3D;
 
-  /// "Regenerate 3D" from the overflow menu (ready products only).
   final VoidCallback onRegenerate3D;
   final VoidCallback onDelete;
 
@@ -699,9 +646,6 @@ class _ProductTile extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 5),
-                          // Wrap (not Row): stock + shipping pills plus the
-                          // edit affordance can exceed the text column on
-                          // 360dp screens and would otherwise overflow.
                           Wrap(
                             spacing: 4,
                             runSpacing: 4,
@@ -730,7 +674,6 @@ class _ProductTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
-                // Pause / resume — optimistic with revert on failure.
                 Switch(
                   value: isActive,
                   onChanged: busy ? null : onToggleActive,
@@ -742,10 +685,6 @@ class _ProductTile extends StatelessWidget {
           Divider(height: 1, thickness: 1, color: AppColors.divider),
           Row(
             children: [
-              // Loose Flexible on the three actions: at normal widths they
-              // keep their natural size and the layout is unchanged, but on
-              // narrow screens / large system font scales they share the row
-              // (labels ellipsize) instead of overflowing it.
               Flexible(
                 flex: 3,
                 child: _RowAction(
@@ -765,9 +704,6 @@ class _ProductTile extends StatelessWidget {
                 ),
               ),
               const Spacer(flex: 1),
-              // Regenerate 3D lives in the overflow menu of READY products
-              // (an explicit seller action — it re-submits a paid Tripo task
-              // when one is configured).
               if (product.ar3d?.isReady ?? false)
                 PopupMenuButton<_OverflowAction>(
                   tooltip: 'More actions',
@@ -811,10 +747,6 @@ class _ProductTile extends StatelessWidget {
     );
   }
 
-  /// AR-pipeline status line: a green "3D ready" pill, an amber "3D
-  /// generating…" pill, or a red tappable "3D failed — retry" pill with
-  /// an explanation row underneath. Rows without a 3D state (legacy
-  /// products) show nothing.
   Widget _arStatusRow(Product p) {
     final ar3d = p.ar3d;
     if (ar3d == null) return const SizedBox.shrink();
@@ -899,10 +831,6 @@ class _ProductTile extends StatelessWidget {
     return _Pill(label: 'In stock · ${p.stock}', color: AppColors.success);
   }
 
-  /// At-a-glance delivery setting for this listing — the seller-set fee
-  /// when "Charge for delivery" is on, otherwise an explicit free label.
-  /// Reads `shippingCharge`, so a stored amount with the toggle off never
-  /// misreports as paid shipping.
   Widget _shippingPill(Product p) {
     final charge = p.shippingCharge;
     if (charge > 0) {

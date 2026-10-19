@@ -11,19 +11,11 @@ import '../../features/customer/ar/data/glb_bounds.dart';
 import '../../features/customer/ar/data/glb_rescaler.dart';
 import '../../models/product.dart';
 
-/// Thrown when a product's 3D model cannot be resolved AT ALL. [reason] is
-/// short, plain CUSTOMER copy — customers are never told to edit the
-/// seller's fields. Callers surface it via [userMessage] instead of falling
-/// back to a catalog model. The literal [generatingSentinel] is a control
-/// signal (progress, not an error), checked by the viewer before display.
 class No3dAvailableException implements Exception, UserFacingException {
   const No3dAvailableException([this.reason]);
 
-  /// Sentinel reason: a Tripo task is running — the viewer shows progress
-  /// UI, not this text.
   static const String generatingSentinel = 'generating';
 
-  /// Short customer-facing explanation, or null for the generic line.
   final String? reason;
 
   @override
@@ -38,57 +30,15 @@ class No3dAvailableException implements Exception, UserFacingException {
       : 'No3dAvailableException: $reason';
 }
 
-/// A product's GLB materialized as a local file, ready for AR placement.
 class ResolvedGlb {
   const ResolvedGlb({required this.file});
 
-  /// Absolute path to the GLB on disk (app documents/`ar_models/`).
-  ///
-  /// Feed `Uri.file(file.path).toString()` to
-  /// `ARNode(type: NodeType.fileSystemAppFolderGLB, …)` — the plugin reads
-  /// the file directly. Geometry already spans the seller's exact W×H/D
-  /// meters (grounded at y = 0), so the node's uniform scale is 1.0.
   final File file;
 
   @override
   String toString() => 'ResolvedGlb(${file.path})';
 }
 
-/// Materializes a [Product]'s 3D model as a local GLB file at TRUE size —
-/// the single product-model path in the app.
-///
-/// The ONLY model source is a Tripo AI generation (`ar3d.status == 'ready'`
-/// with an http(s) `url`, downloaded here). There is no procedural
-/// generation, no category-default dimensions, and no bundled-catalog
-/// fallback for products: every failure below throws
-/// [No3dAvailableException] with a specific, actionable reason.
-///
-/// Pipeline: download → validate as GLB → rescale to the SELLER's declared
-/// dimensions via [rescaleGlbToSellerSize] (per-axis when all of W/H/D are
-/// present, uniform (height preferred) when only some are, refused when none
-/// are) → ground at y = 0 → cache.
-///
-/// Failures are loud, not silent — and always CUSTOMER copy (short, plain,
-/// never "edit the seller's dimensions"; seller-side guidance lives in
-/// generation_decider for the supplier UI):
-///  * empty product id → nothing to cache under;
-///  * no seller dimension at all → "size hasn't been set yet";
-///  * `ar3d` not ready (`none` / `generating` / `failed`) → a short
-///    "not ready / check back" line (generation still running is NOT an
-///    error — the caller shows progress);
-///  * download HTTP/network failure → surfaced, never swallowed into a
-///    different model;
-///  * malformed GLB / degenerate geometry → surfaced.
-///
-/// Results are cached in the `ar_models/` subfolder of the app documents
-/// directory, named `<id>_ai<generatedAt>_<dims>.glb` — one file per
-/// product, pruned after each successful write. The cache key carries the
-/// Tripo `generatedAt` (a new AI run replaces the cached download) and the
-/// seller's dims token (a dimension edit re-rescales under a fresh key).
-///
-/// Pure async — the caller awaits; no UI is blocked. The class has NO
-/// Firebase dependency: only the product object and the local filesystem are
-/// touched, so tests run headless with an injected cache directory.
 class ModelGlbResolver {
   ModelGlbResolver({
     Future<Directory> Function()? cacheRootProvider,
@@ -99,22 +49,14 @@ class ModelGlbResolver {
         _http = httpClient ?? http.Client(),
         _downloadTimeout = downloadTimeout;
 
-  /// Folder holding the GLB cache, inside the app documents directory
-  /// (`.../app_flutter/ar_models/` on Android — visible to the AR plugin's
-  /// `fileSystemAppFolder` node type).
   static const String cacheDirName = 'ar_models';
 
   final Future<Directory> Function() _cacheRootProvider;
   final http.Client _http;
   final Duration _downloadTimeout;
 
-  /// Releases the underlying HTTP client. Idempotent.
   void dispose() => _http.close();
 
-  /// Resolves the product's Tripo GLB at the seller's size.
-  ///
-  /// Throws [No3dAvailableException] (with an actionable reason) whenever
-  /// the model cannot be produced — see the class docs for the full list.
   Future<ResolvedGlb> resolveProductGlb(Product product) async {
     final dims = product.dimensions;
     final id = product.id.trim();
@@ -122,10 +64,6 @@ class ModelGlbResolver {
       throw const No3dAvailableException(
           'product id is empty — cannot cache a 3D model for it');
     }
-    // Seller dimensions are the only source of truth for size. Without at
-    // least one declared axis there is no true size to place at → refuse
-    // (never guess, never substitute another model). The copy is CUSTOMER
-    // facing — it never asks the customer to edit the seller's fields.
     if (!hasAnySellerDimension(dims)) {
       throw const No3dAvailableException(
           "This product's size hasn't been set yet, so it can't be shown "
@@ -137,13 +75,10 @@ class ModelGlbResolver {
           "This product doesn't have a 3D view yet. Check back later.");
     }
     if (ar3d.status == 'generating') {
-      // Not an error — the viewer shows generation progress instead.
       throw const No3dAvailableException(
           No3dAvailableException.generatingSentinel);
     }
     if (ar3d.status == 'failed') {
-      // ar3d.error holds SELLER-side generation copy (what to fix in the
-      // product form) — never shown to customers; logged for support only.
       final detail = ar3d.error.trim();
       if (detail.isNotEmpty) {
         debugPrint('[model-3d] ar3d failed for $id: $detail');
@@ -156,22 +91,18 @@ class ModelGlbResolver {
           "This product's 3D view isn't ready yet. Check back later.");
     }
     if (!ar3d.url.startsWith('http')) {
-      // A ready record without a downloadable URL is a legacy / broken
-      // record (the old procedural path could stamp `ready` with url '').
       throw const No3dAvailableException(
           "This product's 3D view isn't ready yet. Check back later.");
     }
 
     final cacheDir = await _ensureCacheDir();
-    final dimsToken = _sanitize(dims!.label); // non-null: guarded above
+    final dimsToken = _sanitize(dims!.label);
     final target = File('${cacheDir.path}${Platform.pathSeparator}'
         '${_sanitize(id)}_${_aiStamp(ar3d)}_$dimsToken.glb');
     if (target.existsSync() && target.lengthSync() > 0) {
       return ResolvedGlb(file: target);
     }
 
-    // Download. ANY failure is a hard stop with a specific CUSTOMER copy —
-    // there is no other model to fall through to.
     final Uint8List bytes;
     try {
       final resp =
@@ -200,12 +131,9 @@ class ModelGlbResolver {
           'and try again.');
     }
 
-    // Validate + resize to the seller's declared size (throws
-    // GlbParseException / GlbRescaleException / MissingDimensionsException
-    // with specifics — all customer-safe copy only).
     final Uint8List prepared;
     try {
-      GlbBounds.fromGlbBytes(bytes); // throws GlbParseException on garbage
+      GlbBounds.fromGlbBytes(bytes);
       prepared = rescaleGlbToSellerSize(bytes, dims);
     } on MissingDimensionsException {
       throw const No3dAvailableException(
@@ -221,9 +149,6 @@ class ModelGlbResolver {
     return ResolvedGlb(file: target);
   }
 
-  /// The cache-stamp segment of a ready network model: the Tripo
-  /// `generatedAt` epoch (a new AI run replaces the cached download), or a
-  /// URL hash for legacy ready docs without a timestamp.
   static String _aiStamp(Ar3dInfo ar3d) {
     final at = ar3d.generatedAt;
     return at != null
@@ -241,7 +166,6 @@ class ModelGlbResolver {
   Future<void> _writeAndPrune(Directory cacheDir, String productId,
       File target, Uint8List bytes) async {
     await target.writeAsBytes(bytes, flush: true);
-    // Keep exactly one cached model per product.
     final prefix = '${_sanitize(productId)}_';
     try {
       for (final f in cacheDir.listSync()) {
@@ -258,8 +182,6 @@ class ModelGlbResolver {
     }
   }
 
-  /// Deletes every cached GLB belonging to [productId]. Best-effort — used
-  /// when a product is deleted so its documents-cache model goes too.
   static Future<void> pruneCacheForProduct(String productId) async {
     if (productId.trim().isEmpty) return;
     try {
@@ -283,7 +205,6 @@ class ModelGlbResolver {
   static String _sanitize(String s) =>
       s.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
 
-  /// Deterministic FNV-1a (model output must not depend on VM hashing).
   static String _fnv1a(String text) {
     var h = 0x811C9DC5;
     for (final c in text.codeUnits) {

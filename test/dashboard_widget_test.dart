@@ -1,10 +1,3 @@
-// Widget tests for the homeowner dashboard's real stats layer.
-//
-// All live sources are overridden with real-shaped data, so the tests
-// prove the screen renders what the providers actually return — and that
-// none of the old hardcoded figures ("RM 5.2K", "Order #1234 Shipped", …)
-// can ever come back.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -79,7 +72,6 @@ Future<void> _pump(WidgetTester tester, {required List<Override> overrides}) asy
       child: const MaterialApp(home: Scaffold(body: DashboardScreen())),
     ),
   );
-  // Let the StreamValues / errors resolve and the rebuild land.
   await tester.pump();
   await tester.pump();
 }
@@ -121,18 +113,14 @@ void main() {
       wishlistCountProvider.overrideWithValue(0),
     ]);
 
-    // Budget tile ← budgetPlanProvider (users/{uid}.budgetPlan).
     expect(find.text('RM 4,200'), findsOneWidget);
 
-    // Purchases: 2 orders − 1 cancelled = 1. Saved Designs: 1 design = 1.
     expect(find.text('1'), findsNWidgets(2));
 
-    // Real activity rows, newest first.
     expect(find.text('Order ORD-42 delivered'), findsOneWidget);
     expect(find.text('Saved “Modern Loft”'), findsOneWidget);
     expect(find.text('1 item · RM 420'), findsOneWidget);
 
-    // The old hardcoded stats can never come back.
     expect(find.text('RM 5.2K'), findsNothing);
     expect(find.text('Order #1234 Shipped'), findsNothing);
     expect(find.text('Budget Alert'), findsNothing);
@@ -153,11 +141,8 @@ void main() {
       wishlistCountProvider.overrideWithValue(0),
     ]);
 
-    // No saved budget → dash, never a placeholder figure.
     expect(find.text('RM —'), findsOneWidget);
-    // Real zeroes for purchases and saved designs.
     expect(find.text('0'), findsNWidgets(2));
-    // Proper empty state instead of invented activity rows.
     expect(find.text('No activity yet'), findsOneWidget);
     expect(find.text('RM 5.2K'), findsNothing);
     expect(find.text('Order #1234 Shipped'), findsNothing);
@@ -174,10 +159,8 @@ void main() {
       wishlistCountProvider.overrideWithValue(0),
     ]);
 
-    // Purchases tile → dash; saved designs still a real 0.
     expect(find.text('—'), findsOneWidget);
     expect(find.text('0'), findsOneWidget);
-    // Feed shows a retryable error card instead of partial fake rows.
     expect(find.text('Could not load activity'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
     expect(find.text('RM 5.2K'), findsNothing);

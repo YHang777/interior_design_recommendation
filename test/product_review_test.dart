@@ -1,10 +1,3 @@
-// Tests for the product review system: the pure star-aggregate math (what
-// addReview commits and what the rating backfill repairs) and the buyer
-// order-detail entry points that gate whether a customer can actually file
-// a review.
-//
-// Widget half runs against an in-memory fake repository — no Firebase.
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -64,20 +57,14 @@ Order _order({OrderStatus status = OrderStatus.pending, int itemCount = 2}) {
   );
 }
 
-/// In-memory stand-in for [MarketplaceRepository]: only the members the
-/// buyer order-detail screen touches are stubbed; anything else throws via
-/// [noSuchMethod] so an accidental new dependency fails loudly in tests.
 class _FakeMarketplaceRepository implements MarketplaceRepository {
   _FakeMarketplaceRepository({
     required this.order,
     Map<String, Review>? reviews,
   }) : reviews = reviews ?? {};
 
-  /// Latest order — pushed on the broadcast stream after every status
-  /// change so the screen's watch rebuilds, like the real Firestore doc.
   Order order;
 
-  /// productId → the review this order already filed for it.
   final Map<String, Review> reviews;
   final List<Review> filedReviews = [];
   final List<OrderStatus> statusChanges = [];
@@ -133,8 +120,6 @@ Future<void> _pumpOrderDetail(
   WidgetTester tester,
   _FakeMarketplaceRepository repo,
 ) async {
-  // Tall surface: "Rate your items" sits far down the order body, and the
-  // ListView only builds children within its cache extent.
   tester.view.physicalSize = const Size(400, 2400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -162,9 +147,7 @@ void main() {
     });
 
     test('later reviews roll over the stored sum, rounded to one decimal', () {
-      // 4.5 × 2 = 9 stars; + 1 → 10/3 = 3.33… → 3.3.
       expect(rollingRating(ratingCount: 2, rating: 4.5, added: 1), 3.3);
-      // 4.0 × 1 + 5 → 9/2 = 4.5.
       expect(rollingRating(ratingCount: 1, rating: 4.0, added: 5), 4.5);
     });
 
@@ -177,7 +160,6 @@ void main() {
         aggregateForRatings(const [5, 4]),
         (rating: 4.5, ratingCount: 2),
       );
-      // 13/3 = 4.33… → 4.3.
       expect(
         aggregateForRatings(const [5, 4, 4]),
         (rating: 4.3, ratingCount: 3),
@@ -185,9 +167,6 @@ void main() {
     });
 
     test('backfill target replaces a fabricated 4.5 (12) honestly', () {
-      // The old seed stamped 4.5/12 on every demo row. With exactly one
-      // five-star review on file the product must read 5.0 (1); with no
-      // reviews at all it must drop to 0.0 (0) instead of keeping the lie.
       expect(
         aggregateForRatings(const [5]),
         (rating: 5.0, ratingCount: 1),
@@ -207,9 +186,7 @@ void main() {
 
       expect(find.text('Rate your items'), findsNothing);
       expect(find.text('Write review'), findsNothing);
-      // Nor can the buyer short-circuit to delivered before it ships.
       expect(find.text('Confirm delivery'), findsNothing);
-      // Sanity: the action bar itself rendered.
       expect(find.text('Cancel order'), findsOneWidget);
     });
 
@@ -232,10 +209,8 @@ void main() {
       await _pumpOrderDetail(tester, repo);
 
       expect(find.text('Rate your items'), findsOneWidget);
-      // p-0 already reviewed, p-1 still open — one entry per item.
       expect(find.text('Write review'), findsOneWidget);
       expect(find.text('Reviewed ✓'), findsOneWidget);
-      // Terminal order: no delivery confirmation to tap.
       expect(find.text('Confirm delivery'), findsNothing);
     });
 
@@ -272,7 +247,6 @@ void main() {
       await tester.tap(find.text('Write review').first);
       await tester.pumpAndSettle();
 
-      // Stars gate the submit: no rating yet, button disabled.
       expect(find.text('Tap the stars to rate'), findsOneWidget);
       final disabledSubmit = find.text('Tap the stars to rate');
       expect(
@@ -285,7 +259,6 @@ void main() {
         isNull,
       );
 
-      // Four stars + a comment → submit lights up and files the review.
       await tester.tap(find.byIcon(Icons.star_border).at(3));
       await tester.pump();
       await tester.enterText(
@@ -297,15 +270,12 @@ void main() {
 
       expect(repo.filedReviews, hasLength(1));
       final filed = repo.filedReviews.single;
-      // Doc id = order id: one review per (product, order), and
-      // "already reviewed?" stays a cheap doc read.
       expect(filed.id, 'o-1');
       expect(filed.orderId, 'o-1');
       expect(filed.rating, 4);
       expect(filed.comment, 'Really comfortable and sturdy.');
       expect(repo.reviews.keys, contains('p-0'));
 
-      // The row flips to Reviewed and the second item stays open.
       expect(find.text('Reviewed ✓'), findsOneWidget);
       expect(find.text('Write review'), findsOneWidget);
     });

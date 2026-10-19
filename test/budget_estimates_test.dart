@@ -1,8 +1,3 @@
-// Tests for the budget planner's live-catalogue estimate logic and the
-// clipboard report builder.
-//
-// Pure Dart — no widgets, no Firebase, no network.
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_estimates.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -76,15 +71,13 @@ void main() {
         _product(category: 'Textiles', price: 80),
       ], ecoFriendly: false);
 
-      // Wall Paint covers Paint + Wall Covering → median(120, 200) = 160.
       expect(lines[0].label, 'Wall Paint');
       expect(lines[0].price, 160);
       expect(lines[0].matches, 2);
 
-      expect(lines[1].price, 300); // Flooring
-      expect(lines[2].price, 900); // Furniture
-      expect(lines[3].price, 150); // Lighting
-      // Accessories = Decor + Textiles → median(60, 80) = 70.
+      expect(lines[1].price, 300);
+      expect(lines[2].price, 900);
+      expect(lines[3].price, 150);
       expect(lines[4].label, 'Accessories');
       expect(lines[4].price, 70);
       expect(lines[4].matches, 2);
@@ -167,7 +160,6 @@ void main() {
       );
       expect(report, contains('Furniture: — (no price data yet)'));
       expect(report, contains('eco-friendly listings only'));
-      // Budget 0 with a 420 estimate → honest over-budget line.
       expect(report, contains('Over budget by RM 420'));
     });
   });

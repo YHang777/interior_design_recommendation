@@ -35,7 +35,7 @@ export function DeleteUserDialog({ user, onClose, onDeleted }: Props) {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError('Deletion failed unexpectedly. Check the backend logs.');
+        setError('Deletion failed. Check the backend logs.');
       }
       setBusy(false);
     }
@@ -52,12 +52,12 @@ export function DeleteUserDialog({ user, onClose, onDeleted }: Props) {
       <div className="danger-box" role="alert">
         <strong>This permanently deletes {user.email}.</strong>
         <ul>
-          <li>The Firebase Auth account is removed — the user can no longer sign in.</li>
-          <li>Their profile, cart and wishlist documents are deleted.</li>
+          <li>Sign-in is removed.</li>
+          <li>Profile, cart and wishlist are deleted.</li>
           <li>
             {user.role === 'supplier'
-              ? 'Their product listings are deactivated (kept for order history).'
-              : 'Past orders are kept for history.'}
+              ? 'Listings are deactivated; orders are kept.'
+              : 'Past orders are kept.'}
           </li>
           <li>This cannot be undone.</li>
         </ul>

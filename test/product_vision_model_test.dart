@@ -1,9 +1,3 @@
-// Photo-verification model: the verdict round-trips, legacy products without
-// it still parse, `Product.toJson()` never emits the server-owned `vision`
-// key, and `preserveStoredVision` re-attaches the stored map around a
-// seller's full-document write (the erasure bug that would otherwise hit
-// every product edit).
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/product.dart';
 
@@ -39,7 +33,7 @@ void main() {
         'summary': 'ok',
         'mismatch': {'flagged': 'yes'},
       });
-      expect(parsed.labels, ['sofa']); // non-strings and blanks dropped
+      expect(parsed.labels, ['sofa']);
       expect(parsed.mismatchFlagged, isFalse);
       expect(parsed.mismatchReason, '');
     });
@@ -71,8 +65,6 @@ void main() {
     test('toJson NEVER emits the server-owned vision key', () {
       final p = product(extra: {'vision': _verdict().toJson()});
       expect(p.toJson().containsKey('vision'), isFalse);
-      // Round-trip loss is expected and correct: vision lives in Firestore,
-      // re-attached on write by preserveStoredVision.
       expect(Product.fromJson(p.toJson()).vision, isNull);
     });
   });
@@ -85,13 +77,12 @@ void main() {
       final vision = _verdict().toJson();
       final out = preserveStoredVision(write, {...stored, 'vision': vision});
       expect(out['vision'], vision);
-      expect(out['name'], 'Edited name'); // the seller's edit still wins
+      expect(out['name'], 'Edited name');
     });
 
     test('leaves the write untouched for legacy/unanalyzed products', () {
       expect(preserveStoredVision(write, stored), same(write));
       expect(preserveStoredVision(write, null), same(write));
-      // A stored `vision: null` means nothing to preserve.
       expect(preserveStoredVision(write, {...stored, 'vision': null}), same(write));
     });
   });

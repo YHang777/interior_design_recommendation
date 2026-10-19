@@ -1,4 +1,3 @@
-/// Shared form validators.
 class Validators {
   Validators._();
 
@@ -48,7 +47,7 @@ class Validators {
 
   static String? phone(String? value) {
     if (value == null || value.trim().isEmpty) {
-      return null; // phone is optional
+      return null;
     }
     final phoneRegex = RegExp(r'^\+?[\d\s()-]{8,15}$');
     if (!phoneRegex.hasMatch(value.trim())) {

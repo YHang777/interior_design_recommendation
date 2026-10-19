@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 
-/// Horizontal scrollable row of selectable filter chips.
-/// Generic over T — use String for simple labels or model objects for complex data.
 class FilterChipBar<T> extends StatelessWidget {
   const FilterChipBar({
     super.key,
@@ -16,7 +14,6 @@ class FilterChipBar<T> extends StatelessWidget {
 
   final List<T> options;
 
-  /// Currently selected option; null means nothing selected yet.
   final T? selected;
   final ValueChanged<T> onSelected;
   final String Function(T)? labelBuilder;

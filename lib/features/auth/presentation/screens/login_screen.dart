@@ -57,8 +57,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (_submitting) return;
     final form = _formKey.currentState;
     if (form == null || !form.validate()) {
-      // Inline field errors can sit below the fold on short screens —
-      // make a failed validation unmissable.
       _showError('Please check the highlighted fields');
       return;
     }
@@ -69,10 +67,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             _pwdCtrl.text,
           );
     } catch (e) {
-      // The notifier records the error too, but the auth-state stream can
-      // overwrite that state before `ref.listen` observes it (an unverified
-      // sign-in triggers signOut(), which emits `data(null)` again). Surface
-      // the failure here so the user is never left with a dead button.
       if (!mounted) return;
       _showError(userMessage(e, fallback: 'Could not sign in. Please try again.'));
     } finally {
@@ -123,7 +117,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               child: Column(
                 children: [
                   const SizedBox(height: 48),
-                  // Logo with shadow
                   Container(
                     width: 76,
                     height: 76,
@@ -156,7 +149,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       style: GoogleFonts.poppins(
                           fontSize: 14, color: AppColors.textSecondary)),
                   const SizedBox(height: 40),
-                  // Animated form card
                   FadeTransition(
                     opacity: _fadeAnimation,
                     child: SlideTransition(
@@ -205,12 +197,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 controller: _pwdCtrl,
                                 obscureText: _obscure,
                                 textInputAction: TextInputAction.done,
-                                // Only require a non-empty password here.
-                                // The strength policy (length / uppercase /
-                                // digit) belongs to registration — enforcing
-                                // it at sign-in silently rejects accounts whose
-                                // password predates the policy and hides the
-                                // real auth error behind a validation return.
                                 validator: (v) => Validators.required(v, 'Password'),
                                 onFieldSubmitted: (_) => _login(),
                                 decoration: InputDecoration(
@@ -239,10 +225,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              // Min-height only: a tight SizedBox(height: 52)
-                              // squeezed the label box (52 - theme padding 32
-                              // = 20px) below Poppins' ~22px line height, and
-                              // the paragraph clipped the 'g' descender.
                               ConstrainedBox(
                                 constraints: const BoxConstraints(minHeight: 52),
                                 child: ElevatedButton(
@@ -277,7 +259,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Sign up link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

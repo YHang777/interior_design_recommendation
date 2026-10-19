@@ -8,17 +8,6 @@ import 'package:interior_design_recommendation/features/auth/data/models/app_use
 import 'package:interior_design_recommendation/features/auth/domain/repositories/auth_repository.dart';
 import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
 
-/// Regression tests for the silent sign-in failure: pressing "Sign In"
-/// did nothing — no spinner, no error message, no navigation.
-///
-/// Three compounding defects produced that:
-///  1. `login()` set `AsyncValue.loading()` then immediately overwrote it
-///     with `data(null)`, so the button never disabled.
-///  2. the `authStateChanges()` listener overwrote the `AsyncError` a failed
-///     login produced. An unverified sign-in calls `signOut()`, which emits
-///     `data(null)` right after the throw and wiped the error before any
-///     listener could show it.
-///  3. `login()` swallowed the failure instead of rethrowing to the caller.
 void main() {
   AppUser user({
     String uid = 'u1',
@@ -45,14 +34,11 @@ void main() {
 
     final notifier = container.read(authStateProvider.notifier);
 
-    // Hold the future open so we can observe the in-flight state.
     final gate = Completer<AppUser>();
     repo.onLogin = () => gate.future;
 
     final pending = notifier.login('a@b.com', 'pw');
 
-    // Regression: this used to already be `AsyncValue.data(null)`, which
-    // left the button enabled and silent for the whole attempt.
     final inFlight = container.read(authStateProvider);
     expect(inFlight.isLoading, isTrue,
         reason: 'login() must stay in loading while the call is in flight');
@@ -74,8 +60,6 @@ void main() {
 
     repo.loginError = const AuthException('Please verify your email first.',
         code: 'unverified');
-    // The repository signs the user out after rejecting an unverified
-    // sign-in, so the stream fires `null` right behind the throw.
     repo.emitAfterLoginFailure = true;
 
     final notifier = container.read(authStateProvider.notifier);
@@ -85,7 +69,6 @@ void main() {
       throwsA(isA<AuthException>()),
     );
 
-    // Let the deferred `data(null)` from the post-failure signOut land.
     await Future<void>.delayed(Duration.zero);
 
     final state = container.read(authStateProvider);
@@ -148,17 +131,13 @@ void main() {
     } catch (_) {}
     await Future<void>.delayed(Duration.zero);
 
-    // The failure's error is still on screen — not wiped by the sign-out.
     expect(container.read(authStateProvider).hasError, isTrue);
 
-    // A late, unrelated stream emission must not silently clear it either:
-    // only the user starting a new action re-opens the stream.
     repo.controller.add(user(uid: 'stray'));
     await Future<void>.delayed(Duration.zero);
     expect(container.read(authStateProvider).hasError, isTrue,
         reason: 'a stray emission must not clear an on-screen sign-in error');
 
-    // Explicit sign-out re-opens the stream, so the app keeps working.
     await notifier.logout();
     repo.controller.add(null);
     await Future<void>.delayed(Duration.zero);
@@ -172,12 +151,9 @@ class _FakeAuthRepository implements IAuthRepository {
   final StreamController<AppUser?> controller =
       StreamController<AppUser?>.broadcast();
 
-  /// When set, `login` waits on this future before completing.
   Future<AppUser> Function()? onLogin;
   Object? loginError;
 
-  /// Emit `data(null)` from the auth stream right after a failed login —
-  /// the unverified sign-in path calls `signOut()`, which does exactly this.
   bool emitAfterLoginFailure = false;
 
   @override
@@ -189,7 +165,6 @@ class _FakeAuthRepository implements IAuthRepository {
     final error = loginError;
     if (error != null) {
       if (emitAfterLoginFailure) {
-        // Deferred so it lands *after* login() has recorded the error.
         scheduleMicrotask(() => controller.add(null));
       }
       // ignore: only_throw_errors

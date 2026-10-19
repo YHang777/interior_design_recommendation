@@ -1,18 +1,3 @@
-// Floating nav bar sync: navigating to another shell branch must SWITCH
-// the StatefulShellRoute branch, otherwise the pushed screen shows while
-// FloatingNavBar keeps highlighting the previous tab (reported: home →
-// AI page, nav bar still shows Home).
-//
-// go_router implements `push('/ai')` from `/home` by recursing into the
-// shell's children while keeping the shell match's ORIGINAL branch
-// navigatorKey, so StatefulNavigationShell.currentIndex never moves.
-// Two layers are asserted against the real app router:
-//   1. the dashboard's own "AI Design" shortcut — the reported repro,
-//      which now calls context.go directly; and
-//   2. GuardedGoRouter.push, which reroutes any cross-branch push to
-//      go() so call sites added later (or outside lib/) cannot silently
-//      regress the highlight.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,8 +19,6 @@ import 'package:interior_design_recommendation/features/customer/homeowner/prese
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/shared/widgets/floating_nav_bar.dart';
 
-/// Bounded settling: skeleton/shimmer loops make `pumpAndSettle` hang for
-/// its full timeout, so step the frame clock explicitly instead.
 Future<void> _settle(WidgetTester tester, {int frames = 6}) async {
   await tester.pump();
   for (var i = 0; i < frames; i++) {
@@ -43,9 +26,6 @@ Future<void> _settle(WidgetTester tester, {int frames = 6}) async {
   }
 }
 
-/// Boots the real app (real router, signed-in homeowner, Firebase-free
-/// provider overrides) and returns the router for imperative navigation.
-/// The redirect lands the app in the homeowner shell on `/home`.
 Future<GoRouter> _boot(WidgetTester tester) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -76,7 +56,6 @@ Future<GoRouter> _boot(WidgetTester tester) async {
   return container.read(appRouterProvider);
 }
 
-/// What the FloatingNavBar is actually highlighting right now.
 int _navIndex(WidgetTester tester) =>
     tester.widget<FloatingNavBar>(find.byType(FloatingNavBar)).selectedIndex;
 
@@ -84,14 +63,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    // The AI screen's chat history notifier reads SharedPreferences.
     SharedPreferences.setMockInitialValues({});
   });
 
   testWidgets('dashboard AI shortcut lands on AI with the AI tab highlighted',
       (tester) async {
-    // Tall surface so the Quick Actions row is on screen without
-    // hunting for the right scrollable in a nested-scroll dashboard.
     await tester.binding.setSurfaceSize(const Size(800, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -101,7 +77,6 @@ void main() {
     expect(find.byType(DashboardScreen), findsOneWidget);
     expect(_navIndex(tester), 0, reason: 'boot state is the Home tab');
 
-    // The reported repro: "from home to AI page".
     await tester.tap(find.text('AI Design'));
     await _settle(tester);
 
@@ -122,10 +97,6 @@ void main() {
     await _settle(tester);
     expect(_navIndex(tester), 0);
 
-    // Any push into a different branch of the shell on top of the stack
-    // (dashboard call site, pushOnce, a future call site) must behave as
-    // a branch switch: the shell's currentIndex — and with it the
-    // FloatingNavBar — has to move.
     router.push('/saved');
     await _settle(tester);
 
@@ -140,8 +111,6 @@ void main() {
   });
 }
 
-/// Signed-in homeowner stub: the router's redirect only passes once auth
-/// delivers a non-loading state, and every role gate reads this user.
 class _HomeownerAuth implements IAuthRepository {
   static final AppUser _user = AppUser(
     uid: 'u-test',

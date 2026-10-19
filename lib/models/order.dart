@@ -1,6 +1,5 @@
 import 'dart:math';
 
-/// Order statuses following e-commerce lifecycle.
 enum OrderStatus {
   pending,
   confirmed,
@@ -34,15 +33,7 @@ enum OrderStatus {
   }
 
   // ── Transition guards (pure, shared by the repository write path) ──
-  //
-  // Legal forward chain: pending → confirmed → shipped → delivered.
-  // Terminal states (delivered, cancelled) are frozen. Cancellation is
-  // allowed from any non-terminal state.
 
-  /// Throws a [StateError] unless [to] is exactly the single legal next step
-  /// out of [from] — rejects terminal orders ('Order is already x') and any
-  /// jump/skip/backwards move ('Cannot move from A to B'). Messages match
-  /// what `MarketplaceRepository.updateOrderStatus` has always thrown.
   static void ensureAdvance(OrderStatus from, OrderStatus to) {
     if (from.isTerminal) {
       throw StateError('Order is already ${from.label.toLowerCase()}');
@@ -53,10 +44,6 @@ enum OrderStatus {
     }
   }
 
-  /// Throws a [StateError] when the order is already terminal. Any
-  /// non-terminal status (pending/confirmed/shipped) may be cancelled.
-  /// `MarketplaceRepository.cancelOrder` short-circuits an already-cancelled
-  /// order before calling this (idempotent cancel).
   static void ensureCancellable(OrderStatus from) {
     if (from.isTerminal) {
       throw StateError(
@@ -65,7 +52,6 @@ enum OrderStatus {
   }
 }
 
-/// Possible refund states on an order.
 enum RefundStatus {
   requested,
   approved,
@@ -88,8 +74,6 @@ enum RefundStatus {
   }
 }
 
-/// Snapshot of a product at purchase time — frozen so price changes don't
-/// affect historical orders.
 class OrderItem {
   final String productId;
   final String name;
@@ -130,22 +114,7 @@ class OrderItem {
       };
 }
 
-/// One supplier's invoice for one order — the shipping document and receipt
-/// created the moment they accept the order.
-///
-/// Deliberately self-contained: the from/to blocks, the line items and the
-/// money are all frozen at issue time, so the document still reads correctly
-/// if the supplier later edits their profile, and the PDF builder never has
-/// to reach back into the [Order]. Scoped to a SINGLE supplier — on a
-/// multi-seller order every supplier gets their own invoice, covering only
-/// their items and their share of the shipping fee.
-///
-/// Order-level discount and tax are NOT split across suppliers (the order
-/// records them once, with no per-supplier attribution). They are carried as
-/// [orderDiscount]/[orderTax] purely so the document can state that other
-/// adjustments exist; they never enter [total].
 class OrderInvoice {
-  /// `INV-YYYYMMDD-NNNN`, matching the `ORD-…` order-number style.
   final String invoiceNumber;
   final String orderId;
   final String orderNumber;
@@ -157,16 +126,12 @@ class OrderInvoice {
   final String supplierEmail;
   final DateTime issuedAt;
 
-  /// This supplier's line items only.
   final List<OrderItem> items;
 
-  /// Sum of [items]' line totals.
   final int subtotal;
 
-  /// This supplier's share of the order's shipping fee.
   final int shippingFee;
 
-  /// [subtotal] + [shippingFee] — the charge for this shipment.
   final int total;
 
   final String customerName;
@@ -176,7 +141,6 @@ class OrderInvoice {
   final String paymentMethod;
   final DateTime orderCreatedAt;
 
-  /// Order-level discount/tax, for reference only. Never in [total].
   final int orderDiscount;
   final int orderTax;
 
@@ -208,9 +172,6 @@ class OrderInvoice {
 
   int get unitCount => items.fold(0, (sum, i) => sum + i.quantity);
 
-  /// Builds the document from an [Order] plus the accepting supplier's
-  /// profile. Money is derived from [order]'s own per-supplier helpers so an
-  /// invoice can never disagree with the order it bills.
   factory OrderInvoice.issue({
     required Order order,
     required String supplierId,
@@ -252,9 +213,6 @@ class OrderInvoice {
     );
   }
 
-  /// `INV-YYYYMMDD-NNNN`. The date is the issue date; the suffix is a random
-  /// 4-digit tail (same shape as `ORD-…`), so numbers are human-readable and
-  /// collision-safe without a counter.
   static String generateInvoiceNumber(DateTime issuedAt, {String? supplierId, Random? random}) {
     final r = random ?? _invoiceRandom;
     final y = issuedAt.year.toString().padLeft(4, '0');
@@ -320,7 +278,6 @@ class OrderInvoice {
 
 final Random _invoiceRandom = Random();
 
-/// A complete order placed by a buyer, fulfilled by supplier(s).
 class Order {
   final String id;
   final String orderNumber;
@@ -336,35 +293,20 @@ class Order {
   final int shippingFee;
   final int total;
 
-  /// Membership discount (whole ringgit) applied at checkout.
   final int discount;
 
-  /// Sales tax (whole ringgit) applied at checkout.
   final int tax;
 
-  /// Membership tier the customer held at purchase time (Free/Silver/Gold).
   final String membershipTier;
 
-  /// Supplier uids fulfilled by this order. Derives from items when empty.
   final List<String> supplierIds;
 
-  /// Delivery charge each supplier earned on this order
-  /// (`{supplierUid: share}`), recorded at checkout from product-level
-  /// shipping settings. Shares always sum to [shippingFee] for orders
-  /// placed after product-level shipping shipped. Empty on legacy orders
-  /// — those fall back in [shippingShareFor].
   final Map<String, int> shippingBySupplier;
 
   final DateTime createdAt;
 
-  /// Timestamp per status transition — map key is the [OrderStatus] name
-  /// ('pending', 'confirmed', …), value the moment the order reached it.
-  /// Enables per-step dates in the buyer/supplier status timelines.
   final Map<String, DateTime> statusHistory;
 
-  /// Invoices issued against this order, keyed by supplier uid. Written in
-  /// the same transaction that accepts the order, so an accepted order never
-  /// exists without its paperwork. Empty until a supplier accepts.
   final Map<String, OrderInvoice> invoices;
 
   final RefundStatus? refundStatus;
@@ -407,7 +349,6 @@ class Order {
         _ => paymentMethod,
       };
 
-  /// Supplier ids, deriving from item snapshots when none were recorded.
   List<String> get resolvedSupplierIds => supplierIds.isNotEmpty
       ? supplierIds
       : items
@@ -416,25 +357,15 @@ class Order {
           .toSet()
           .toList();
 
-  /// [supplierId]'s portion of this order's [shippingFee] — what they
-  /// earned from delivery charges, for revenue math and the detail screen.
-  ///
-  /// Modern orders carry [shippingBySupplier] (exact shares from checkout).
-  /// Legacy orders recorded only the aggregate fee, so we fall back:
-  ///   • one supplier on the order → that supplier paid the whole fee,
-  ///     so the full [shippingFee] is theirs;
-  ///   • several suppliers → the flat fee cannot honestly be split, so
-  ///     every share reads 0 rather than inventing an attribution.
   int shippingShareFor(String supplierId) {
     final recorded = shippingBySupplier[supplierId];
     if (recorded != null) return recorded;
-    if (shippingBySupplier.isNotEmpty) return 0; // known shares, none is ours
+    if (shippingBySupplier.isNotEmpty) return 0;
     final ids = resolvedSupplierIds;
     if (ids.length == 1 && ids.first == supplierId) return shippingFee;
     return 0;
   }
 
-  /// The invoice [supplierId] issued when they accepted this order, if any.
   OrderInvoice? invoiceFor(String supplierId) => invoices[supplierId];
 
   Order copyWith({
@@ -560,8 +491,6 @@ class Order {
       };
 }
 
-/// Parses `{supplierUid: OrderInvoice}`. Malformed entries are dropped —
-/// a missing invoice simply means that supplier has not accepted yet.
 Map<String, OrderInvoice> _parseInvoices(dynamic raw) {
   if (raw is! Map<String, dynamic>) return const {};
   final out = <String, OrderInvoice>{};
@@ -572,23 +501,6 @@ Map<String, OrderInvoice> _parseInvoices(dynamic raw) {
   return out;
 }
 
-/// Puts the STORED `invoices` map back into [payload] byte-for-byte, or drops
-/// the key entirely when the stored document never had one.
-///
-/// `firestore.rules` lets a customer update an order only while the `invoices`
-/// value is untouched — `diff().affectedKeys()` must not name it. A
-/// read-modify-write that re-serialises the parsed model can trip that check
-/// on a write that never meant to touch paperwork, two ways:
-///
-///  * [Order.toJson] always emits an `invoices` key, so a legacy order that
-///    predates the feature would look like an ADD (`{}` appearing);
-///  * any field that does not survive a parse → serialise round-trip —
-///    currently only the dates, and only if a stored value is missing and
-///    defaults to `DateTime.now()` — would look like an edit.
-///
-/// Either would lock a buyer out of cancelling their own order. Invoice writes
-/// (`acceptOrderAndIssueInvoice`) deliberately do NOT use this: they are the
-/// supplier's paperwork write and must change the map.
 Map<String, dynamic> preserveStoredInvoices(
   Map<String, dynamic> payload,
   Map<String, dynamic> stored,
@@ -599,8 +511,6 @@ Map<String, dynamic> preserveStoredInvoices(
   return {...payload}..remove('invoices');
 }
 
-/// Parses the stored status→timestamp map (values may be ISO strings or
-/// Firestore Timestamps). Unparseable entries are dropped, never fabricated.
 Map<String, DateTime> _parseStatusHistory(dynamic raw) {
   if (raw is! Map<String, dynamic>) return {};
   final history = <String, DateTime>{};
@@ -612,8 +522,6 @@ Map<String, DateTime> _parseStatusHistory(dynamic raw) {
   return history;
 }
 
-/// Parses `{supplierUid: shippingShare}`; malformed/negative entries are
-/// dropped (missing supplier → share 0 via `Order.shippingShareFor`).
 Map<String, int> _parseShippingBySupplier(dynamic raw) {
   if (raw is! Map<String, dynamic>) return const {};
   final shares = <String, int>{};
@@ -625,7 +533,6 @@ Map<String, int> _parseShippingBySupplier(dynamic raw) {
   return shares;
 }
 
-/// Parses a date that may be an ISO-8601 string or a Firestore Timestamp.
 DateTime? _parseOrderDate(dynamic value) {
   if (value is DateTime) return value;
   try {

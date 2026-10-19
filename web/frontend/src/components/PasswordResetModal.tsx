@@ -51,7 +51,7 @@ export function PasswordResetModal({ user, onClose }: Props) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      setError('Clipboard unavailable — select the value and copy manually.');
+      setError('Clipboard unavailable. Select and copy manually.');
     }
   };
 
@@ -74,7 +74,7 @@ export function PasswordResetModal({ user, onClose }: Props) {
               />
               <span>
                 <strong>Send reset link</strong>
-                <em>Generates a Firebase password-reset link you forward to the user.</em>
+                <em>A link you forward to the user.</em>
               </span>
             </label>
             <label className={`radio-card ${mode === 'temp_password' ? 'selected' : ''}`}>
@@ -86,7 +86,7 @@ export function PasswordResetModal({ user, onClose }: Props) {
               />
               <span>
                 <strong>Set one-time password</strong>
-                <em>Replaces the password with a random one you hand over directly.</em>
+                <em>A random password you hand over.</em>
               </span>
             </label>
           </div>
@@ -111,8 +111,8 @@ export function PasswordResetModal({ user, onClose }: Props) {
         <>
           <p className="hint">
             {result.mode === 'reset_link'
-              ? 'Reset link generated (valid per the project’s email-link settings). Send it to the user — it is not stored anywhere.'
-              : 'A new random password was set. It is shown ONCE below — copy it now; the server does not keep it.'}
+              ? 'Link generated. Send it to the user — it is not stored.'
+              : 'Shown once below — copy it now. The server does not keep it.'}
           </p>
           <div className="result-row">
             <input
