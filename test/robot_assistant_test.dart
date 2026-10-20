@@ -5,11 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
+import 'package:interior_design_recommendation/features/customer/budget/data/budget_plan.dart';
+import 'package:interior_design_recommendation/features/customer/budget/data/budget_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/chat_datasource.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
+import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_data_card.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/widgets/robot_assistant/robot_assistant_host.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/widgets/robot_assistant/robot_chat_panel.dart';
+import 'package:interior_design_recommendation/models/cart_item.dart';
 import 'package:interior_design_recommendation/models/product.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -44,11 +49,21 @@ Product _product() => Product.fromJson({
       'image': '',
     });
 
+class _StaticCart extends CartNotifier {
+  _StaticCart(this.items);
+  final List<CartItem> items;
+
+  @override
+  List<CartItem> build() => items;
+}
+
 Future<void> _pumpHost(
   WidgetTester tester,
   _ChatCapture capture, {
   Product? focusProduct,
   int status = 200,
+  List<CartItem> cart = const [],
+  BudgetPlan? budget,
 }) async {
   await tester.binding.setSurfaceSize(const Size(393, 852));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -64,6 +79,10 @@ Future<void> _pumpHost(
         ),
         marketplaceProductsProvider
             .overrideWith((ref) => Stream.value([product])),
+        currentUserProvider.overrideWithValue(null),
+        if (cart.isNotEmpty) cartProvider.overrideWith(() => _StaticCart(cart)),
+        if (budget != null)
+          budgetPlanProvider.overrideWith((ref) => Stream.value(budget)),
       ],
       child: MaterialApp(
         home: Builder(
@@ -290,5 +309,74 @@ void main() {
     final body = capture.body!;
     expect(body['style'], 'Scandinavian');
     expect(body['room'], 'Living Room');
+  });
+
+  testWidgets('an empty app state sends no state block', (tester) async {
+    final capture = _ChatCapture();
+    await _pumpHost(tester, capture);
+    await _openChat(tester);
+
+    await _send(tester, 'Is the sofa in stock?');
+
+    expect(capture.calls, 1);
+    expect(capture.body!.containsKey('state'), isFalse);
+  });
+
+  testWidgets('live cart and budget ride along as verified state',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpHost(
+      tester,
+      capture,
+      cart: [
+        CartItem(product: _product(), quantity: 2),
+      ],
+      budget: BudgetPlan(
+        budgetRm: 5000,
+        room: 'Kitchen',
+        ecoFriendly: true,
+        updatedAt: DateTime.utc(2026, 1, 1),
+      ),
+    );
+    await _openChat(tester);
+
+    await _send(tester, 'Is the sofa in stock?');
+
+    expect(capture.calls, 1);
+    final state = capture.body!['state'] as Map<String, dynamic>;
+    final cart = state['cart'] as Map<String, dynamic>;
+    expect(cart['itemCount'], 2);
+    final items = (cart['items'] as List).cast<Map<String, dynamic>>();
+    expect(items.single['name'], 'Nordic Sofa');
+    final budget = state['budget'] as Map<String, dynamic>;
+    expect(budget['capRm'], 5000);
+    expect(budget['ecoFriendly'], isTrue);
+  });
+
+  testWidgets('a pure state question answers instantly with a data card',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpHost(tester, capture);
+    await _openChat(tester);
+
+    await _send(tester, "What's in my cart?");
+
+    expect(capture.calls, 0);
+    expect(find.text("Here's what's in your cart right now."), findsOneWidget);
+    expect(find.byType(ChatDataCard), findsOneWidget);
+  });
+
+  testWidgets('the state card still lands when the proxy is down',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpHost(tester, capture, status: 500);
+    await _openChat(tester);
+
+    await _send(tester, 'Can you list every single thing inside my cart today?');
+
+    expect(capture.calls, 1);
+    expect(find.text('The design assistant could not reply. Try again.'),
+        findsOneWidget);
+    expect(find.byType(ChatDataCard), findsOneWidget);
   });
 }

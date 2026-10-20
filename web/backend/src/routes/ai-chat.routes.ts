@@ -9,6 +9,7 @@ import {
   type ChatMessage,
   type ChatProduct,
   type ChatReply,
+  type ChatState,
 } from '../services/ai-chat.service';
 
 /**
@@ -40,11 +41,64 @@ const productSchema = z.object({
   photoMismatch: z.boolean().optional(),
 });
 
+const stateCartLine = z.object({
+  productId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(1).max(48),
+  qty: z.number().int().nonnegative().max(999),
+  lineTotal: z.number().finite().nonnegative().max(1e9),
+});
+
+const statePlaced = z.object({
+  name: z.string().trim().min(1).max(48),
+  wCm: z.number().finite().nonnegative().max(100000),
+  hCm: z.number().finite().nonnegative().max(100000),
+});
+
+const statePlan = z.object({
+  name: z.string().trim().max(60).optional(),
+  roomType: z.string().trim().max(40).optional(),
+  widthCm: z.number().finite().nonnegative().max(100000).optional(),
+  heightCm: z.number().finite().nonnegative().max(100000).optional(),
+  placed: z.array(statePlaced).max(10).optional(),
+  pendingPlacements: z.number().int().nonnegative().max(99).optional(),
+});
+
+const stateBudget = z.object({
+  capRm: z.number().int().nonnegative().max(100000000),
+  room: z.string().trim().max(40).optional(),
+  ecoFriendly: z.boolean().optional(),
+  estimateRm: z.number().int().nonnegative().max(100000000).optional(),
+  remainingRm: z.number().int().max(100000000).optional(),
+});
+
+const stateOrder = z.object({
+  orderNumber: z.string().trim().min(1).max(64),
+  status: z.string().trim().min(1).max(32),
+  total: z.number().finite().nonnegative().max(1e9),
+  itemCount: z.number().int().nonnegative().max(999),
+  placedAt: z.string().trim().max(40).optional(),
+});
+
+const chatStateSchema = z.object({
+  cart: z
+    .object({
+      items: z.array(stateCartLine).max(8),
+      itemCount: z.number().int().nonnegative().max(9999),
+      subtotal: z.number().finite().nonnegative().max(1e9),
+    })
+    .optional(),
+  plan: statePlan.optional(),
+  budget: stateBudget.optional(),
+  orders: z.array(stateOrder).max(3).optional(),
+  wishlistCount: z.number().int().nonnegative().max(99999).optional(),
+});
+
 const chatBodySchema = z.object({
   messages: z.array(messageSchema).min(1).max(50),
   style: z.string().trim().max(120).optional(),
   room: z.string().trim().max(120).optional(),
   products: z.array(productSchema).max(20).optional(),
+  state: chatStateSchema.optional(),
 });
 
 export function createAiChatRouter(deps: AiChatDeps): Router {
@@ -72,6 +126,7 @@ export function createAiChatRouter(deps: AiChatDeps): Router {
         style: parsed.style,
         room: parsed.room,
         products: parsed.products as ChatProduct[] | undefined,
+        ...(parsed.state ? { state: parsed.state as ChatState } : {}),
       };
 
       let result: ChatReply;

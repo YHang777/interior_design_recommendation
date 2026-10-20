@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/chat_datasource.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
@@ -43,6 +44,7 @@ Future<void> _pumpScreen(WidgetTester tester, Size size) async {
           ),
         ),
         marketplaceProductsProvider.overrideWith((ref) => Stream.value(const [])),
+        currentUserProvider.overrideWithValue(null),
       ],
       child: const MaterialApp(home: AiRecommendationScreen()),
     ),

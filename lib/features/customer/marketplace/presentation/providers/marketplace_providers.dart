@@ -398,7 +398,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
     _productsSub?.cancel();
     _latestProducts = null;
 
-    ref.read(cartHydratedProvider.notifier).state = false;
+    scheduleMicrotask(() {
+      ref.read(cartHydratedProvider.notifier).state = false;
+    });
 
     try {
       final repo = ref.watch(marketplaceRepositoryProvider);
@@ -427,7 +429,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
       }
     } catch (e) {
       debugPrint('[cart] setup failed: $e');
-      ref.read(cartHydratedProvider.notifier).state = true;
+      scheduleMicrotask(() {
+        ref.read(cartHydratedProvider.notifier).state = true;
+      });
     }
     return [];
   }
@@ -506,7 +510,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
   }
 
   void _persist(Future<void> Function() write) {
-    unawaited(write().catchError((Object e, StackTrace st) {
+    unawaited(Future.sync(write).catchError((Object e, StackTrace st) {
       debugPrint('[cart] Firestore write-through failed: $e');
     }));
   }
@@ -543,16 +547,16 @@ class CartNotifier extends Notifier<List<CartItem>> {
       item = CartItem(product: fresh, quantity: qty.clamp(1, fresh.stock));
       state = [...state, item];
     }
-    final repo = ref.read(marketplaceRepositoryProvider);
-    _persist(() => repo.saveCartItem(uid, item));
+    _persist(
+        () => ref.read(marketplaceRepositoryProvider).saveCartItem(uid, item));
   }
 
   void removeItem(String productId) {
     final uid = _uid;
     if (uid == null) return;
     state = state.where((ci) => ci.product.id != productId).toList();
-    final repo = ref.read(marketplaceRepositoryProvider);
-    _persist(() => repo.removeCartItem(uid, productId));
+    _persist(() =>
+        ref.read(marketplaceRepositoryProvider).removeCartItem(uid, productId));
   }
 
   bool restoreItem(CartItem item) {
@@ -562,7 +566,6 @@ class CartNotifier extends Notifier<List<CartItem>> {
     if (uid == null) return false;
     final maxQty = fresh.stock < 1 ? item.quantity : fresh.stock;
     final idx = state.indexWhere((ci) => ci.product.id == item.product.id);
-    final repo = ref.read(marketplaceRepositoryProvider);
     if (idx >= 0) {
       final merged = state[idx].copyWith(
         product: fresh,
@@ -572,12 +575,15 @@ class CartNotifier extends Notifier<List<CartItem>> {
         for (var i = 0; i < state.length; i++)
           if (i == idx) merged else state[i],
       ];
-      _persist(() => repo.saveCartItem(uid, merged));
+      _persist(
+          () => ref.read(marketplaceRepositoryProvider).saveCartItem(uid, merged));
     } else {
       final restored = item.copyWith(
           product: fresh, quantity: item.quantity.clamp(1, maxQty));
       state = [...state, restored];
-      _persist(() => repo.saveCartItem(uid, restored));
+      _persist(() => ref
+          .read(marketplaceRepositoryProvider)
+          .saveCartItem(uid, restored));
     }
     return true;
   }
@@ -733,7 +739,7 @@ class WishlistNotifier extends Notifier<Set<String>> {
   }
 
   void _persist(Future<void> Function() write) {
-    unawaited(write().catchError((Object e, StackTrace st) {
+    unawaited(Future.sync(write).catchError((Object e, StackTrace st) {
       debugPrint('[wishlist] Firestore write-through failed: $e');
     }));
   }
@@ -770,9 +776,10 @@ class WishlistNotifier extends Notifier<Set<String>> {
     final uid = _uid;
     if (uid == null) return;
     state = state.where((id) => !ids.contains(id)).toSet();
-    final repo = ref.read(marketplaceRepositoryProvider);
     for (final id in ids) {
-      _persist(() => repo.removeFromWishlist(uid, id));
+      _persist(() => ref
+          .read(marketplaceRepositoryProvider)
+          .removeFromWishlist(uid, id));
     }
   }
 

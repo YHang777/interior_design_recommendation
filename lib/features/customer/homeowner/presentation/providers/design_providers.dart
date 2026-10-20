@@ -114,6 +114,7 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
     required String role,
     required String text,
     List<ChatSuggestionSnapshot>? suggestions,
+    ChatDataCardRef? dataCard,
   }) {
     final sessions = [...state.sessions];
     final index = sessions.indexWhere((s) => s.id == sessionId);
@@ -128,6 +129,7 @@ class ChatHistoryNotifier extends Notifier<ChatHistoryState> {
         text: text,
         createdAt: DateTime.now(),
         suggestions: suggestions,
+        dataCard: dataCard,
       )],
       title: isFirstUserMessage ? _titleFrom(text) : null,
       updatedAt: DateTime.now(),

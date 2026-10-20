@@ -1,36 +1,42 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../../core/constants/app_colors.dart';
-import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/chat_session.dart';
 import '../../../../../shared/widgets/product_image.dart';
+import '../../../marketplace/presentation/providers/marketplace_providers.dart';
+import 'chat_card_actions.dart';
 
-class ChatSuggestionCard extends StatelessWidget {
+enum _CardOverflow {
+  open,
+  wishlist,
+  qtyPlus,
+  qtyMinus,
+  remove,
+  similar,
+}
+
+class ChatSuggestionCard extends ConsumerWidget {
   const ChatSuggestionCard({
     super.key,
     required this.suggestion,
-    required this.onAdd,
-    this.onPlace,
+    required this.actions,
+    this.showPlace = true,
   });
 
   final ChatSuggestionSnapshot suggestion;
-
-  final VoidCallback onAdd;
-  final VoidCallback? onPlace;
-
-  void _openDetail(BuildContext context) {
-    context.pushNamed(
-      RouteNames.homeownerProductDetail,
-      pathParameters: {'id': suggestion.productId},
-    );
-  }
+  final ChatCardActions actions;
+  final bool showPlace;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final s = suggestion;
+    final inCart =
+        ref.watch(cartProvider).any((item) => item.product.id == s.productId);
+    final saved = ref.watch(wishlistProvider).contains(s.productId);
+
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
@@ -44,7 +50,7 @@ class ChatSuggestionCard extends StatelessWidget {
           Expanded(
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
-              onTap: () => _openDetail(context),
+              onTap: () => actions.openProduct(s.productId),
               child: Row(
                 children: [
                   ClipRRect(
@@ -102,7 +108,7 @@ class ChatSuggestionCard extends StatelessWidget {
             ),
           ),
           TextButton.icon(
-            onPressed: onAdd,
+            onPressed: () => actions.addToCart(s),
             icon: const Icon(Icons.add_shopping_cart, size: 16),
             label: Text(
               'Add',
@@ -118,9 +124,9 @@ class ChatSuggestionCard extends StatelessWidget {
               visualDensity: VisualDensity.compact,
             ),
           ),
-          if (onPlace != null)
+          if (showPlace)
             TextButton.icon(
-              onPressed: onPlace,
+              onPressed: () => actions.placeInLayout(s),
               icon: const Icon(Icons.weekend_outlined, size: 16),
               label: Text(
                 'Place',
@@ -136,8 +142,70 @@ class ChatSuggestionCard extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
               ),
             ),
+          PopupMenuButton<_CardOverflow>(
+            icon: const Icon(Icons.more_vert, size: 18),
+            padding: EdgeInsets.zero,
+            tooltip: 'More actions',
+            color: AppColors.surface,
+            onSelected: (choice) => _onChoice(ref, choice),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: _CardOverflow.open,
+                child: Text('Open product'),
+              ),
+              PopupMenuItem(
+                value: _CardOverflow.wishlist,
+                child: Text(saved ? 'Remove from wishlist' : 'Save to wishlist'),
+              ),
+              if (inCart) ...[
+                const PopupMenuItem(
+                  value: _CardOverflow.qtyPlus,
+                  child: Text('Increase quantity'),
+                ),
+                const PopupMenuItem(
+                  value: _CardOverflow.qtyMinus,
+                  child: Text('Decrease quantity'),
+                ),
+                const PopupMenuItem(
+                  value: _CardOverflow.remove,
+                  child: Text('Remove from cart'),
+                ),
+              ] else
+                const PopupMenuItem(
+                  value: _CardOverflow.similar,
+                  child: Text('See similar'),
+                ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  void _onChoice(WidgetRef ref, _CardOverflow choice) {
+    final s = suggestion;
+    switch (choice) {
+      case _CardOverflow.open:
+        actions.openProduct(s.productId);
+      case _CardOverflow.wishlist:
+        actions.toggleWishlist(s);
+      case _CardOverflow.qtyPlus:
+        actions.bumpCartQty(s, 1);
+      case _CardOverflow.qtyMinus:
+        actions.bumpCartQty(s, -1);
+      case _CardOverflow.remove:
+        actions.removeFromCart(s);
+      case _CardOverflow.similar:
+        final category = _categoryOf(ref, s);
+        if (category.isNotEmpty) actions.browseCategory(category);
+    }
+  }
+
+  String _categoryOf(WidgetRef ref, ChatSuggestionSnapshot s) {
+    final products = ref.read(marketplaceProductsProvider).valueOrNull;
+    for (final p in products ?? const []) {
+      if (p.id == s.productId) return p.category;
+    }
+    return '';
   }
 }

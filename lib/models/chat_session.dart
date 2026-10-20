@@ -34,12 +34,42 @@ class ChatSuggestionSnapshot {
       );
 }
 
+enum ChatDataTopic {
+  cart,
+  budget,
+  plan,
+  orders,
+  wishlist;
+
+  static ChatDataTopic? tryParse(String? raw) {
+    for (final topic in values) {
+      if (topic.name == raw) return topic;
+    }
+    return null;
+  }
+}
+
+class ChatDataCardRef {
+  const ChatDataCardRef({required this.topic});
+
+  final ChatDataTopic topic;
+
+  Map<String, dynamic> toJson() => {'topic': topic.name};
+
+  static ChatDataCardRef? tryFromJson(Map<String, dynamic> json) {
+    final topic = ChatDataTopic.tryParse(json['topic']?.toString());
+    if (topic == null) return null;
+    return ChatDataCardRef(topic: topic);
+  }
+}
+
 class ChatMessage {
   ChatMessage({
     required this.role,
     required this.text,
     required this.createdAt,
     this.suggestions,
+    this.dataCard,
   });
 
   final String role;
@@ -48,16 +78,20 @@ class ChatMessage {
 
   final List<ChatSuggestionSnapshot>? suggestions;
 
+  final ChatDataCardRef? dataCard;
+
   Map<String, dynamic> toJson() => {
         'role': role,
         'text': text,
         'createdAt': createdAt.toUtc().toIso8601String(),
         if (suggestions != null && suggestions!.isNotEmpty)
           'suggestions': [for (final s in suggestions!) s.toJson()],
+        if (dataCard != null) 'dataCard': dataCard!.toJson(),
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final rawSuggestions = json['suggestions'];
+    final rawCard = json['dataCard'];
     return ChatMessage(
       role: json['role'] == 'user' ? 'user' : 'model',
       text: json['text']?.toString() ?? '',
@@ -69,6 +103,9 @@ class ChatMessage {
               .map(ChatSuggestionSnapshot.fromJson)
               .where((s) => s.productId.isNotEmpty && s.name.isNotEmpty)
               .toList()
+          : null,
+      dataCard: rawCard is Map
+          ? ChatDataCardRef.tryFromJson(Map<String, dynamic>.from(rawCard))
           : null,
     );
   }

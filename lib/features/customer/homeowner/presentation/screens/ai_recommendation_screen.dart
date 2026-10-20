@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
-import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/chat_session.dart';
-import '../../../../../models/product.dart';
-import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/filter_chip_bar.dart';
@@ -15,8 +11,13 @@ import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
 import '../../data/chat_product_mapper.dart';
+import '../../data/chat_state_answers.dart';
+import '../../data/chat_state_context.dart';
 import '../../data/datasources/chat_datasource.dart';
 import '../providers/design_providers.dart';
+import '../widgets/chat_card_actions.dart';
+import '../widgets/chat_data_card.dart';
+import '../widgets/chat_proactive_chip_bar.dart';
 import '../widgets/chat_suggestion_card.dart';
 
 class AiRecommendationScreen extends ConsumerStatefulWidget {
@@ -140,6 +141,24 @@ class _AiRecommendationScreenState
     setState(() => _sending = true);
     _scrollToBottom();
 
+    final match = matchStateQuestion(text);
+    final dataCard =
+        match == null ? null : ChatDataCardRef(topic: match.topic);
+
+    if (match != null && match.isPure) {
+      historyNotifier.addMessage(
+        sessionId,
+        role: 'model',
+        text: cannedLine(match.topic),
+        dataCard: dataCard,
+      );
+      if (mounted) {
+        setState(() => _sending = false);
+        _scrollToBottom();
+      }
+      return;
+    }
+
     try {
       final result = await ref.read(chatDatasourceProvider).send(
             messages: transcript,
@@ -148,6 +167,7 @@ class _AiRecommendationScreenState
             products: productsToChatContext(
               ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
             ),
+            state: ref.read(chatStatePayloadProvider),
           );
       if (!mounted) return;
       historyNotifier.addMessage(
@@ -158,6 +178,7 @@ class _AiRecommendationScreenState
           result.suggestions,
           ref.read(marketplaceProductsProvider).valueOrNull ?? const [],
         ),
+        dataCard: dataCard,
       );
     } catch (e) {
       if (!mounted) return;
@@ -166,6 +187,7 @@ class _AiRecommendationScreenState
         role: 'model',
         text: userMessage(e,
             fallback: 'Sorry, something went wrong. Please try again.'),
+        dataCard: dataCard,
       );
     } finally {
       if (mounted) {
@@ -371,6 +393,11 @@ class _AiRecommendationScreenState
             onSelected: _onRoomChip,
           ),
           const SizedBox(height: 4),
+          ChatProactiveChipBar(
+            onPrompt: _fillSuggestion,
+            fillers: _promptSuggestions,
+          ),
+          const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
@@ -466,66 +493,16 @@ class _AiRecommendationScreenState
                     fontSize: 14,
                     color: isAI ? AppColors.textPrimary : Colors.white,
                     height: 1.4)),
+            if (msg.dataCard != null)
+              ChatDataCard(topic: msg.dataCard!.topic),
             for (final s in cards)
               ChatSuggestionCard(
                 suggestion: s,
-                onAdd: () => _addToCart(s),
-                onPlace: () => _placeInLayout(s),
+                actions: ChatCardActions(context: context, ref: ref),
               ),
           ],
         ),
       ),
-    );
-  }
-
-  void _addToCart(ChatSuggestionSnapshot suggestion) {
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    Product? live;
-    for (final p in products) {
-      if (p.id == suggestion.productId) {
-        live = p;
-        break;
-      }
-    }
-    final product = live;
-    if (product == null || !product.isActive || product.isOutOfStock) {
-      showAppSnackbar(context, 'That item is no longer available.');
-      return;
-    }
-    ref.read(cartProvider.notifier).addItem(product);
-    showAddedToCartSnack(
-      context,
-      '${product.name} added to cart',
-      onViewCart: () => context.pushNamed(RouteNames.homeownerCart),
-    );
-  }
-
-  void _placeInLayout(ChatSuggestionSnapshot suggestion) {
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    Product? live;
-    for (final p in products) {
-      if (p.id == suggestion.productId) {
-        live = p;
-        break;
-      }
-    }
-    final product = live;
-    if (product == null) {
-      showAppSnackbar(context, 'That item is no longer available.',
-          color: AppColors.error);
-      return;
-    }
-    ref
-        .read(pendingChatPlacementsProvider.notifier)
-        .enqueue(chatPlacementForProduct(product));
-    showAppSnackbar(
-      context,
-      '${product.name} added to your room plan',
-      color: AppColors.success,
-      actionLabel: 'View plan',
-      onAction: () => context.go('/design'),
     );
   }
 

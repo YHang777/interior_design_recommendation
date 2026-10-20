@@ -42,6 +42,53 @@ export interface ChatSuggestionRef {
   reason: string;
 }
 
+export interface ChatStateCartLine {
+  productId: string;
+  name: string;
+  qty: number;
+  lineTotal: number;
+}
+
+export interface ChatStatePlaced {
+  name: string;
+  wCm: number;
+  hCm: number;
+}
+
+export interface ChatStatePlan {
+  name?: string;
+  roomType?: string;
+  widthCm?: number;
+  heightCm?: number;
+  placed?: ChatStatePlaced[];
+  pendingPlacements?: number;
+}
+
+export interface ChatStateBudget {
+  capRm: number;
+  room?: string;
+  ecoFriendly?: boolean;
+  estimateRm?: number;
+  remainingRm?: number;
+}
+
+export interface ChatStateOrder {
+  orderNumber: string;
+  status: string;
+  total: number;
+  itemCount: number;
+  placedAt?: string;
+}
+
+/** The customer's own app state — verified figures, never model guesses. */
+export interface ChatState {
+  cart?: { items: ChatStateCartLine[]; itemCount: number; subtotal: number };
+  plan?: ChatStatePlan;
+  budget?: ChatStateBudget;
+  orders?: ChatStateOrder[];
+  wishlistCount?: number;
+}
+
 /** The assistant's answer: prose for the bubble, ids for the cards. */
 export interface ChatReply {
   reply: string;
@@ -53,6 +100,7 @@ export interface AiChatRequest {
   style?: string;
   room?: string;
   products?: ChatProduct[];
+  state?: ChatState;
 }
 
 /** Why a request could not produce a reply — maps 1:1 onto an HTTP status. */
@@ -103,6 +151,8 @@ const MAX_PRODUCTS = 20;
 /** How many products one reply may surface as cards, and how long a why. */
 const MAX_SUGGESTIONS = 3;
 const MAX_REASON_LENGTH = 160;
+/** The state block is context, not a dump — keep it well under the prompt. */
+const MAX_STATE_CHARS = 1500;
 
 /**
  * The assistant's persona.
@@ -123,8 +173,14 @@ How you answer:
 - Money in ringgit (RM), measurements in metric.
 - When a catalogue item is provided below, recommend from it by name where it genuinely fits. Never invent products, prices or availability.
 
+Live app state:
+- When a "Customer's live app state" block is included below, it is verified data from the app itself: cart, room plan, budget, recent orders and wishlist. Treat it as fact and answer state questions from it — use the exact numbers, names and counts given there.
+- Never invent or guess state that is not in that block. If asked for something it does not include (payment details, delivery dates, stock changes), say briefly that you cannot see it and point to the right screen: Cart, Orders, Budget or the Room plan.
+- Keep state answers short — one or two sentences and the key number. Do not read long lists back; the app shows a detail card beside your reply.
+- Budget figures: "cap" is what the customer set; "estimate" is a median-price estimate from the catalogue, not money spent. Never describe an estimate as spending.
+
 Hard limits:
-- You cannot see the customer's photos, floor plan or cart, and you cannot place orders, change bookings or handle refunds. Say so plainly and point them to support for account and order problems.
+- You cannot see the customer's photos, and you cannot place orders, change bookings or handle refunds. Say so plainly and point them to support for account and order problems.
 - Stay on furniture, interiors and room planning. If asked something else, say so briefly and steer back.
 
 Product photos:
@@ -340,6 +396,11 @@ export function buildSystemPrompt(req: AiChatRequest): string {
     );
   }
 
+  if (req.state) {
+    const block = formatStateBlock(req.state);
+    if (block.length > 0) lines.push(`\n${block}`);
+  }
+
   const products = normaliseProducts(req.products);
   if (products.length > 0) {
     const list = products.map(formatCatalogueEntry).join('\n');
@@ -349,6 +410,95 @@ export function buildSystemPrompt(req: AiChatRequest): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * The customer's live app state as the model sees it: a handful of verified
+ * figures it must cite instead of guessing. Hard-clipped so a full cart and
+ * plan cannot crowd the prompt.
+ */
+export function formatStateBlock(state: ChatState): string {
+  const lines: string[] = [];
+
+  const cart = state.cart;
+  if (cart && Array.isArray(cart.items) && cart.items.length > 0) {
+    const items = cart.items
+      .map((i) => `${i.name} x${i.qty} — RM ${i.lineTotal}`)
+      .join('; ');
+    lines.push(
+      `- Cart (${cart.itemCount} items, RM ${cart.subtotal}): ${items}.`
+    );
+  }
+
+  const plan = state.plan;
+  if (plan) {
+    const title = plan.name ? ` "${plan.name}"` : '';
+    const room = plan.roomType ?? '';
+    const dims =
+      plan.widthCm != null && plan.heightCm != null
+        ? `${plan.widthCm}x${plan.heightCm} cm`
+        : '';
+    const head = [room, dims].filter(Boolean).join(', ');
+    const placed = Array.isArray(plan.placed) ? plan.placed : [];
+    const parts: string[] = [];
+    if (placed.length > 0) {
+      parts.push(
+        `${placed.length} placed — ${placed
+          .map((p) => `${p.name} ${p.wCm}x${p.hCm} cm`)
+          .join('; ')}`
+      );
+    }
+    if (plan.pendingPlacements != null && plan.pendingPlacements > 0) {
+      parts.push(`${plan.pendingPlacements} chat item(s) waiting to be placed`);
+    }
+    if (head || parts.length > 0) {
+      lines.push(
+        `- Room plan${title}${head ? ` (${head})` : ''}: ${
+          parts.length > 0 ? parts.join('; ') : 'empty'
+        }.`
+      );
+    }
+  }
+
+  const budget = state.budget;
+  if (budget) {
+    const bits = [`cap RM ${budget.capRm}`];
+    if (budget.room) bits.push(`for ${budget.room}`);
+    const tail: string[] = [];
+    if (budget.estimateRm != null) {
+      tail.push(`catalogue median estimate RM ${budget.estimateRm}`);
+    }
+    if (budget.remainingRm != null) {
+      tail.push(
+        budget.remainingRm >= 0
+          ? `under cap by RM ${budget.remainingRm}`
+          : `over cap by RM ${Math.abs(budget.remainingRm)}`
+      );
+    }
+    const eco = budget.ecoFriendly ? ' (eco-friendly)' : '';
+    lines.push(`- Budget: ${bits.join(' ')}${eco}${tail.length ? `; ${tail.join('; ')}` : ''}.`);
+  }
+
+  const orders = state.orders;
+  if (Array.isArray(orders) && orders.length > 0) {
+    const list = orders
+      .map((o) => {
+        const placedAt = o.placedAt ? `, placed ${o.placedAt.slice(0, 10)}` : '';
+        return `#${o.orderNumber} ${o.status} — RM ${o.total}, ${o.itemCount} item(s)${placedAt}`;
+      })
+      .join('; ');
+    lines.push(`- Recent orders: ${list}.`);
+  }
+
+  if (state.wishlistCount != null && state.wishlistCount > 0) {
+    lines.push(`- Wishlist: ${state.wishlistCount} saved item(s).`);
+  }
+
+  if (lines.length === 0) return '';
+  return (
+    "Customer's live app state (verified app data — cite as fact):\n" +
+    lines.join('\n')
+  ).slice(0, MAX_STATE_CHARS);
 }
 
 /**

@@ -6,9 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:interior_design_recommendation/features/auth/data/models/app_user.dart';
+import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
+import 'package:interior_design_recommendation/features/customer/budget/data/budget_plan.dart';
+import 'package:interior_design_recommendation/features/customer/budget/data/budget_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/chat_datasource.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
+import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_data_card.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_suggestion_card.dart';
 import 'package:interior_design_recommendation/models/cart_item.dart';
@@ -38,8 +43,11 @@ MockClient _client(
     });
 
 class _RecordingCart extends CartNotifier {
+  _RecordingCart([this.seed = const []]);
+  final List<CartItem> seed;
+
   @override
-  List<CartItem> build() => [];
+  List<CartItem> build() => seed;
 
   @override
   void addItem(Product product, {int qty = 1}) {
@@ -47,27 +55,51 @@ class _RecordingCart extends CartNotifier {
   }
 }
 
+AppUser _user() => AppUser(
+      uid: 'u1',
+      email: 'aina@example.com',
+      name: 'Aina',
+      role: UserRole.homeowner,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+
 Future<void> _pumpScreen(
   WidgetTester tester,
   _ChatCapture capture, {
   List<Product> products = const [],
   Stream<List<Product>>? productStream,
   List<Map<String, dynamic>> replySuggestions = const [],
+  List<CartItem> cart = const [],
+  BudgetPlan? budget,
+  bool fail = false,
+  bool signedIn = false,
 }) async {
   await tester.binding.setSurfaceSize(const Size(393, 852));
   addTearDown(() => tester.binding.setSurfaceSize(null));
+  final client = fail
+      ? MockClient((request) async {
+          capture.calls++;
+          capture.body = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"error":{"code":"UPSTREAM_ERROR"}}', 502);
+        })
+      : _client(capture, suggestions: replySuggestions);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         chatDatasourceProvider.overrideWithValue(
           ChatDatasource(
-            client: _client(capture, suggestions: replySuggestions),
+            client: client,
             idTokenProvider: () async => 'tok-123',
           ),
         ),
         marketplaceProductsProvider
             .overrideWith((ref) => productStream ?? Stream.value(products)),
-        cartProvider.overrideWith(() => _RecordingCart()),
+        cartProvider.overrideWith(() => _RecordingCart(cart)),
+        currentUserProvider.overrideWithValue(signedIn ? _user() : null),
+        budgetPlanProvider.overrideWith((ref) => Stream.value(budget)),
+        savedDesignsProvider.overrideWith((ref) => Stream.value(const [])),
+        customerOrdersProvider.overrideWith((ref) => Stream.value(const [])),
       ],
       child: const MaterialApp(home: AiRecommendationScreen()),
     ),
@@ -408,27 +440,8 @@ void main() {
 
   testWidgets('a failed reply lands as a friendly error bubble',
       (tester) async {
-    final failing = MockClient((request) async {
-      return http.Response('{"error":{"code":"UPSTREAM_ERROR"}}', 502);
-    });
-    await tester.binding.setSurfaceSize(const Size(393, 852));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          chatDatasourceProvider.overrideWithValue(
-            ChatDatasource(
-              client: failing,
-              idTokenProvider: () async => 'tok-123',
-            ),
-          ),
-          marketplaceProductsProvider
-              .overrideWith((ref) => Stream.value(const [])),
-        ],
-        child: const MaterialApp(home: AiRecommendationScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture, fail: true);
 
     await _send(tester, 'Hello?');
 
@@ -437,5 +450,134 @@ void main() {
     final saved = await _savedMessages();
     expect(saved.last['text'],
         'The design assistant could not reply. Try again.');
+    expect(capture.calls, 1);
+  });
+
+  testWidgets('cart and budget travel with the request as verified state',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      products: [_chatProduct()],
+      cart: [CartItem(product: _chatProduct(), quantity: 2)],
+      budget: BudgetPlan(
+        budgetRm: 5000,
+        room: 'Kitchen',
+        ecoFriendly: false,
+        updatedAt: DateTime.utc(2026, 1, 1),
+      ),
+    );
+
+    await _send(tester, 'Which sofa fits my room?');
+
+    expect(capture.calls, 1);
+    final state = capture.body!['state'] as Map<String, dynamic>;
+    expect((state['cart'] as Map<String, dynamic>)['itemCount'], 2);
+    expect((state['budget'] as Map<String, dynamic>)['capRm'], 5000);
+  });
+
+  testWidgets('an empty app state omits the state key', (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture);
+
+    await _send(tester, 'Hello there');
+
+    expect(capture.calls, 1);
+    expect(capture.body!.containsKey('state'), isFalse);
+  });
+
+  testWidgets('pure state questions answer locally with a data card',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      cart: [CartItem(product: _chatProduct(), quantity: 1)],
+      products: [_chatProduct()],
+    );
+
+    await _send(tester, "What's in my cart?");
+
+    expect(capture.calls, 0);
+    expect(find.text("Here's what's in your cart right now."), findsOneWidget);
+    expect(find.byType(ChatDataCard), findsOneWidget);
+  });
+
+  testWidgets('a failed state question still shows the exact card',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture, fail: true);
+
+    await _send(tester, 'Can you list every single thing inside my cart today?');
+
+    expect(capture.calls, 1);
+    expect(find.text('The design assistant could not reply. Try again.'),
+        findsOneWidget);
+    expect(find.byType(ChatDataCard), findsOneWidget);
+  });
+
+  testWidgets('overflow menu saves and unsaves the suggestion',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      products: [_chatProduct()],
+      signedIn: true,
+      replySuggestions: [
+        {'productId': 'sofa-1', 'reason': 'Matches your grey floor.'},
+      ],
+    );
+
+    await _send(tester, 'Which sofa fits my room?');
+    expect(find.byType(ChatSuggestionCard), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to wishlist'));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(AiRecommendationScreen)));
+    expect(container.read(wishlistProvider), contains('sofa-1'));
+    expect(find.text('Nordic Sofa saved to your wishlist'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from wishlist'));
+    await tester.pumpAndSettle();
+    expect(container.read(wishlistProvider), isEmpty);
+  });
+
+  testWidgets('overflow menu edits the cart line', (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      products: [_chatProduct()],
+      cart: [CartItem(product: _chatProduct(), quantity: 1)],
+      signedIn: true,
+      replySuggestions: [
+        {'productId': 'sofa-1', 'reason': 'Fits your space.'},
+      ],
+    );
+
+    await _send(tester, 'Which sofa fits my room?');
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Increase quantity'));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(AiRecommendationScreen)));
+    expect(container.read(cartProvider).single.quantity, 2);
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from cart'));
+    await tester.pumpAndSettle();
+    expect(container.read(cartProvider), isEmpty);
+    expect(find.text('Nordic Sofa removed from cart'), findsOneWidget);
   });
 }

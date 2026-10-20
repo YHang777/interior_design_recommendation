@@ -292,3 +292,123 @@ test('chat → an unexpected throw still reaches the error handler', async () =>
     }
   );
 });
+
+const validState = {
+  cart: {
+    items: [{ productId: 'sofa-1', name: 'Nordic Sofa', qty: 1, lineTotal: 1299 }],
+    itemCount: 1,
+    subtotal: 1299,
+  },
+  plan: { name: 'Living Room A', widthCm: 400, heightCm: 500, pendingPlacements: 1 },
+  budget: { capRm: 5000, room: 'Kitchen', estimateRm: 3200, remainingRm: 1800 },
+  orders: [{ orderNumber: 'A102', status: 'shipped', total: 890, itemCount: 2 }],
+  wishlistCount: 5,
+};
+
+test('chat → accepts state and forwards it to the generator', async () => {
+  let seen: unknown;
+  await withServer(
+    {
+      generate: async (req) => {
+        seen = req.state;
+        return { reply: 'ok', suggestions: [] };
+      },
+    },
+    async (base) => {
+      const res = await post(base, { ...validBody, state: validState });
+      assert.equal(res.status, 200);
+    }
+  );
+  assert.deepEqual(seen, validState);
+});
+
+test('chat → state is optional and unknown keys inside it are stripped', async () => {
+  const seen: unknown[] = [];
+  await withServer(
+    {
+      generate: async (req) => {
+        seen.push(req.state);
+        return { reply: 'ok', suggestions: [] };
+      },
+    },
+    async (base) => {
+      await post(base, {
+        ...validBody,
+        state: {
+          wishlistCount: 2,
+          cart: {
+            items: [{ productId: 'sofa-1', name: 'Nordic Sofa', qty: 1, lineTotal: 1299, hacker: 1 }],
+            itemCount: 1,
+            subtotal: 1299,
+          },
+        },
+      });
+      await post(base, validBody);
+    }
+  );
+  assert.deepEqual(seen[0], {
+    wishlistCount: 2,
+    cart: {
+      items: [{ productId: 'sofa-1', name: 'Nordic Sofa', qty: 1, lineTotal: 1299 }],
+      itemCount: 1,
+      subtotal: 1299,
+    },
+  });
+  assert.equal(seen[1], undefined);
+});
+
+test('chat → 400 when the cart carries more than 8 lines', async () => {
+  await withServer({}, async (base) => {
+    const res = await post(base, {
+      ...validBody,
+      state: {
+        cart: {
+          items: Array.from({ length: 9 }, (_, i) => ({
+            productId: `p-${i}`,
+            name: `Item ${i}`,
+            qty: 1,
+            lineTotal: 10,
+          })),
+          itemCount: 9,
+          subtotal: 90,
+        },
+      },
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, 'VALIDATION_ERROR');
+  });
+});
+
+test('chat → 400 when more than 3 orders are sent', async () => {
+  await withServer({}, async (base) => {
+    const res = await post(base, {
+      ...validBody,
+      state: {
+        orders: Array.from({ length: 4 }, (_, i) => ({
+          orderNumber: `A${i}`,
+          status: 'delivered',
+          total: 10,
+          itemCount: 1,
+        })),
+      },
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test('chat → 400 when a cart line productId does not look like an id', async () => {
+  await withServer({}, async (base) => {
+    const res = await post(base, {
+      ...validBody,
+      state: {
+        cart: {
+          items: [{ productId: 'bad id!', name: 'Sofa', qty: 1, lineTotal: 10 }],
+          itemCount: 1,
+          subtotal: 10,
+        },
+      },
+    });
+    assert.equal(res.status, 400);
+  });
+});

@@ -107,6 +107,7 @@ class ChatDatasource {
     String? style,
     String? room,
     List<ChatProduct> products = const [],
+    Map<String, Object?>? state,
   }) async {
     final base = AppConfig.chatApiUrl.trim();
     if (base.isEmpty) {
@@ -132,6 +133,7 @@ class ChatDatasource {
               if (style != null && style.isNotEmpty) 'style': style,
               if (room != null && room.isNotEmpty) 'room': room,
               'products': [for (final p in products) p.toJson()],
+              if (state != null) 'state': state,
             }),
           )
           .timeout(_timeout);

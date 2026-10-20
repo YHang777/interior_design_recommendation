@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../../../core/constants/app_colors.dart';
-import '../../../../../../core/router/route_names.dart';
 import '../../../../../../core/utils/formatters.dart';
 import '../../../../../../core/utils/user_errors.dart';
 import '../../../../../../models/chat_session.dart';
 import '../../../../../../models/product.dart';
-import '../../../../../../shared/widgets/app_feedback.dart';
-import '../../../../../../shared/widgets/filter_chip_bar.dart';
 import '../../../../homeowner/data/chat_product_mapper.dart';
+import '../../../../homeowner/data/chat_state_answers.dart';
+import '../../../../homeowner/data/chat_state_context.dart';
 import '../../../../homeowner/data/datasources/chat_datasource.dart';
 import '../../../../homeowner/presentation/providers/design_providers.dart';
+import '../../../../homeowner/presentation/widgets/chat_card_actions.dart';
+import '../../../../homeowner/presentation/widgets/chat_data_card.dart';
+import '../../../../homeowner/presentation/widgets/chat_proactive_chip_bar.dart';
 import '../../../../homeowner/presentation/widgets/chat_suggestion_card.dart';
 import '../../providers/marketplace_providers.dart';
 
@@ -113,6 +114,25 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
     setState(() => _sending = true);
     _scrollToBottom();
 
+    final match = matchStateQuestion(text);
+    final dataCard =
+        match == null ? null : ChatDataCardRef(topic: match.topic);
+
+    if (match != null && match.isPure) {
+      widget.messages.add(ChatMessage(
+        role: 'model',
+        text: cannedLine(match.topic),
+        createdAt: DateTime.now(),
+        dataCard: dataCard,
+      ));
+      widget.onMessagesChanged();
+      if (mounted) {
+        setState(() => _sending = false);
+        _scrollToBottom();
+      }
+      return;
+    }
+
     try {
       final home = _householdSession();
       final result = await ref.read(chatDatasourceProvider).send(
@@ -120,6 +140,7 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
             style: home?.style,
             room: home?.room,
             products: productsToChatContext(widget.products),
+            state: ref.read(chatStatePayloadProvider),
           );
       if (!mounted) return;
       final live =
@@ -129,6 +150,7 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
         text: result.reply,
         createdAt: DateTime.now(),
         suggestions: hydrateChatSuggestions(result.suggestions, live),
+        dataCard: dataCard,
       ));
       widget.onMessagesChanged();
     } catch (e) {
@@ -138,6 +160,7 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
         text: userMessage(e,
             fallback: 'Sorry, something went wrong. Please try again.'),
         createdAt: DateTime.now(),
+        dataCard: dataCard,
       ));
       widget.onMessagesChanged();
     } finally {
@@ -159,60 +182,11 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
     });
   }
 
-  void _addToCart(ChatSuggestionSnapshot suggestion) {
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    Product? live;
-    for (final p in products) {
-      if (p.id == suggestion.productId) {
-        live = p;
-        break;
-      }
-    }
-    final product = live;
-    if (product == null || !product.isActive || product.isOutOfStock) {
-      showAppSnackbar(context, 'That item is no longer available.');
-      return;
-    }
-    ref.read(cartProvider.notifier).addItem(product);
-    showAddedToCartSnack(
-      context,
-      '${product.name} added to cart',
-      onViewCart: () => context.pushNamed(RouteNames.homeownerCart),
-    );
-  }
-
-  void _placeInLayout(ChatSuggestionSnapshot suggestion) {
-    final products =
-        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
-    Product? live;
-    for (final p in products) {
-      if (p.id == suggestion.productId) {
-        live = p;
-        break;
-      }
-    }
-    final product = live;
-    if (product == null) {
-      showAppSnackbar(context, 'That item is no longer available.',
-          color: AppColors.error);
-      return;
-    }
-    ref
-        .read(pendingChatPlacementsProvider.notifier)
-        .enqueue(chatPlacementForProduct(product));
-    showAppSnackbar(
-      context,
-      '${product.name} added to your room plan',
-      color: AppColors.success,
-      actionLabel: 'View plan',
-      onAction: () {
-        final router = GoRouter.of(context);
-        Navigator.of(context).pop();
-        router.go('/design');
-      },
-    );
-  }
+  ChatCardActions _cardActions() => ChatCardActions(
+        context: context,
+        ref: ref,
+        onBeforeNavigate: () => Navigator.of(context).pop(),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -293,10 +267,9 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                FilterChipBar<String>(
-                  options: [kFitHomeQuestion, ...widget.quickQuestions],
-                  selected: null,
-                  onSelected: _fillInput,
+                ChatProactiveChipBar(
+                  onPrompt: _fillInput,
+                  fillers: [kFitHomeQuestion, ...widget.quickQuestions],
                 ),
                 const SizedBox(height: 4),
                 Container(
@@ -401,11 +374,12 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
                     fontSize: 14,
                     color: isAI ? AppColors.textPrimary : Colors.white,
                     height: 1.4)),
+            if (msg.dataCard != null)
+              ChatDataCard(topic: msg.dataCard!.topic),
             for (final s in cards)
               ChatSuggestionCard(
                 suggestion: s,
-                onAdd: () => _addToCart(s),
-                onPlace: () => _placeInLayout(s),
+                actions: _cardActions(),
               ),
           ],
         ),
