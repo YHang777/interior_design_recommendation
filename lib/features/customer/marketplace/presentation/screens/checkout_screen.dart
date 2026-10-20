@@ -10,6 +10,7 @@ import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/cart_item.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/product.dart';
+import '../../../../../models/saved_address.dart';
 import '../../../../../services/marketplace_repository.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
@@ -36,6 +37,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   late final TextEditingController _addressCtrl;
   String _paymentMethod = 'fpx';
   bool _submitting = false;
+  String? _selectedAddressId;
 
   String? _pendingOrderId;
 
@@ -46,6 +48,64 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     _nameCtrl = TextEditingController(text: user?.name ?? '');
     _phoneCtrl = TextEditingController(text: user?.phone ?? '');
     _addressCtrl = TextEditingController(text: user?.address ?? '');
+
+    ref.listenManual(
+      savedAddressesProvider,
+      (prev, next) {
+        final addresses = next.valueOrNull;
+        if (addresses == null || addresses.isEmpty) return;
+        if (_selectedAddressId != null) return;
+        final preferred = addresses.firstWhere(
+          (a) => a.isDefault,
+          orElse: () => addresses.first,
+        );
+        _applyAddress(preferred);
+      },
+      fireImmediately: true,
+    );
+  }
+
+  void _applyAddress(SavedAddress address) {
+    _nameCtrl.text = address.recipientName;
+    _phoneCtrl.text = address.phone;
+    _addressCtrl.text = address.address;
+    setState(() => _selectedAddressId = address.id);
+  }
+
+  void _onAddressFieldEdited() {
+    if (_selectedAddressId != null) {
+      setState(() => _selectedAddressId = null);
+    }
+  }
+
+  Future<void> _autoSaveAddress() async {
+    try {
+      final user = ref.read(currentUserProvider);
+      if (user == null) return;
+      // A picked saved address is already stored; only new input is saved.
+      if (_selectedAddressId != null) return;
+      final name = _nameCtrl.text.trim();
+      final phone = _phoneCtrl.text.trim();
+      final address = _addressCtrl.text.trim();
+      if (name.isEmpty || address.length < 10) return;
+      final existing =
+          ref.read(savedAddressesProvider).valueOrNull ?? const <SavedAddress>[];
+      final saved = SavedAddress(
+        id: MarketplaceRepository.newOrderId(),
+        label: existing.isEmpty ? 'Home' : 'Address',
+        recipientName: name,
+        phone: phone,
+        address: address,
+        isDefault: existing.isEmpty,
+        createdAt: DateTime.now(),
+      );
+      await ref.read(marketplaceRepositoryProvider).saveAddress(
+            user.uid,
+            saved,
+          );
+    } catch (_) {
+      // Saving the address must never block or fail the order.
+    }
   }
 
   @override
@@ -213,6 +273,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       final created = await repo.createOrder(order);
       if (!mounted) return;
 
+      await _autoSaveAddress();
+      if (!mounted) return;
+
       if (buyNow == null) {
         await ref.read(cartProvider.notifier).clearAndPersist();
         if (!mounted) return;
@@ -292,6 +355,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         : _checkoutRows();
     final configAsync = ref.watch(configProvider);
     final tier = ref.watch(customerMembershipTierProvider);
+    final savedAddresses =
+        ref.watch(savedAddressesProvider).valueOrNull ?? const <SavedAddress>[];
 
     final config = configAsync.valueOrNull;
     final moneyReady = config != null;
@@ -355,9 +420,20 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     ),
                     child: Column(
                       children: [
+                        if (savedAddresses.isNotEmpty) ...[
+                          _SavedAddressPicker(
+                            addresses: savedAddresses,
+                            selectedId: _selectedAddressId,
+                            onSelected: _applyAddress,
+                            onManage: () =>
+                                context.push('/profile/addresses'),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         TextFormField(
                           controller: _nameCtrl,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) => _onAddressFieldEdited(),
                           decoration: const InputDecoration(
                             labelText: 'Full name',
                             prefixIcon: Icon(Icons.person_outline),
@@ -374,6 +450,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
                           textInputAction: TextInputAction.next,
+                          onChanged: (_) => _onAddressFieldEdited(),
                           decoration: const InputDecoration(
                             labelText: 'Phone number',
                             hintText: 'e.g. 012-345 6789',
@@ -385,6 +462,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         TextFormField(
                           controller: _addressCtrl,
                           maxLines: 3,
+                          onChanged: (_) => _onAddressFieldEdited(),
                           decoration: const InputDecoration(
                             labelText: 'Delivery address',
                             hintText: 'Street, area, city, postcode, state',
@@ -800,6 +878,90 @@ class _ItemSummaryRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SavedAddressPicker extends StatelessWidget {
+  const _SavedAddressPicker({
+    required this.addresses,
+    required this.selectedId,
+    required this.onSelected,
+    required this.onManage,
+  });
+
+  final List<SavedAddress> addresses;
+  final String? selectedId;
+  final ValueChanged<SavedAddress> onSelected;
+  final VoidCallback onManage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.bookmark_outline,
+                size: 14, color: AppColors.textSecondary),
+            const SizedBox(width: 6),
+            const Text(
+              'Saved addresses',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: onManage,
+              child: const Text(
+                'Manage',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.accent,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 34,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: addresses.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final a = addresses[i];
+              final selected = a.id == selectedId;
+              return ChoiceChip(
+                label: Text(
+                  a.isDefault ? '★ ${a.label}' : a.label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.white : AppColors.textPrimary,
+                  ),
+                ),
+                selected: selected,
+                onSelected: (_) => onSelected(a),
+                selectedColor: AppColors.accent,
+                backgroundColor: AppColors.surface,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: selected ? AppColors.accent : AppColors.border,
+                  ),
+                ),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

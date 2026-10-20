@@ -11,6 +11,7 @@ import '../models/order.dart';
 import '../models/product.dart';
 import '../models/product_category.dart';
 import '../models/review.dart';
+import '../models/saved_address.dart';
 import 'media/media_store.dart';
 import 'model_generation/model_glb_resolver.dart';
 
@@ -73,6 +74,8 @@ class MarketplaceRepository {
       _db.collection(_usersCol).doc(uid).collection('cart');
   CollectionReference<Map<String, dynamic>> _userWishlist(String uid) =>
       _db.collection(_usersCol).doc(uid).collection('wishlist');
+  CollectionReference<Map<String, dynamic>> _userAddresses(String uid) =>
+      _db.collection(_usersCol).doc(uid).collection('addresses');
   CollectionReference<Map<String, dynamic>> _reviews(String productId) =>
       _products.doc(productId).collection('reviews');
 
@@ -435,6 +438,42 @@ class MarketplaceRepository {
 
   Future<void> removeFromWishlist(String uid, String productId) async {
     await _userWishlist(uid).doc(productId).delete();
+  }
+
+  // ── Saved addresses ─────────────────────────────────────────────────────
+
+  Stream<List<SavedAddress>> watchAddresses(String uid) {
+    return _userAddresses(uid).snapshots().map((snap) {
+      final list =
+          snap.docs.map((d) => SavedAddress.fromJson(d.data())).toList();
+      list.sort((a, b) {
+        if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+        return b.createdAt.compareTo(a.createdAt);
+      });
+      return list;
+    });
+  }
+
+  Future<void> saveAddress(String uid, SavedAddress address) async {
+    await _userAddresses(uid).doc(address.id).set(address.toJson());
+  }
+
+  Future<void> deleteAddress(String uid, String addressId) async {
+    await _userAddresses(uid).doc(addressId).delete();
+  }
+
+  Future<void> setDefaultAddress(String uid, String addressId) async {
+    final col = _userAddresses(uid);
+    final snap = await col.get();
+    final batch = _db.batch();
+    for (final d in snap.docs) {
+      final shouldBeDefault = d.id == addressId;
+      final currentlyDefault = d.data()['isDefault'] == true;
+      if (currentlyDefault != shouldBeDefault) {
+        batch.update(d.reference, {'isDefault': shouldBeDefault});
+      }
+    }
+    await batch.commit();
   }
 
   // ── Reviews ─────────────────────────────────────────────────────────────

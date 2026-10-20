@@ -134,6 +134,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
     final productsAsync = ref.watch(marketplaceProductsProvider);
     final filtered = ref.watch(filteredProductsProvider);
     final cartCount = ref.watch(cartCountProvider);
+    final wishlistIds = ref.watch(wishlistProvider);
     final wishlistCount = ref.watch(wishlistCountProvider);
     final ordersAsync = ref.watch(customerOrdersProvider);
     final orderCount = ordersAsync.whenOrNull(data: (o) => o.length) ?? 0;
@@ -252,9 +253,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                           final product = filtered[index];
                           return ProductCard(
                             product: product,
-                            isWishlisted: ref
-                                .watch(wishlistProvider)
-                                .contains(product.id),
+                            isWishlisted: wishlistIds.contains(product.id),
                             onTap: () => _openProduct(product),
                             onArPreview: () => context.pushNamed(
                               RouteNames.arViewer,

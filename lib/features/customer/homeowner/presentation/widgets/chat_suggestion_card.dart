@@ -13,11 +13,13 @@ class ChatSuggestionCard extends StatelessWidget {
     super.key,
     required this.suggestion,
     required this.onAdd,
+    this.onPlace,
   });
 
   final ChatSuggestionSnapshot suggestion;
 
   final VoidCallback onAdd;
+  final VoidCallback? onPlace;
 
   void _openDetail(BuildContext context) {
     context.pushNamed(
@@ -116,6 +118,24 @@ class ChatSuggestionCard extends StatelessWidget {
               visualDensity: VisualDensity.compact,
             ),
           ),
+          if (onPlace != null)
+            TextButton.icon(
+              onPressed: onPlace,
+              icon: const Icon(Icons.weekend_outlined, size: 16),
+              label: Text(
+                'Place',
+                style: GoogleFonts.poppins(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.secondaryAccent,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 36),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
         ],
       ),
     );

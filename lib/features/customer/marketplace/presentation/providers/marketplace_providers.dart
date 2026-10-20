@@ -8,6 +8,7 @@ import '../../../../../models/cart_item.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/app_config_data.dart';
 import '../../../../../models/review.dart';
+import '../../../../../models/saved_address.dart';
 import '../../../../../services/marketplace_repository.dart';
 import '../../../../../services/recent_searches_store.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -399,30 +400,35 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
     ref.read(cartHydratedProvider.notifier).state = false;
 
-    final repo = ref.watch(marketplaceRepositoryProvider);
+    try {
+      final repo = ref.watch(marketplaceRepositoryProvider);
 
-    _productsSub = repo.watchProducts().listen(
-          (products) {
-            _latestProducts = products;
-            _reconcileAgainstLive();
-          },
-          onError: (Object e, StackTrace st) {
-            debugPrint('[cart] products watch failed: $e');
-          },
-        );
+      _productsSub = repo.watchProducts().listen(
+            (products) {
+              _latestProducts = products;
+              _reconcileAgainstLive();
+            },
+            onError: (Object e, StackTrace st) {
+              debugPrint('[cart] products watch failed: $e');
+            },
+          );
 
-    if (uid == null) return [];
-
-    _cartSub = repo.watchCart(uid).listen(
-          (items) {
-            state = _clampQuantitiesToStock(items);
-            ref.read(cartHydratedProvider.notifier).state = true;
-          },
-          onError: (Object e, StackTrace st) {
-            debugPrint('[cart] watch failed: $e');
-            ref.read(cartHydratedProvider.notifier).state = true;
-          },
-        );
+      if (uid != null) {
+        _cartSub = repo.watchCart(uid).listen(
+              (items) {
+                state = _clampQuantitiesToStock(items);
+                ref.read(cartHydratedProvider.notifier).state = true;
+              },
+              onError: (Object e, StackTrace st) {
+                debugPrint('[cart] watch failed: $e');
+                ref.read(cartHydratedProvider.notifier).state = true;
+              },
+            );
+      }
+    } catch (e) {
+      debugPrint('[cart] setup failed: $e');
+      ref.read(cartHydratedProvider.notifier).state = true;
+    }
     return [];
   }
 
@@ -713,12 +719,16 @@ class WishlistNotifier extends Notifier<Set<String>> {
 
     if (uid == null) return {};
 
-    final repo = ref.watch(marketplaceRepositoryProvider);
-    _wishSub = repo.watchWishlistIds(uid).listen(
-          (ids) => state = ids.toSet(),
-          onError: (Object e, StackTrace st) =>
-              debugPrint('[wishlist] watch failed: $e'),
-        );
+    try {
+      final repo = ref.watch(marketplaceRepositoryProvider);
+      _wishSub = repo.watchWishlistIds(uid).listen(
+            (ids) => state = ids.toSet(),
+            onError: (Object e, StackTrace st) =>
+                debugPrint('[wishlist] watch failed: $e'),
+          );
+    } catch (e) {
+      debugPrint('[wishlist] setup failed: $e');
+    }
     return {};
   }
 
@@ -774,6 +784,19 @@ final wishlistProvider =
 
 final wishlistCountProvider = Provider<int>((ref) {
   return ref.watch(wishlistProvider).length;
+});
+
+// ─── Saved addresses (checkout address book) ─────────────────────────────────
+
+final savedAddressesProvider = StreamProvider<List<SavedAddress>>((ref) {
+  final uid = ref.watch(currentUserProvider)?.uid;
+  if (uid == null) return Stream.value(const []);
+  try {
+    return ref.watch(marketplaceRepositoryProvider).watchAddresses(uid);
+  } catch (e) {
+    debugPrint('[addresses] setup failed: $e');
+    return Stream.value(const []);
+  }
 });
 
 // ─── Orders (real-time, role-scoped) ─────────────────────────────────────────

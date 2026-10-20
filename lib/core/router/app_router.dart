@@ -33,6 +33,7 @@ import '../../features/customer/marketplace/presentation/screens/order_confirmat
 import '../../features/customer/marketplace/presentation/screens/order_history_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/buyer_order_detail_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/wishlist_screen.dart';
+import '../../features/customer/marketplace/presentation/screens/saved_addresses_screen.dart';
 import '../../features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/customer/ar/data/furniture_model_library.dart';
 import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
@@ -175,6 +176,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/marketplace/wishlist',
         name: RouteNames.homeownerWishlist,
         pageBuilder: (_, __) => _buildPage(const WishlistScreen()),
+      ),
+
+      // ── Saved addresses (checkout address book, full-screen) ──
+      GoRoute(
+        path: '/profile/addresses',
+        name: RouteNames.homeownerSavedAddresses,
+        pageBuilder: (_, __) => _buildPage(const SavedAddressesScreen()),
       ),
 
       // ── Supplier product form (create / edit, full-screen) ──

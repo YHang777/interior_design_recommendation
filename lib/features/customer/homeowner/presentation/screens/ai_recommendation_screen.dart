@@ -470,6 +470,7 @@ class _AiRecommendationScreenState
               ChatSuggestionCard(
                 suggestion: s,
                 onAdd: () => _addToCart(s),
+                onPlace: () => _placeInLayout(s),
               ),
           ],
         ),
@@ -497,6 +498,34 @@ class _AiRecommendationScreenState
       context,
       '${product.name} added to cart',
       onViewCart: () => context.pushNamed(RouteNames.homeownerCart),
+    );
+  }
+
+  void _placeInLayout(ChatSuggestionSnapshot suggestion) {
+    final products =
+        ref.read(marketplaceProductsProvider).valueOrNull ?? const [];
+    Product? live;
+    for (final p in products) {
+      if (p.id == suggestion.productId) {
+        live = p;
+        break;
+      }
+    }
+    final product = live;
+    if (product == null) {
+      showAppSnackbar(context, 'That item is no longer available.',
+          color: AppColors.error);
+      return;
+    }
+    ref
+        .read(pendingChatPlacementsProvider.notifier)
+        .enqueue(chatPlacementForProduct(product));
+    showAppSnackbar(
+      context,
+      '${product.name} added to your room plan',
+      color: AppColors.success,
+      actionLabel: 'View plan',
+      onAction: () => context.go('/design'),
     );
   }
 

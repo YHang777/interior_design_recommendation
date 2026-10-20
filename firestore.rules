@@ -161,6 +161,11 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    // ── Per-user saved addresses (checkout address book, owner only) ──
+    match /users/{uid}/addresses/{addressId} {
+      allow read, write: if isOwner(uid);
+    }
+
     // ── Room designs: owner can CRUD their own designs ──
     match /room_designs/{designId} {
       allow read, update, delete: if signedIn() &&

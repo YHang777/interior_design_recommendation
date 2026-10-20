@@ -323,6 +323,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 title: 'Settings',
                 accentColor: AppColors.textHint,
                 children: [
+                  _LinkRow(Icons.location_on_outlined, 'Saved addresses',
+                      () => pushOnce(context, '/profile/addresses')),
                   _LinkRow(Icons.lock_outline, 'Change Password', () {
                     final email = user?.email ?? '';
                     if (email.isEmpty) {

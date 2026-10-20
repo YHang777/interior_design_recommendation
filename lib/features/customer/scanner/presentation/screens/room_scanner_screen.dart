@@ -116,6 +116,37 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     } else {
       _stage = _Stage.plan;
     }
+
+    ref.listenManual(
+      pendingChatPlacementsProvider,
+      (prev, next) {
+        if (next.isEmpty) return;
+        final placements =
+            ref.read(pendingChatPlacementsProvider.notifier).drain();
+        _applyChatPlacements(placements);
+      },
+      fireImmediately: true,
+    );
+  }
+
+  void _applyChatPlacements(List<FurniturePlacement> placements) {
+    if (placements.isEmpty) return;
+    var slot = _furniture.length;
+    final added = <FurniturePlacement>[];
+    for (final p in placements) {
+      final maxX = max(1.0, _roomW - p.width);
+      final maxY = max(1.0, _roomH - p.height);
+      final x = (20.0 + (slot % 3) * 110.0)
+          .clamp(5.0, max(5.0, maxX - 5))
+          .toDouble();
+      final y = (40.0 + ((slot ~/ 3) % 3) * 130.0)
+          .clamp(5.0, max(5.0, maxY - 5))
+          .toDouble();
+      added.add(p.copyWith(x: x, y: y));
+      slot++;
+    }
+    if (!mounted) return;
+    setState(() => _furniture = [..._furniture, ...added]);
   }
 
   Future<void> _setupCam() async {
@@ -176,7 +207,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _scanDeadline =
           DateTime.now().add(Duration(seconds: _scanDurationSec));
     });
-    _cam!.startImageStream(_onCameraFrame);
+    try {
+      await _cam!.startImageStream(_onCameraFrame);
+    } catch (_) {
+      if (mounted) setState(() => _stage = _Stage.plan);
+      return;
+    }
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => _elapsed++);
@@ -190,7 +227,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   void _onCameraFrame(CameraImage image) {
-    if (_stage != _Stage.scanning || _processingFrame) return;
+    if (!mounted || _stage != _Stage.scanning || _processingFrame) return;
     final now = DateTime.now();
     final last = _lastProcessedAt;
     if (last != null &&
@@ -264,20 +301,26 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     _timer?.cancel();
     _autoPlaceFound();
     if (mounted) setState(() => _stage = _Stage.plan);
-    unawaited(_releaseCam());
+    WidgetsBinding.instance.endOfFrame.whenComplete(_releaseCam);
   }
 
   void _autoPlaceFound() {
     final rng = Random();
     final items = <FurniturePlacement>[];
+    final base = _furniture.length;
     for (final f in _found) {
       final cat = _matchCatalog(f.label);
-      var x = (rng.nextDouble() * (_roomW - cat.defaultWidth))
-          .clamp(10.0, _roomW - cat.defaultWidth - 10);
-      var y = (rng.nextDouble() * (_roomH - cat.defaultHeight))
-          .clamp(10.0, _roomH - cat.defaultHeight - 10);
+      final maxW = max(1.0, _roomW - cat.defaultWidth);
+      final maxH = max(1.0, _roomH - cat.defaultHeight);
+      final x = (rng.nextDouble() * maxW)
+          .clamp(10.0, max(10.0, maxW - 10))
+          .toDouble();
+      final y = (rng.nextDouble() * maxH)
+          .clamp(10.0, max(10.0, maxH - 10))
+          .toDouble();
       var item = FurniturePlacement(
-        id: DateTime.now().microsecondsSinceEpoch.toString() + items.length.toString(),
+        id: DateTime.now().microsecondsSinceEpoch.toString() +
+            (base + items.length).toString(),
         name: cat.name,
         iconName: cat.iconName,
         x: x,
@@ -289,7 +332,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       item = _clampToWalls(item);
       items.add(item);
     }
-    setState(() => _furniture = items);
+    if (!mounted || items.isEmpty) return;
+    setState(() => _furniture = [..._furniture, ...items]);
   }
 
   _Cat _matchCatalog(String label) {
@@ -450,15 +494,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   void _addFromCatalog(_Cat cat) {
     final id =
         DateTime.now().microsecondsSinceEpoch.toString();
-    var x = ((20 + _furniture.length * 30) %
-            (_roomW - cat.defaultWidth).toInt())
+    final maxX = max(1, (_roomW - cat.defaultWidth).toInt());
+    final maxY = max(1, (_roomH - cat.defaultHeight).toInt());
+    var x = ((20 + _furniture.length * 30) % maxX)
         .toDouble()
-        .clamp(5, _roomW - cat.defaultWidth - 5)
+        .clamp(5, max(5.0, _roomW - cat.defaultWidth - 5))
         .toDouble();
-    var y = ((15 + _furniture.length * 35) %
-            (_roomH - cat.defaultHeight).toInt())
+    var y = ((15 + _furniture.length * 35) % maxY)
         .toDouble()
-        .clamp(5, _roomH - cat.defaultHeight - 5)
+        .clamp(5, max(5.0, _roomH - cat.defaultHeight - 5))
         .toDouble();
     var item = FurniturePlacement(
       id: id,
@@ -592,7 +636,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _cam?.stopImageStream();
     } catch (_) {}
     _labeler.close();
-    _cam?.dispose();
+    try {
+      _cam?.dispose();
+    } catch (_) {}
     _wallsRev.dispose();
     super.dispose();
   }
@@ -694,18 +740,25 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   // ─── Init view (camera preview) ───
+  Widget _camPreview() {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) {
+      return const ColoredBox(
+          color: Colors.black,
+          child: Center(
+              child:
+                  Icon(Icons.camera_alt, size: 64, color: Colors.white38)));
+    }
+    return CameraPreview(cam);
+  }
+
   Widget _initView() {
     final ready = _cam != null && _cam!.value.isInitialized;
     return Column(
       children: [
         Expanded(
-          child: ready
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: CameraPreview(_cam!))
-              : const Center(
-                  child:
-                      Icon(Icons.camera_alt, size: 64, color: Colors.white38)),
+          child: ClipRRect(
+              borderRadius: BorderRadius.circular(16), child: _camPreview()),
         ),
         const SizedBox(height: 20),
         Text('Point camera at the room',
@@ -742,7 +795,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             children: [
               ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: CameraPreview(_cam!)),
+                  child: _camPreview()),
               Positioned(
                 top: 12,
                 right: 12,

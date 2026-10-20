@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../models/chat_session.dart';
+import '../../../../../models/product.dart';
 import '../../../../../models/room_design.dart';
 import '../../../../../services/chat_history_store.dart';
 import '../../data/datasources/chat_datasource.dart';
@@ -252,3 +253,89 @@ final selectedPlacementIndexProvider = StateProvider<int>((ref) => -1);
 final editorRoomWidthProvider = StateProvider<double>((ref) => 400);
 
 final editorRoomHeightProvider = StateProvider<double>((ref) => 500);
+
+// ─── Chat suggestions → room-plan placements ──────────────────────────────────
+
+class ChatPlacementsNotifier extends StateNotifier<List<FurniturePlacement>> {
+  ChatPlacementsNotifier() : super(const []);
+
+  void enqueue(FurniturePlacement placement) {
+    state = [...state, placement];
+  }
+
+  List<FurniturePlacement> drain() {
+    final pending = state;
+    if (pending.isNotEmpty) state = const [];
+    return pending;
+  }
+}
+
+final pendingChatPlacementsProvider =
+    StateNotifierProvider<ChatPlacementsNotifier, List<FurniturePlacement>>(
+        (ref) => ChatPlacementsNotifier());
+
+FurniturePlacement chatPlacementForProduct(Product product) {
+  final iconName = _chatIconNameFor(product);
+  final fallback = _chatCatalogSizes[iconName] ?? (80.0, 60.0);
+  var width = fallback.$1;
+  var height = fallback.$2;
+  final dims = product.dimensions;
+  if (dims != null && dims.widthM > 0) {
+    width = (dims.widthM * 100).clamp(10.0, 300.0).toDouble();
+  }
+  if (dims != null && dims.heightM > 0) {
+    height = (dims.heightM * 100).clamp(10.0, 300.0).toDouble();
+  }
+  return FurniturePlacement(
+    id: 'chat-${product.id}-${DateTime.now().microsecondsSinceEpoch}',
+    name: product.name,
+    iconName: iconName,
+    x: 20,
+    y: 20,
+    width: width,
+    height: height,
+  );
+}
+
+const _chatCatalogSizes = <String, (double, double)>{
+  'sofa': (180, 90),
+  'armchair': (70, 70),
+  'coffee_table': (100, 50),
+  'dining_table': (140, 100),
+  'bed': (200, 160),
+  'cabinet': (90, 50),
+  'desk': (120, 60),
+  'floor_lamp': (25, 25),
+  'plant': (30, 30),
+  'tv_stand': (140, 45),
+  'rug': (160, 120),
+  'bookshelf': (90, 30),
+};
+
+String _chatIconNameFor(Product product) {
+  final source = '${product.category} ${product.name}'.toLowerCase();
+  const keys = <String, String>{
+    'coffee table': 'coffee_table',
+    'dining table': 'dining_table',
+    'tv stand': 'tv_stand',
+    'armchair': 'armchair',
+    'bookshelf': 'bookshelf',
+    'wardrobe': 'cabinet',
+    'cabinet': 'cabinet',
+    'couch': 'sofa',
+    'sofa': 'sofa',
+    'chair': 'armchair',
+    'desk': 'desk',
+    'shelf': 'bookshelf',
+    'bed': 'bed',
+    'rug': 'rug',
+    'carpet': 'rug',
+    'lamp': 'floor_lamp',
+    'light': 'floor_lamp',
+    'plant': 'plant',
+  };
+  for (final entry in keys.entries) {
+    if (source.contains(entry.key)) return entry.value;
+  }
+  return 'unknown';
+}

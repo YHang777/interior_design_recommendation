@@ -256,6 +256,74 @@ void main() {
     expect(find.text('Nordic Sofa added to cart'), findsOneWidget);
   });
 
+  testWidgets('Place queues a room-plan placement for the scanner to pick up',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(
+      tester,
+      capture,
+      products: [_chatProduct()],
+      replySuggestions: [
+        {'productId': 'sofa-1', 'reason': 'Fits your space.'},
+      ],
+    );
+
+    await _send(tester, 'Which sofa fits my room?');
+
+    await tester.tap(find.widgetWithText(TextButton, 'Place'));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+        tester.element(find.byType(AiRecommendationScreen)));
+    final pending = container.read(pendingChatPlacementsProvider);
+    expect(pending, hasLength(1));
+    expect(pending.single.name, 'Nordic Sofa');
+    expect(pending.single.iconName, 'sofa');
+    expect(pending.single.width, 180);
+    expect(pending.single.height, 90);
+    expect(find.text('Nordic Sofa added to your room plan'), findsOneWidget);
+
+    // Draining hands the placement over exactly once.
+    final drained =
+        container.read(pendingChatPlacementsProvider.notifier).drain();
+    expect(drained, hasLength(1));
+    expect(container.read(pendingChatPlacementsProvider), isEmpty);
+  });
+
+  test('chatPlacementForProduct maps catalogue dims and falls back to catalog',
+      () {
+    final withDims = Product.fromJson({
+      'id': 'sofa-2',
+      'name': 'Deep Sofa',
+      'price': 999,
+      'stock': 1,
+      'category': 'Sofa',
+      'description': '',
+      'image': '',
+      'dimensions': {'widthM': 2.0, 'heightM': 0.5, 'depthM': 1.0},
+    });
+    final mapped = chatPlacementForProduct(withDims);
+    expect(mapped.iconName, 'sofa');
+    expect(mapped.width, 200);
+    expect(mapped.height, 50);
+    expect(mapped.name, 'Deep Sofa');
+    expect(mapped.id, contains('sofa-2'));
+
+    final noDims = Product.fromJson({
+      'id': 'lamp-9',
+      'name': 'Arc Lamp',
+      'price': 120,
+      'stock': 2,
+      'category': 'Lighting',
+      'description': '',
+      'image': '',
+    });
+    final fallback = chatPlacementForProduct(noDims);
+    expect(fallback.iconName, 'floor_lamp');
+    expect(fallback.width, 25);
+    expect(fallback.height, 25);
+  });
+
   testWidgets(
       'a card whose listing vanished says so and keeps the cart empty',
       (tester) async {
