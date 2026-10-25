@@ -78,7 +78,7 @@ export function toProductRow(productId: string, raw: Record<string, unknown>): A
   };
 }
 
-/** products/{id} → detail row (list fields + copy, shipping, read-only echoes). */
+/** products/{id} → detail row (list fields + copy, read-only echoes). */
 export function toProductDetail(
   productId: string,
   raw: Record<string, unknown>
@@ -95,9 +95,6 @@ export function toProductDetail(
     ...toProductRow(productId, data),
     description: nestedString(data, 'description'),
     images,
-    shippingEnabled: data.shippingEnabled === true,
-    shippingFee: Math.max(0, Math.round(nestedNumber(data, 'shippingFee'))),
-    shippingLongDistanceNotice: data.shippingLongDistanceNotice === true,
     ar3dStatus: nestedString(ar3d, 'status') || 'none',
     visionFlagged: mismatch.flagged === true,
     supplierPhone: nestedString(supplier, 'phone') || nestedString(data, 'supplierPhone'),
@@ -106,7 +103,7 @@ export function toProductDetail(
   };
 }
 
-/** Only the 12 editable fields ever reach Firestore — field-level update. */
+/** Only the 9 editable fields ever reach Firestore — field-level update. */
 export function buildProductUpdateData(patch: ProductUpdate): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (typeof patch.name === 'string') out.name = patch.name;
@@ -119,11 +116,6 @@ export function buildProductUpdateData(patch: ProductUpdate): Record<string, unk
   if (typeof patch.stock === 'number') out.stock = Math.round(patch.stock);
   if (typeof patch.isActive === 'boolean') out.isActive = patch.isActive;
   if (typeof patch.isEcoFriendly === 'boolean') out.isEcoFriendly = patch.isEcoFriendly;
-  if (typeof patch.shippingEnabled === 'boolean') out.shippingEnabled = patch.shippingEnabled;
-  if (typeof patch.shippingFee === 'number') out.shippingFee = Math.max(0, Math.round(patch.shippingFee));
-  if (typeof patch.shippingLongDistanceNotice === 'boolean') {
-    out.shippingLongDistanceNotice = patch.shippingLongDistanceNotice;
-  }
   return out;
 }
 

@@ -125,18 +125,18 @@ void main() {
     expect(_labels(lit), isNot(contains('Lighting for my living room')));
   });
 
-  test('shipped orders surface a tracking chip', () {
+  test('orders awaiting collection surface an order-status chip', () {
     final chips = buildProactiveChips(_inputs(
       budget: _budget(9999),
-      latestOrderStatus: 'shipped',
+      latestOrderStatus: 'waitingCollection',
     ));
     expect(_labels(chips), contains("Where's my order?"));
 
-    final delivered = buildProactiveChips(_inputs(
+    final collected = buildProactiveChips(_inputs(
       budget: _budget(9999),
-      latestOrderStatus: 'delivered',
+      latestOrderStatus: 'collected',
     ));
-    expect(_labels(delivered), isNot(contains("Where's my order?")));
+    expect(_labels(collected), isNot(contains("Where's my order?")));
   });
 
   test('three or more saved items offer a comparison', () {
@@ -155,7 +155,7 @@ void main() {
         budget: _budget(10),
         estimateRm: 999,
         wishlistCount: 9,
-        latestOrderStatus: 'shipped',
+        latestOrderStatus: 'waitingCollection',
       ),
       fillers: const ['A filler', 'Another filler', 'Third filler'],
     );

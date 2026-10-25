@@ -252,7 +252,7 @@ void main() {
     expect(p['id'], 'wall-1');
     expect(p['name'], 'Floral Wallpaper');
     expect(p['description'],
-        'In stock. Free delivery. Premium vinyl, waterproof.');
+        'In stock. Self-collection at seller. Premium vinyl, waterproof.');
     expect(p['designStyle'], 'Floral');
     expect(p['photoLabels'], ['living room', 'sofa']);
     expect(p['photoSummary'], 'A living room with a grey sofa.');

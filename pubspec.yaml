@@ -73,6 +73,7 @@ dependencies:
   path_provider: ^2.1.5
   pdf: ^3.11.3
   printing: ^5.14.3
+  flutter_stripe: ^14.2.0
 
 dev_dependencies:
   flutter_test:

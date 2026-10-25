@@ -564,7 +564,7 @@ class _RecentOrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = myLineItemCount(order, supplierId);
-    final total = mySubtotal(order, supplierId) + myShipping(order, supplierId);
+    final total = mySubtotal(order, supplierId);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(

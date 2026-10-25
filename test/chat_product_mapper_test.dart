@@ -13,9 +13,6 @@ Product _product({
   bool isActive = true,
   bool isEcoFriendly = false,
   int? originalPrice,
-  bool shippingEnabled = false,
-  int shippingFee = 0,
-  bool shippingLongDistanceNotice = false,
   ProductDimensions? dimensions,
   ProductVision? vision,
   DateTime? createdAt,
@@ -35,9 +32,6 @@ Product _product({
       isActive: isActive,
       isEcoFriendly: isEcoFriendly,
       originalPrice: originalPrice,
-      shippingEnabled: shippingEnabled,
-      shippingFee: shippingFee,
-      shippingLongDistanceNotice: shippingLongDistanceNotice,
       dimensions: dimensions,
       vision: vision,
       createdAt: createdAt,
@@ -51,24 +45,15 @@ void main() {
       expect(productFactsLine(_product(stock: 0)), contains('Out of stock'));
     });
 
-    test('free vs paid delivery, with the long-distance note', () {
-      expect(productFactsLine(_product()), contains('Free delivery'));
+    test('facts line always offers self-collection', () {
       expect(
-        productFactsLine(
-            _product(shippingEnabled: true, shippingFee: 10)),
-        contains('Delivery RM 10'),
-      );
+          productFactsLine(_product()), contains('Self-collection at seller'));
       expect(
-        productFactsLine(_product(
-            shippingEnabled: true,
-            shippingFee: 10,
-            shippingLongDistanceNotice: true)),
-        contains('Deliveries over 30 km incur extra charges.'),
-      );
+          productFactsLine(_product(price: 499)),
+          contains('Self-collection at seller'));
       expect(
-        productFactsLine(_product(shippingEnabled: false, shippingFee: 10)),
-        contains('Free delivery'),
-      );
+          productFactsLine(_product()),
+          isNot(contains('delivery fee')));
     });
 
     test('seller verification, eco, and the sale discount', () {
@@ -123,25 +108,23 @@ void main() {
       final mapped = productToChatProduct(_product(description: 'd' * 500));
       expect(mapped.description, hasLength(kChatDescriptionClip));
       expect(
-          mapped.description, startsWith('In stock. Free delivery. '));
+          mapped.description, startsWith('In stock. Self-collection at seller. '));
       final dense = productToChatProduct(_product(
         stock: 2,
-        shippingEnabled: true,
-        shippingFee: 15,
         isEcoFriendly: true,
         dimensions:
             const ProductDimensions(widthM: 1.0, heightM: 1.5, depthM: 0.6),
         description: 'd' * 500,
       ));
       expect(dense.description, startsWith('Only 2 left.'));
-      expect(dense.description, contains('Delivery RM 15'));
+      expect(dense.description, contains('Self-collection at seller'));
       expect(dense.description, hasLength(kChatDescriptionClip));
     });
 
     test('seller copy follows the facts when the description is short', () {
       final mapped = productToChatProduct(_product());
       expect(mapped.description,
-          'In stock. Free delivery. Oatmeal boucle three-seater.');
+          'In stock. Self-collection at seller. Oatmeal boucle three-seater.');
     });
 
     test('vision fields only ship when the verdict is ok', () {

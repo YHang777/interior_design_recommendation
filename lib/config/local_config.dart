@@ -1,7 +1,5 @@
 class LocalConfig {
 
-  static const String marketplaceApiUrl = 'http://localhost:8080';
-
   static const String verificationApiUrl = 'https://interior-design-recommendation.onrender.com';
 
   static const String cloudinaryCloudName = 'qydpaw3g';

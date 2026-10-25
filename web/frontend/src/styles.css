@@ -1129,12 +1129,12 @@ code,
   color: #2563eb;
 }
 
-.badge-status-shipped {
+.badge-status-waitingCollection {
   background: color-mix(in srgb, #7c3aed 12%, var(--surface));
   color: #7c3aed;
 }
 
-.badge-status-delivered {
+.badge-status-collected {
   background: var(--success-soft);
   color: var(--success);
 }
@@ -1144,12 +1144,32 @@ code,
   color: var(--text-muted);
 }
 
+.badge-payment-unpaid {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.badge-payment-paid {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.badge-payment-failed {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.badge-payment-refunded {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
 @media (prefers-color-scheme: dark) {
   .badge-status-confirmed {
     background: color-mix(in srgb, #2563eb 28%, var(--surface));
     color: #93c5fd;
   }
-  .badge-status-shipped {
+  .badge-status-waitingCollection {
     background: color-mix(in srgb, #7c3aed 26%, var(--surface));
     color: #c4b5fd;
   }

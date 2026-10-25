@@ -31,9 +31,9 @@ class _OrderManagementScreenState
 
   static _OrderBucket _bucketOf(OrderStatus status) => switch (status) {
         OrderStatus.pending => _OrderBucket.fresh,
-        OrderStatus.confirmed || OrderStatus.shipped =>
+        OrderStatus.confirmed || OrderStatus.waitingCollection =>
           _OrderBucket.processing,
-        OrderStatus.delivered || OrderStatus.cancelled =>
+        OrderStatus.collected || OrderStatus.cancelled =>
           _OrderBucket.completed,
       };
 
@@ -144,7 +144,6 @@ class _OrderManagementScreenState
                 supplierId: supplierId,
                 myCount: myLineItemCount(o, supplierId),
                 myTotal: mySubtotal(o, supplierId),
-                myShipping: myShipping(o, supplierId),
                 onTap: () => _open(o),
               )),
           const SizedBox(height: 8),
@@ -181,7 +180,6 @@ class _OrderTile extends StatelessWidget {
     required this.supplierId,
     required this.myCount,
     required this.myTotal,
-    required this.myShipping,
     required this.onTap,
   });
 
@@ -190,7 +188,6 @@ class _OrderTile extends StatelessWidget {
   final int myCount;
   final int myTotal;
 
-  final int myShipping;
   final VoidCallback onTap;
 
   @override
@@ -284,28 +281,13 @@ class _OrderTile extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        Formatters.myr(myTotal),
-                        style: GoogleFonts.poppins(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.accent,
-                        ),
-                      ),
-                      if (myShipping > 0) ...[
-                        const SizedBox(height: 1),
-                        Text(
-                          '+ ${Formatters.myr(myShipping)} shipping',
-                          style: GoogleFonts.poppins(
-                            fontSize: 10.5,
-                            color: AppColors.textHint,
-                          ),
-                        ),
-                      ],
-                    ],
+                  Text(
+                    Formatters.myr(myTotal),
+                    style: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.accent,
+                    ),
                   ),
                 ],
               ),

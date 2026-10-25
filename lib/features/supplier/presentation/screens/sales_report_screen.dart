@@ -263,7 +263,7 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
                 AppColors.gradientGreen,
               ],
             ),
-            'Items + shipping; cancelled excluded',
+            'Item sales; cancelled excluded',
           ),
           _statCell(
             StatCard(
@@ -302,7 +302,7 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
                 AppColors.gradientGreen,
               ],
             ),
-            'Delivered ÷ all orders',
+            'Collected ÷ all orders',
           ),
         ),
         const SizedBox(height: 14),
@@ -310,7 +310,7 @@ class _SalesReportScreenState extends ConsumerState<SalesReportScreen> {
         // ── 2. Monthly sales performance ──
         _card(
           title: 'Monthly Sales Performance',
-          subtitle: 'Your sales + shipping; cancelled orders excluded',
+          subtitle: 'Your item sales; cancelled orders excluded',
           child: monthly.every((v) => v == 0)
               ? Padding(
                   padding: const EdgeInsets.symmetric(vertical: 26),

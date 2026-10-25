@@ -117,7 +117,7 @@ List<ProactiveChip> buildProactiveChips(
   }
 
   final status = inputs.latestOrderStatus;
-  if (status == 'shipped' || status == 'confirmed') {
+  if (status == 'waitingCollection' || status == 'confirmed') {
     chips.add(const ProactiveChip(
       label: "Where's my order?",
       kind: ProactiveChipKind.prompt,

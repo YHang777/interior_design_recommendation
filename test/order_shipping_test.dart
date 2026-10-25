@@ -1,43 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/models/order.dart';
-import 'package:interior_design_recommendation/models/product.dart';
-
-Product _product({
-  required String id,
-  required String supplierId,
-  bool shippingEnabled = false,
-  int shippingFee = 0,
-  bool shippingLongDistanceNotice = false,
-}) {
-  return Product(
-    id: id,
-    name: 'Product $id',
-    price: 100,
-    stock: 3,
-    image: '',
-    description: '',
-    designStyle: 'Modern',
-    category: 'Furniture',
-    supplier: Supplier(
-      id: supplierId,
-      name: 'Store $supplierId',
-      phone: '',
-      address: '',
-      email: '',
-    ),
-    supplierId: supplierId,
-    shippingEnabled: shippingEnabled,
-    shippingFee: shippingFee,
-    shippingLongDistanceNotice: shippingLongDistanceNotice,
-  );
-}
 
 Order _order({
-  int shippingFee = 0,
   List<String> supplierIds = const [],
-  Map<String, int> shippingBySupplier = const {},
   List<OrderItem>? items,
   OrderStatus status = OrderStatus.pending,
+  int discount = 0,
+  int tax = 0,
+  PaymentStatus paymentStatus = PaymentStatus.unpaid,
+  String paymentIntentId = '',
+  DateTime? paidAt,
 }) {
   return Order(
     id: 'o1',
@@ -46,7 +18,6 @@ Order _order({
     customerName: 'Aina',
     customerEmail: 'aina@example.com',
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, KL',
     items: items ??
         [
           const OrderItem(
@@ -59,229 +30,39 @@ Order _order({
           ),
         ],
     status: status,
-    paymentMethod: 'cod',
+    paymentStatus: paymentStatus,
+    paymentIntentId: paymentIntentId,
+    paidAt: paidAt,
+    paymentMethod: 'card',
     subtotal: 50,
-    shippingFee: shippingFee,
-    total: 50 + shippingFee,
+    discount: discount,
+    tax: tax,
+    total: 50,
     createdAt: DateTime.utc(2026, 1, 1),
     supplierIds: supplierIds,
-    shippingBySupplier: shippingBySupplier,
   );
 }
 
 void main() {
-  group('Product shipping fields — defaults & backward compatibility', () {
-    test('legacy product JSON without shipping keys loads as free shipping',
+  group('Order lifecycle — self-collection chain', () {
+    test('legal chain pending → confirmed → waitingCollection → collected',
         () {
-      final p = Product.fromJson(const {
-        'id': 'p1',
-        'name': 'Chair',
-        'price': 100,
-        'stock': 3,
-        'image': '',
-        'supplierId': 's1',
-      });
-      expect(p.shippingEnabled, isFalse);
-      expect(p.shippingFee, 0);
-      expect(p.shippingLongDistanceNotice, isFalse);
-      expect(p.shippingCharge, 0);
-    });
-
-    test('shipping fields round-trip through toJson → fromJson', () {
-      final p = _product(
-        id: 'p1',
-        supplierId: 's1',
-        shippingEnabled: true,
-        shippingFee: 25,
-        shippingLongDistanceNotice: true,
-      );
-      final json = p.toJson();
-      expect(json['shippingEnabled'], true);
-      expect(json['shippingFee'], 25);
-      expect(json['shippingLongDistanceNotice'], true);
-
-      final back = Product.fromJson(json);
-      expect(back.shippingEnabled, isTrue);
-      expect(back.shippingFee, 25);
-      expect(back.shippingLongDistanceNotice, isTrue);
-      expect(back.shippingCharge, 25);
-    });
-
-    test('negative or malformed shippingFee clamps to 0', () {
-      final negative = Product.fromJson(const {'id': 'x', 'shippingFee': -5});
-      expect(negative.shippingFee, 0);
-
-      final malformed = Product.fromJson(const {'id': 'x', 'shippingFee': 'abc'});
-      expect(malformed.shippingFee, 0);
-    });
-
-    test('shippingCharge is gated by shippingEnabled (fee ignored when off)',
-        () {
-      final off = _product(id: 'p', supplierId: 's', shippingFee: 12);
-      expect(off.shippingEnabled, isFalse);
-      expect(off.shippingCharge, 0);
-
-      final on = _product(
-          id: 'p', supplierId: 's', shippingEnabled: true, shippingFee: 12);
-      expect(on.shippingCharge, 12);
-    });
-
-    test('copyWith carries shipping fields', () {
-      final p = _product(id: 'p', supplierId: 's')
-          .copyWith(shippingEnabled: true, shippingFee: 8);
-      expect(p.shippingEnabled, isTrue);
-      expect(p.shippingFee, 8);
-      final notice = p.copyWith(shippingLongDistanceNotice: true);
-      expect(notice.shippingEnabled, isTrue);
-      expect(notice.shippingLongDistanceNotice, isTrue);
-    });
-  });
-
-  group('Product shipping math (multi-supplier rule)', () {
-    test('per-supplier grouping sums each seller’s charges', () {
-      final shares = shippingBySupplierFor([
-        _product(id: 'a1', supplierId: 's1', shippingEnabled: true, shippingFee: 10),
-        _product(id: 'a2', supplierId: 's1', shippingEnabled: true, shippingFee: 5),
-        _product(id: 'b1', supplierId: 's2', shippingEnabled: true, shippingFee: 20),
-        _product(id: 'f1', supplierId: 's3'),
-      ]);
-      expect(shares, {'s1': 15, 's2': 20});
-      expect(shares.containsKey('s3'), isFalse);
-    });
-
-    test('a product id appearing twice bills once (one line per product)',
-        () {
-      final dupe = _product(id: 'a1', supplierId: 's1',
-          shippingEnabled: true, shippingFee: 10);
-      final shares = shippingBySupplierFor([dupe, dupe]);
-      expect(shares, {'s1': 10});
-    });
-
-    test('disabled products never contribute', () {
-      final shares = shippingBySupplierFor([
-        _product(id: 'a1', supplierId: 's1', shippingFee: 99),
-      ]);
-      expect(shares, isEmpty);
-      expect(totalShippingFor([
-        _product(id: 'a1', supplierId: 's1', shippingFee: 99),
-      ]), 0);
-    });
-
-    test('totalShippingFor equals the sum of per-supplier shares', () {
-      final products = [
-        _product(id: 'a1', supplierId: 's1', shippingEnabled: true, shippingFee: 12),
-        _product(id: 'b1', supplierId: 's2', shippingEnabled: true, shippingFee: 7),
-        _product(id: 'b2', supplierId: 's2'),
-      ];
-      final shares = shippingBySupplierFor(products);
-      expect(totalShippingFor(products), shares.values.fold(0, (s, v) => s + v));
-      expect(totalShippingFor(products), 19);
-    });
-  });
-
-  group('Order.shippingShareFor', () {
-    test('modern order: returns the recorded share exactly', () {
-      final o = _order(
-        shippingFee: 30,
-        supplierIds: ['s1', 's2'],
-        shippingBySupplier: {'s1': 10, 's2': 20},
-      );
-      expect(o.shippingShareFor('s1'), 10);
-      expect(o.shippingShareFor('s2'), 20);
-      expect(o.shippingShareFor('stranger'), 0);
-    });
-
-    test('modern order with shares: supplier missing from the map gets 0',
-        () {
-      final o = _order(
-        shippingFee: 20,
-        supplierIds: ['s1', 's2'],
-        shippingBySupplier: {'s2': 20},
-      );
-      expect(o.shippingShareFor('s1'), 0);
-      expect(o.shippingShareFor('s2'), 20);
-    });
-
-    test('legacy single-supplier order (no map): full fee attributed', () {
-      final o = _order(shippingFee: 25, supplierIds: ['s1']);
-      expect(o.shippingBySupplier, isEmpty);
-      expect(o.shippingShareFor('s1'), 25);
-      expect(o.shippingShareFor('s2'), 0);
-    });
-
-    test('legacy multi-supplier order: flat fee cannot be split → all 0',
-        () {
-      final o = _order(shippingFee: 25, supplierIds: ['s1', 's2']);
-      expect(o.shippingShareFor('s1'), 0);
-      expect(o.shippingShareFor('s2'), 0);
-    });
-
-    test('supplierIds derive from items when none were recorded', () {
-      final o = _order(shippingFee: 15, supplierIds: const []);
-      expect(o.resolvedSupplierIds, ['s1']);
-      expect(o.shippingShareFor('s1'), 15);
-    });
-
-    test('modern zero-fee order (free shipping waived) shares are 0', () {
-      final o = _order(shippingFee: 0, supplierIds: ['s1', 's2']);
-      expect(o.shippingShareFor('s1'), 0);
-      expect(o.shippingShareFor('s2'), 0);
-    });
-  });
-
-  group('Order shippingBySupplier JSON', () {
-    test('round-trips through toJson → fromJson', () {
-      final o = _order(
-        shippingFee: 30,
-        supplierIds: ['s1', 's2'],
-        shippingBySupplier: {'s1': 12, 's2': 18},
-      );
-      final json = o.toJson();
-      expect(json['shippingBySupplier'], {'s1': 12, 's2': 18});
-
-      final back = Order.fromJson(json);
-      expect(back.shippingBySupplier, {'s1': 12, 's2': 18});
-      expect(back.shippingShareFor('s1'), 12);
-      expect(back.shippingShareFor('s2'), 18);
-    });
-
-    test('legacy order JSON without the key parses to an empty map', () {
-      final json = _order(shippingFee: 25, supplierIds: ['s1']).toJson()
-        ..remove('shippingBySupplier');
-      final back = Order.fromJson(json);
-      expect(back.shippingBySupplier, isEmpty);
-      expect(back.shippingShareFor('s1'), 25);
-    });
-
-    test('malformed share entries are dropped, never invented', () {
-      final back = Order.fromJson({
-        'id': 'o1',
-        'shippingFee': 40,
-        'supplierIds': ['s1', 's2'],
-        'shippingBySupplier': {'s1': 40, 's2': -3, '': 5, 's3': 'NaN'},
-      });
-      expect(back.shippingBySupplier, {'s1': 40});
-      expect(back.shippingShareFor('s2'), 0);
-      expect(back.shippingShareFor('s3'), 0);
-    });
-  });
-
-  group('OrderStatus transition guards', () {
-    test('legal chain pending → confirmed → shipped → delivered passes', () {
       expect(() => OrderStatus.ensureAdvance(
           OrderStatus.pending, OrderStatus.confirmed), returnsNormally);
       expect(() => OrderStatus.ensureAdvance(
-          OrderStatus.confirmed, OrderStatus.shipped), returnsNormally);
+          OrderStatus.confirmed, OrderStatus.waitingCollection),
+          returnsNormally);
       expect(() => OrderStatus.ensureAdvance(
-          OrderStatus.shipped, OrderStatus.delivered), returnsNormally);
+          OrderStatus.waitingCollection, OrderStatus.collected),
+          returnsNormally);
     });
 
-    test('terminal orders cannot advance (no delivered → pending)', () {
+    test('terminal orders cannot advance', () {
       expect(
         () => OrderStatus.ensureAdvance(
-            OrderStatus.delivered, OrderStatus.pending),
+            OrderStatus.collected, OrderStatus.pending),
         throwsA(isA<StateError>().having((e) => e.message, 'message',
-            contains('already delivered'))),
+            contains('already collected'))),
       );
       expect(
         () => OrderStatus.ensureAdvance(
@@ -294,36 +75,39 @@ void main() {
     test('skipping steps is rejected', () {
       expect(
         () => OrderStatus.ensureAdvance(
-            OrderStatus.pending, OrderStatus.shipped),
+            OrderStatus.pending, OrderStatus.waitingCollection),
         throwsA(isA<StateError>().having(
             (e) => e.message, 'message', contains('Cannot move'))),
       );
       expect(
         () => OrderStatus.ensureAdvance(
-            OrderStatus.confirmed, OrderStatus.delivered),
+            OrderStatus.confirmed, OrderStatus.collected),
         throwsA(isA<StateError>()),
       );
     });
 
-    test('backwards moves are rejected (delivered/shipped → pending)', () {
+    test('backwards moves are rejected', () {
       expect(
         () => OrderStatus.ensureAdvance(
-            OrderStatus.shipped, OrderStatus.confirmed),
+            OrderStatus.waitingCollection, OrderStatus.confirmed),
         throwsA(isA<StateError>()),
       );
       expect(
         () => OrderStatus.ensureAdvance(
-            OrderStatus.delivered, OrderStatus.pending),
+            OrderStatus.collected, OrderStatus.pending),
         throwsA(isA<StateError>()),
       );
     });
 
     test('legal next pointers drive the guards', () {
       expect(OrderStatus.pending.next, OrderStatus.confirmed);
-      expect(OrderStatus.confirmed.next, OrderStatus.shipped);
-      expect(OrderStatus.shipped.next, OrderStatus.delivered);
-      expect(OrderStatus.delivered.next, isNull);
+      expect(OrderStatus.confirmed.next, OrderStatus.waitingCollection);
+      expect(OrderStatus.waitingCollection.next, OrderStatus.collected);
+      expect(OrderStatus.collected.next, isNull);
       expect(OrderStatus.cancelled.next, isNull);
+      expect(OrderStatus.collected.isTerminal, isTrue);
+      expect(OrderStatus.cancelled.isTerminal, isTrue);
+      expect(OrderStatus.waitingCollection.isTerminal, isFalse);
     });
 
     test('cancel allowed from every non-terminal state', () {
@@ -331,18 +115,220 @@ void main() {
           returnsNormally);
       expect(() => OrderStatus.ensureCancellable(OrderStatus.confirmed),
           returnsNormally);
-      expect(() => OrderStatus.ensureCancellable(OrderStatus.shipped),
+      expect(() => OrderStatus.ensureCancellable(OrderStatus.waitingCollection),
           returnsNormally);
     });
 
     test('cancel rejected for terminal states', () {
       expect(
-        () => OrderStatus.ensureCancellable(OrderStatus.delivered),
+        () => OrderStatus.ensureCancellable(OrderStatus.collected),
         throwsA(isA<StateError>().having(
             (e) => e.message, 'message', contains('cannot be cancelled'))),
       );
       expect(() => OrderStatus.ensureCancellable(OrderStatus.cancelled),
           throwsA(isA<StateError>()));
+    });
+
+    test('status labels match the buyer/supplier wording', () {
+      expect(OrderStatus.pending.label, 'Pending');
+      expect(OrderStatus.confirmed.label, 'Confirmed');
+      expect(OrderStatus.waitingCollection.label, 'Waiting for collection');
+      expect(OrderStatus.collected.label, 'Collected');
+      expect(OrderStatus.cancelled.label, 'Cancelled');
+    });
+  });
+
+  group('Legacy delivery-era status mapping', () {
+    test("'shipped' maps to waitingCollection", () {
+      expect(OrderStatus.fromString('shipped'), OrderStatus.waitingCollection);
+      expect(OrderStatus.fromString('Shipped'), OrderStatus.waitingCollection);
+    });
+
+    test("'delivered' maps to collected", () {
+      expect(OrderStatus.fromString('delivered'), OrderStatus.collected);
+      expect(OrderStatus.fromString('Delivered'), OrderStatus.collected);
+    });
+
+    test('current names parse case-insensitively', () {
+      expect(OrderStatus.fromString('waitingCollection'),
+          OrderStatus.waitingCollection);
+      expect(OrderStatus.fromString('WAITINGCOLLECTION'),
+          OrderStatus.waitingCollection);
+      expect(OrderStatus.fromString('collected'), OrderStatus.collected);
+    });
+
+    test('unknown status falls back to pending', () {
+      expect(OrderStatus.fromString('nonsense'), OrderStatus.pending);
+      expect(OrderStatus.fromString(''), OrderStatus.pending);
+    });
+
+    test('legacy order JSON with shipped/delivered parses to new statuses',
+        () {
+      final shipped = Order.fromJson(const {
+        'id': 'a',
+        'status': 'shipped',
+        'items': [],
+      });
+      expect(shipped.status, OrderStatus.waitingCollection);
+
+      final delivered = Order.fromJson(const {
+        'id': 'b',
+        'status': 'delivered',
+        'items': [],
+      });
+      expect(delivered.status, OrderStatus.collected);
+    });
+  });
+
+  group('Payment fields', () {
+    test('constructor defaults to unpaid with no intent', () {
+      final o = _order();
+      expect(o.paymentStatus, PaymentStatus.unpaid);
+      expect(o.paymentIntentId, '');
+      expect(o.paidAt, isNull);
+    });
+
+    test('payment fields round-trip through toJson → fromJson', () {
+      final paidAt = DateTime.utc(2026, 2, 1, 9);
+      final o = _order(
+        paymentStatus: PaymentStatus.paid,
+        paymentIntentId: 'pi_123',
+        paidAt: paidAt,
+      );
+      final json = o.toJson();
+      expect(json['paymentStatus'], 'paid');
+      expect(json['paymentIntentId'], 'pi_123');
+      expect(json['paidAt'], '2026-02-01T09:00:00.000Z');
+
+      final back = Order.fromJson(json);
+      expect(back.paymentStatus, PaymentStatus.paid);
+      expect(back.paymentIntentId, 'pi_123');
+      expect(back.paidAt, paidAt);
+    });
+
+    test('legacy order JSON without paymentStatus is treated as paid', () {
+      final back = Order.fromJson(const {'id': 'x', 'items': []});
+      expect(back.paymentStatus, PaymentStatus.paid);
+    });
+
+    test('payment method labels cover card and FPX', () {
+      expect(_order().paymentMethodLabel, 'Credit / Debit Card');
+      final o = _order().copyWith(paymentMethod: 'fpx');
+      expect(o.paymentMethodLabel, 'FPX Online Banking');
+    });
+  });
+
+  group('OrderInvoice.issue — allocated discount/tax', () {
+    OrderInvoice issueFor(String supplierId) {
+      final order = _order(
+        items: const [
+          OrderItem(
+              productId: 'a',
+              name: 'A',
+              image: '',
+              unitPrice: 60,
+              quantity: 1,
+              supplierId: 's1'),
+          OrderItem(
+              productId: 'b',
+              name: 'B',
+              image: '',
+              unitPrice: 40,
+              quantity: 1,
+              supplierId: 's2'),
+        ],
+        supplierIds: ['s1', 's2'],
+        discount: 10,
+        tax: 5,
+      ).copyWith(subtotal: 100, total: 95);
+      return OrderInvoice.issue(
+        order: order,
+        supplierId: supplierId,
+        supplierName: 'Store $supplierId',
+        supplierAddress: '1 Jalan Test, KL',
+        invoiceNumber: 'INV-TEST',
+        issuedAt: DateTime.utc(2026, 1, 2),
+      );
+    }
+
+    test('discount and tax split proportionally by item subtotal', () {
+      final i1 = issueFor('s1');
+      expect(i1.subtotal, 60);
+      expect(i1.discountAllocated, 6);
+      expect(i1.taxAllocated, 3);
+      expect(i1.total, 60 - 6 + 3);
+
+      final i2 = issueFor('s2');
+      expect(i2.subtotal, 40);
+      expect(i2.discountAllocated, 4);
+      expect(i2.taxAllocated, 2);
+      expect(i2.total, 40 - 4 + 2);
+    });
+
+    test('totals equal subtotal − discountAllocated + taxAllocated', () {
+      for (final id in ['s1', 's2']) {
+        final inv = issueFor(id);
+        expect(
+            inv.total, inv.subtotal - inv.discountAllocated + inv.taxAllocated);
+      }
+    });
+
+    test('keeps supplier pickup address and payment proof fields', () {
+      final order = _order(
+        paymentStatus: PaymentStatus.paid,
+        paymentIntentId: 'pi_abc',
+        paidAt: DateTime.utc(2026, 1, 3),
+      );
+      final inv = OrderInvoice.issue(
+        order: order,
+        supplierId: 's1',
+        supplierName: 'Store s1',
+        supplierAddress: '1 Jalan Test, KL',
+        invoiceNumber: 'INV-2',
+        issuedAt: DateTime.utc(2026, 1, 2),
+      );
+      expect(inv.supplierAddress, '1 Jalan Test, KL');
+      expect(inv.paymentIntentId, 'pi_abc');
+      expect(inv.paidAt, DateTime.utc(2026, 1, 3));
+      expect(inv.total, inv.subtotal);
+    });
+
+    test('invoice JSON round-trips the new fields', () {
+      final inv = issueFor('s1');
+      final back = OrderInvoice.fromJson(inv.toJson());
+      expect(back.discountAllocated, inv.discountAllocated);
+      expect(back.taxAllocated, inv.taxAllocated);
+      expect(back.supplierAddress, inv.supplierAddress);
+      expect(back.total, inv.total);
+      expect(back.toJson().containsKey('shippingFee'), isFalse);
+      expect(back.toJson().containsKey('shippingAddress'), isFalse);
+    });
+  });
+
+  group('Order JSON — shipping removed, payment kept', () {
+    test('toJson never emits shipping keys', () {
+      final json = _order().toJson();
+      expect(json.containsKey('shippingAddress'), isFalse);
+      expect(json.containsKey('shippingFee'), isFalse);
+      expect(json.containsKey('shippingBySupplier'), isFalse);
+    });
+
+    test('legacy JSON with shipping keys still loads and drops them', () {
+      final back = Order.fromJson(const {
+        'id': 'o9',
+        'status': 'pending',
+        'items': [],
+        'shippingAddress': '9 Old Road',
+        'shippingFee': 25,
+      });
+      expect(back.subtotal, 0);
+      expect(() => back.toJson(), returnsNormally);
+      expect(back.toJson().containsKey('shippingAddress'), isFalse);
+    });
+
+    test('supplierIds derive from items when none were recorded', () {
+      final o = _order(supplierIds: const []);
+      expect(o.resolvedSupplierIds, ['s1']);
     });
   });
 
@@ -362,7 +348,7 @@ void main() {
     });
 
     test('unparseable history entries are dropped, never fabricated', () {
-      final back = Order.fromJson({
+      final back = Order.fromJson(const {
         'id': 'o1',
         'statusHistory': {
           'confirmed': '2026-03-05T10:30:00.000Z',

@@ -247,7 +247,6 @@ function seedHomeowner(fake: FakeFirestore): void {
     customerName: 'Ann Lee',
     customerEmail: 'ann@example.com',
     customerPhone: '555-0100',
-    shippingAddress: '1 Main Street',
     items: [{ productId: 'p1', qty: 1 }],
   });
   fake.seed('products', 'p1', { name: 'Sofa', isActive: true });
@@ -286,7 +285,6 @@ test('homeowner purge: anonymize orders, scrub reviews, delete profile, tombston
   assert.equal(order.customerName, 'Deleted Customer');
   assert.equal(order.customerEmail, 'deleted@removed.invalid');
   assert.equal(order.customerPhone, '');
-  assert.equal(order.shippingAddress, 'Removed');
   assert.deepEqual(order.items, [{ productId: 'p1', qty: 1 }]);
 
   // Products: never touched for a homeowner, never deleted.
@@ -380,7 +378,6 @@ test('supplier purge: deactivate listings, drop IC application, keep supplier or
     customerName: 'Supplier Co',
     customerEmail: 's@example.com',
     customerPhone: '555-0199',
-    shippingAddress: '9 Warehouse Way',
     items: [{ productId: 'p1', qty: 2 }],
   });
   fake.seed('verification_applications', 'u1', { status: 'approved', legalName: 'Co' });

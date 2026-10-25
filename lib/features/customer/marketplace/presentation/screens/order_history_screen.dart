@@ -53,7 +53,7 @@ class OrderHistoryScreen extends ConsumerWidget {
                       tabs: [
                         Tab(text: 'All'),
                         Tab(text: 'Processing'),
-                        Tab(text: 'Delivered'),
+                        Tab(text: 'Collected'),
                         Tab(text: 'Cancelled'),
                       ],
                     ),
@@ -90,16 +90,16 @@ class OrderHistoryScreen extends ConsumerWidget {
                               emptyIcon: Icons.inventory_2_outlined,
                               emptyTitle: 'Nothing being processed',
                               emptySubtitle:
-                                  'Orders awaiting confirmation, being prepared or on '
-                                  'their way will appear here.',
+                                  'Orders awaiting confirmation, being prepared or '
+                                  'ready for collection will appear here.',
                               emptyAction: 'Browse the store',
                             ),
                             _OrdersTab(
                               orders: sorted
-                                  .where((o) => o.status == OrderStatus.delivered)
+                                  .where((o) => o.status == OrderStatus.collected)
                                   .toList(),
-                              emptyIcon: Icons.local_shipping_outlined,
-                              emptyTitle: 'No delivered orders yet',
+                              emptyIcon: Icons.handshake_outlined,
+                              emptyTitle: 'No collected orders yet',
                               emptySubtitle:
                                   'Completed orders land here, ready to be reviewed.',
                               emptyAction: 'Browse the store',

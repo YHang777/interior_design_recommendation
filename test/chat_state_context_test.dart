@@ -38,7 +38,7 @@ CartRow _row(Product product, {int qty = 1, bool missing = false}) => CartRow(
 
 Order _order({
   String number = 'A102',
-  OrderStatus status = OrderStatus.shipped,
+  OrderStatus status = OrderStatus.waitingCollection,
   int total = 890,
   int qty = 2,
   DateTime? createdAt,
@@ -50,7 +50,6 @@ Order _order({
       customerName: 'Ana',
       customerEmail: 'a@b.com',
       customerPhone: '012',
-      shippingAddress: 'KL',
       items: [
         OrderItem(
           productId: 'p1',
@@ -62,9 +61,8 @@ Order _order({
         ),
       ],
       status: status,
-      paymentMethod: 'cod',
+      paymentMethod: 'card',
       subtotal: total,
-      shippingFee: 0,
       total: total,
       createdAt: createdAt ?? DateTime.utc(2026, 10, 1),
     );

@@ -31,7 +31,6 @@ Order _order({OrderStatus status = OrderStatus.pending, int itemCount = 2}) {
     customerName: _buyer.name,
     customerEmail: _buyer.email,
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, Kuala Lumpur',
     items: [
       for (var i = 0; i < itemCount; i++)
         OrderItem(
@@ -46,12 +45,10 @@ Order _order({OrderStatus status = OrderStatus.pending, int itemCount = 2}) {
     status: status,
     paymentMethod: 'fpx',
     subtotal: 100 * itemCount,
-    shippingFee: 0,
     total: 100 * itemCount,
     discount: 0,
     tax: 0,
     supplierIds: const ['s-ghost'],
-    shippingBySupplier: const {},
     createdAt: DateTime(2026, 10, 1),
     invoices: const {},
   );
@@ -86,8 +83,6 @@ class _FakeMarketplaceRepository implements MarketplaceRepository {
 
   @override
   Future<AppConfigData> fetchConfig() async => const AppConfigData(
-        shippingFee: 25,
-        freeShippingThreshold: 500,
         currency: 'MYR',
         taxRate: 0.06,
         membershipTiers: [],
@@ -179,7 +174,8 @@ void main() {
   });
 
   group('buyer order-detail review entry gating', () {
-    testWidgets('an undelivered order offers no review entry', (tester) async {
+    testWidgets('an order awaiting collection offers no review entry',
+        (tester) async {
       final repo =
           _FakeMarketplaceRepository(order: _order(status: OrderStatus.pending));
       await _pumpOrderDetail(tester, repo);
@@ -190,10 +186,10 @@ void main() {
       expect(find.text('Cancel order'), findsOneWidget);
     });
 
-    testWidgets('a delivered order lists each item for review, honoring '
+    testWidgets('a collected order lists each item for review, honoring '
         'already-filed reviews', (tester) async {
       final repo = _FakeMarketplaceRepository(
-        order: _order(status: OrderStatus.delivered),
+        order: _order(status: OrderStatus.collected),
         reviews: {
           'p-0': Review(
             id: 'o-1',
@@ -201,7 +197,7 @@ void main() {
             userId: _buyer.uid,
             userName: _buyer.name,
             rating: 5,
-            comment: 'Lovely seat, fast delivery.',
+            comment: 'Lovely seat, easy pickup.',
             createdAt: DateTime(2026, 10, 2),
           ),
         },
@@ -214,33 +210,22 @@ void main() {
       expect(find.text('Confirm delivery'), findsNothing);
     });
 
-    testWidgets('a shipped order can be delivered by the buyer, unlocking '
-        'the review entry', (tester) async {
-      final repo =
-          _FakeMarketplaceRepository(order: _order(status: OrderStatus.shipped));
+    testWidgets('a waiting-collection order stays unreviewable until the '
+        'supplier hands it over', (tester) async {
+      final repo = _FakeMarketplaceRepository(
+          order: _order(status: OrderStatus.waitingCollection));
       await _pumpOrderDetail(tester, repo);
 
       expect(find.text('Rate your items'), findsNothing);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirm delivery'));
-      await tester.pumpAndSettle();
-
-      final dialogConfirm = find.descendant(
-        of: find.byType(AlertDialog),
-        matching: find.text('Confirm delivery'),
-      );
-      expect(dialogConfirm, findsOneWidget);
-      await tester.tap(dialogConfirm);
-      await tester.pumpAndSettle();
-
-      expect(repo.statusChanges, [OrderStatus.delivered]);
-      expect(find.text('Rate your items'), findsOneWidget);
-      expect(find.text('Write review'), findsNWidgets(2));
+      expect(find.text('Write review'), findsNothing);
+      expect(find.text('Confirm delivery'), findsNothing);
+      expect(repo.statusChanges, isEmpty);
     });
 
     testWidgets('the review sheet files an order-tied star review against '
         'the product', (tester) async {
       final repo = _FakeMarketplaceRepository(
-        order: _order(status: OrderStatus.delivered),
+        order: _order(status: OrderStatus.collected),
       );
       await _pumpOrderDetail(tester, repo);
 

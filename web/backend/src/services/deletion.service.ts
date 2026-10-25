@@ -454,7 +454,6 @@ export async function purgeSelfService(
             customerName: 'Deleted Customer',
             customerEmail: 'deleted@removed.invalid',
             customerPhone: '',
-            shippingAddress: 'Removed',
           });
           anonymized += 1;
         }

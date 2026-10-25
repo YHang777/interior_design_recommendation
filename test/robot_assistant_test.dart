@@ -233,7 +233,8 @@ void main() {
     expect(products, hasLength(1));
     expect(products.single['id'], 'sofa-1');
     expect(
-        products.single['description'], startsWith('Only 4 left. Free delivery.'));
+        products.single['description'],
+        startsWith('Only 4 left. Self-collection at seller.'));
   });
 
   testWidgets('a failed request lands as a friendly bubble', (tester) async {

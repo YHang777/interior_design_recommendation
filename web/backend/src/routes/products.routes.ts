@@ -51,9 +51,6 @@ const updateBody = z
     stock: z.number().int().min(0).max(1_000_000).optional(),
     isActive: z.boolean().optional(),
     isEcoFriendly: z.boolean().optional(),
-    shippingEnabled: z.boolean().optional(),
-    shippingFee: z.number().int().min(0).max(100_000).optional(),
-    shippingLongDistanceNotice: z.boolean().optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message: 'Provide at least one field to update.',

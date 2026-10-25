@@ -16,6 +16,7 @@ import { createProductVisionRouter } from './routes/product-vision.routes';
 import { defaultProductVisionDeps } from './services/product-vision.service';
 import { createTripoRouter } from './routes/tripo.routes';
 import { defaultTripoDeps } from './services/tripo.service';
+import { defaultCheckoutDeps } from './services/checkout.service';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { env } from './config/env';
 
@@ -74,6 +75,26 @@ export function createApp(): express.Express {
       allowedHeaders: ['Content-Type', 'Authorization'],
     })
   );
+  // Stripe webhook — MUST mount before express.json so the raw body is
+  // available for signature verification (constructEvent needs the bytes
+  // exactly as Stripe sent them; a re-serialized JSON object will fail).
+  app.post(
+    '/api/checkout/webhook',
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+      try {
+        const deps = defaultCheckoutDeps();
+        const signature = req.get('stripe-signature') ?? '';
+        await deps.handleWebhook(req.body as Buffer, signature);
+        res.json({ received: true });
+      } catch (err) {
+        // Never leak Stripe error details to the caller; just fail loudly.
+        console.error('Stripe webhook failed:', err);
+        res.status(400).json({ error: { code: 'WEBHOOK_FAILED', message: 'Webhook handler failed.' } });
+      }
+    }
+  );
+
   app.use(express.json({ limit: '128kb' }));
 
   // Email verification for the mobile app (registration flow).

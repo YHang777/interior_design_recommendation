@@ -112,6 +112,19 @@ export const env = {
    */
   tripoModelVersion: process.env.TRIPO_MODEL_VERSION ?? 'v3.1-20260211',
 
+  // ── Payments (`/api/checkout/*`, Stripe webhook) ────────────────────────
+  //
+  // The SECRET key stays SERVER-SIDE — same rule as the Gemini/Tripo keys.
+  // The publishable key is public by design (the app needs it to init the
+  // Payment Sheet), but keeping it here means one env swap flips test→live.
+
+  /** Stripe secret key (sk_test_… / sk_live_…). Empty → checkout 503s. */
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
+  /** Stripe publishable key (pk_test_… / pk_live_…) handed to the app. */
+  stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? '',
+  /** Stripe webhook signing secret (whsec_…) for POST /api/checkout/webhook. */
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+
   // ── Self-service account deletion (`/api/account/*`, purge sweep) ────────
   //
   // Supabase holds `room_designs` (and the product GLBs). The service-role

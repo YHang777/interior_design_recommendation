@@ -28,24 +28,27 @@ const orderRow: AdminOrderRow = {
   customerName: 'Aina',
   status: 'pending',
   itemCount: 2,
-  total: 1025,
-  paymentMethod: 'fpx',
+  total: 1060,
+  paymentMethod: 'card',
   createdAt: '2026-10-15T00:00:00.000Z',
-  nextStatuses: ['confirmed', 'shipped', 'delivered'],
+  nextStatuses: ['confirmed', 'waitingCollection', 'collected'],
 };
 
 const orderDetail: AdminOrderDetail = {
   ...orderRow,
   customerEmail: 'aina@example.com',
   customerPhone: '0123456789',
-  shippingAddress: '1 Jalan Test, KL',
+  paymentStatus: 'paid',
+  paymentIntentId: 'pi_3ABC123',
+  paidAt: '2026-10-25T06:00:00.000Z',
+  refundStatus: null,
+  refundAmount: null,
   items: [
     { productId: 'p-1', name: 'Sofa', image: '', unitPrice: 500, quantity: 2, supplierId: 'seller-1' },
   ],
   subtotal: 1000,
-  shippingFee: 25,
   discount: 0,
-  tax: 0,
+  tax: 60,
   supplierIds: ['seller-1'],
   statusHistory: { pending: '2026-10-15T00:00:00.000Z' },
   invoiceSupplierIds: [],
@@ -62,7 +65,7 @@ async function withServer(
       ...orderDetail,
       orderId: id,
       status,
-      nextStatuses: status === 'delivered' || status === 'cancelled' ? [] : ['delivered'],
+      nextStatuses: status === 'collected' || status === 'cancelled' ? [] : ['collected'],
     }),
     authorize: allowAdmin,
     log: () => {},
@@ -127,11 +130,11 @@ test('orders → GET forwards the query', async () => {
       },
     },
     async (base) => {
-      const res = await get(base, '?status=shipped&q=ORD-1&limit=10&offset=20');
+      const res = await get(base, '?status=waitingCollection&q=ORD-1&limit=10&offset=20');
       assert.equal(res.status, 200);
     }
   );
-  assert.deepEqual(seen, { status: 'shipped', q: 'ORD-1', limit: 10, offset: 20 });
+  assert.deepEqual(seen, { status: 'waitingCollection', q: 'ORD-1', limit: 10, offset: 20 });
 });
 
 test('orders → GET defaults limit=50 offset=0, no status/q', async () => {
@@ -190,13 +193,13 @@ test('orders → PATCH forwards id and status', async () => {
       },
     },
     async (base) => {
-      const res = await patch(base, 'ord-1', { status: 'shipped' });
+      const res = await patch(base, 'ord-1', { status: 'waitingCollection' });
       assert.equal(res.status, 200);
       const body = (await res.json()) as { order: AdminOrderDetail };
-      assert.equal(body.order.status, 'shipped');
+      assert.equal(body.order.status, 'waitingCollection');
     }
   );
-  assert.deepEqual(seen, { id: 'ord-1', status: 'shipped' });
+  assert.deepEqual(seen, { id: 'ord-1', status: 'waitingCollection' });
 });
 
 test('orders → PATCH 400 on an unknown status', async () => {
@@ -216,7 +219,7 @@ test('orders → PATCH 400 on a missing status', async () => {
 
 test('orders → PATCH 400 on a path-hostile id', async () => {
   await withServer({}, async (base) => {
-    assert.equal((await patch(base, '..%2Fsecrets', { status: 'shipped' })).status, 400);
+    assert.equal((await patch(base, '..%2Fsecrets', { status: 'confirmed' })).status, 400);
   });
 });
 
@@ -227,7 +230,7 @@ test('orders → PATCH surfaces the service 400 transition error', async () => {
         throw new ApiError(
           400,
           'ORDER_INVALID_TRANSITION',
-          'An order that is delivered cannot become cancelled.'
+          'An order that is collected cannot become cancelled.'
         );
       },
     },
@@ -236,7 +239,7 @@ test('orders → PATCH surfaces the service 400 transition error', async () => {
       assert.equal(res.status, 400);
       const body = (await res.json()) as { error: { code: string; message: string } };
       assert.equal(body.error.code, 'ORDER_INVALID_TRANSITION');
-      assert.equal(body.error.message, 'An order that is delivered cannot become cancelled.');
+      assert.equal(body.error.message, 'An order that is collected cannot become cancelled.');
     }
   );
 });

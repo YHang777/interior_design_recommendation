@@ -112,7 +112,6 @@ pw.Widget _parties(OrderInvoice invoice) {
       pw.SizedBox(width: 24),
       pw.Expanded(
         child: _party('TO', invoice.customerName, [
-          invoice.shippingAddress,
           invoice.customerPhone,
           invoice.customerEmail,
         ]),
@@ -151,6 +150,10 @@ pw.Widget _referenceStrip(OrderInvoice invoice) {
     'Order placed ${Formatters.shortDate(invoice.orderCreatedAt)}',
     if (invoice.paymentMethod.trim().isNotEmpty)
       'Payment: ${invoice.paymentMethod.trim()}',
+    if (invoice.paidAt != null)
+      'Paid ${Formatters.shortDate(invoice.paidAt!)}',
+    if (invoice.paymentIntentId.isNotEmpty)
+      'Ref ${invoice.paymentIntentId}',
   ];
   return pw.Container(
     width: double.infinity,
@@ -232,23 +235,33 @@ pw.Widget _totals(OrderInvoice invoice) {
       child: pw.Column(
         children: [
           _totalLine('Items subtotal', Formatters.myr(invoice.subtotal)),
-          _totalLine('Shipping', Formatters.myr(invoice.shippingFee)),
+          if (invoice.discountAllocated > 0)
+            _totalLine(
+              'Discount share',
+              '-${Formatters.myr(invoice.discountAllocated)}',
+            ),
+          if (invoice.taxAllocated > 0)
+            _totalLine('Tax share', Formatters.myr(invoice.taxAllocated)),
           pw.SizedBox(height: 8),
           pw.Divider(height: 1, thickness: 0.8, color: PdfColors.grey500),
           pw.SizedBox(height: 8),
           _totalLine(
-            'Total for this shipment',
+            'Invoice total',
             Formatters.myr(invoice.total),
             strong: true,
           ),
-          if (invoice.orderDiscount > 0 || invoice.orderTax > 0) ...[
+          if (invoice.paidAt != null) ...[
             pw.SizedBox(height: 8),
             pw.Align(
               alignment: pw.Alignment.centerRight,
               child: pw.Text(
-                _adjustmentNote(invoice),
-                textAlign: pw.TextAlign.right,
-                style: _muted(8.5),
+                'PAID ${Formatters.shortDate(invoice.paidAt!)}',
+                style: pw.TextStyle(
+                  fontSize: 10,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.green800,
+                  letterSpacing: 0.6,
+                ),
               ),
             ),
           ],
@@ -272,15 +285,6 @@ pw.Widget _totalLine(String label, String value, {bool strong = false}) {
       ],
     ),
   );
-}
-
-String _adjustmentNote(OrderInvoice invoice) {
-  final parts = <String>[
-    if (invoice.orderDiscount > 0)
-      'Order-level discount: ${Formatters.myr(invoice.orderDiscount)}',
-    if (invoice.orderTax > 0) 'Tax: ${Formatters.myr(invoice.orderTax)}',
-  ];
-  return '${parts.join(' · ')} (not charged to this shipment)';
 }
 
 pw.Widget _footerNote(OrderInvoice invoice) {

@@ -9,6 +9,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/user_errors.dart';
 import '../../../../models/order.dart';
+import '../../../../services/marketplace_api.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state.dart';
@@ -40,8 +41,8 @@ class _SupplierOrderDetailScreenState
   Future<void> _advance(Order order, OrderStatus next) async {
     final actionLabel = switch (next) {
       OrderStatus.confirmed => 'Confirm',
-      OrderStatus.shipped => 'Mark as shipped',
-      _ => 'Mark as delivered',
+      OrderStatus.waitingCollection => 'Mark as ready for collection',
+      _ => 'Mark as collected',
     };
     final confirmed = await showConfirmDialog(
       context,
@@ -50,10 +51,11 @@ class _SupplierOrderDetailScreenState
         OrderStatus.confirmed =>
           'Confirming locks in the order and tells the buyer you are '
               'fulfilling it.',
-        OrderStatus.shipped =>
-          'Marking it shipped notifies the buyer that their items are '
-              'on the way.',
-        _ => 'Marking it delivered completes the order for the buyer.',
+        OrderStatus.waitingCollection =>
+          'This tells the buyer their items are ready for pickup at your '
+              'location.',
+        _ => 'Marking it collected completes the order once the buyer has '
+              'picked up the items.',
       },
       confirmLabel: actionLabel,
     );
@@ -68,8 +70,9 @@ class _SupplierOrderDetailScreenState
           context,
           switch (next) {
             OrderStatus.confirmed => 'Order confirmed',
-            OrderStatus.shipped => 'Order marked as shipped',
-            _ => 'Order marked as delivered',
+            OrderStatus.waitingCollection =>
+              'Items marked as ready for collection',
+            _ => 'Order marked as collected',
           },
           color: AppColors.success,
           duration: const Duration(seconds: 3),
@@ -174,9 +177,8 @@ class _SupplierOrderDetailScreenState
     if (!confirmed || !mounted) return;
 
     setState(() => _working = true);
-    final repo = ref.read(marketplaceRepositoryProvider);
     try {
-      await repo.cancelOrder(order.id);
+      await MarketplaceApi().cancelOrder(order.id);
       if (mounted) {
         showAppSnackbar(context, 'Order cancelled — stock has been restored',
             color: AppColors.error, duration: const Duration(seconds: 3));
@@ -272,7 +274,7 @@ class _SupplierOrderDetailScreenState
     final myItems = orderItemsForSupplier(order, uid);
     final others = order.items.where((i) => i.supplierId != uid).toList();
     final myTotal = mySubtotal(order, uid);
-    final shippingShare = myShipping(order, uid);
+    final invoice = order.invoiceFor(uid);
 
     return ListView(
       padding: EdgeInsets.fromLTRB(
@@ -333,17 +335,18 @@ class _SupplierOrderDetailScreenState
               ),
               const SizedBox(height: 8),
               SummaryLine('Your items', Formatters.myr(myTotal)),
-              SummaryLine(
-                'Shipping (your charge)',
-                Formatters.myr(shippingShare),
-                valueColor: shippingShare > 0
-                    ? AppColors.textPrimary
-                    : AppColors.textHint,
-              ),
+              if (invoice != null && invoice.discountAllocated > 0)
+                SummaryLine(
+                  'Discount share',
+                  '-${Formatters.myr(invoice.discountAllocated)}',
+                  valueColor: AppColors.success,
+                ),
+              if (invoice != null && invoice.taxAllocated > 0)
+                SummaryLine('Tax share', Formatters.myr(invoice.taxAllocated)),
               Divider(height: 1, thickness: 1, color: AppColors.divider),
               SummaryLine(
                 'Your earnings',
-                Formatters.myr(myTotal + shippingShare),
+                Formatters.myr(invoice?.total ?? myTotal),
                 bold: true,
                 valueColor: AppColors.accent,
               ),
@@ -440,12 +443,12 @@ class _SupplierOrderDetailScreenState
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.location_on_outlined,
+            Icon(Icons.handshake_outlined,
                 size: 16, color: AppColors.textSecondary),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                order.shippingAddress,
+                'Contact the buyer to arrange collection of their items.',
                 style: GoogleFonts.poppins(
                   fontSize: 12.5,
                   height: 1.4,
@@ -525,7 +528,11 @@ class _SupplierOrderDetailScreenState
       final next = order.status.next;
       if (next != null) {
         actions.add(_actionButton(
-          label: 'Mark as ${next.label.toLowerCase()}',
+          label: switch (next) {
+            OrderStatus.waitingCollection => 'Mark as ready for collection',
+            OrderStatus.collected => 'Mark as collected',
+            _ => 'Mark as ${next.label.toLowerCase()}',
+          },
           filled: true,
           onTap: _working ? null : () => _advance(order, next),
         ));
@@ -650,7 +657,7 @@ class _SupplierOrderDetailScreenState
   }
 }
 
-/// ── Status timeline (Pending → Confirmed → Shipped → Delivered) ────────
+/// ── Status timeline (Pending → Confirmed → Ready for collection → Collected) ─
 
 class _StatusTimeline extends StatelessWidget {
   const _StatusTimeline({required this.order});
@@ -664,14 +671,14 @@ class _StatusTimeline extends StatelessWidget {
     final currentIndex = switch (order.status) {
       OrderStatus.pending => 0,
       OrderStatus.confirmed => 1,
-      OrderStatus.shipped => 2,
+      OrderStatus.waitingCollection => 2,
       _ => 3,
     };
     const steps = [
       (OrderStatus.pending, 'Pending', 'Order received'),
       (OrderStatus.confirmed, 'Confirmed', 'Fulfilment started'),
-      (OrderStatus.shipped, 'Shipped', 'On its way to the buyer'),
-      (OrderStatus.delivered, 'Delivered', 'Order complete'),
+      (OrderStatus.waitingCollection, 'Ready for collection', 'Ready for pickup'),
+      (OrderStatus.collected, 'Collected', 'Picked up — order complete'),
     ];
     return Column(
       children: [
@@ -864,7 +871,7 @@ class _PillPending extends StatelessWidget {
     final label = switch (status) {
       OrderStatus.pending => 'Action needed',
       OrderStatus.confirmed => 'In progress',
-      OrderStatus.shipped => 'In transit',
+      OrderStatus.waitingCollection => 'Awaiting pickup',
       _ => '',
     };
     return Container(

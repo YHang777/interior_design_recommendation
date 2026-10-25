@@ -8,7 +8,6 @@ import '../../../../../models/cart_item.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/app_config_data.dart';
 import '../../../../../models/review.dart';
-import '../../../../../models/saved_address.dart';
 import '../../../../../services/marketplace_repository.dart';
 import '../../../../../services/recent_searches_store.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -40,9 +39,9 @@ final customerMembershipTierProvider = Provider<MembershipTier?>((ref) {
   final config = ref.watch(configProvider).valueOrNull;
   if (config == null) return null;
   final orders = ref.watch(customerOrdersProvider).valueOrNull;
-  final deliveredCount =
-      orders?.where((o) => o.status == OrderStatus.delivered).length ?? 0;
-  return config.tierForOrderCount(deliveredCount);
+  final collectedCount =
+      orders?.where((o) => o.status == OrderStatus.collected).length ?? 0;
+  return config.tierForOrderCount(collectedCount);
 });
 
 // ─── Products (real-time Firestore sync) ─────────────────────────────────────
@@ -791,19 +790,6 @@ final wishlistProvider =
 
 final wishlistCountProvider = Provider<int>((ref) {
   return ref.watch(wishlistProvider).length;
-});
-
-// ─── Saved addresses (checkout address book) ─────────────────────────────────
-
-final savedAddressesProvider = StreamProvider<List<SavedAddress>>((ref) {
-  final uid = ref.watch(currentUserProvider)?.uid;
-  if (uid == null) return Stream.value(const []);
-  try {
-    return ref.watch(marketplaceRepositoryProvider).watchAddresses(uid);
-  } catch (e) {
-    debugPrint('[addresses] setup failed: $e');
-    return Stream.value(const []);
-  }
 });
 
 // ─── Orders (real-time, role-scoped) ─────────────────────────────────────────

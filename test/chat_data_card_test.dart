@@ -40,7 +40,6 @@ Order _order() => Order(
       customerName: 'Ana',
       customerEmail: 'a@b.com',
       customerPhone: '012',
-      shippingAddress: 'KL',
       items: const [
         OrderItem(
           productId: 'sofa-1',
@@ -51,10 +50,9 @@ Order _order() => Order(
           supplierId: 's1',
         ),
       ],
-      status: OrderStatus.shipped,
-      paymentMethod: 'cod',
+      status: OrderStatus.waitingCollection,
+      paymentMethod: 'card',
       subtotal: 1780,
-      shippingFee: 0,
       total: 1780,
       createdAt: DateTime.utc(2026, 10, 1),
     );
@@ -198,7 +196,7 @@ void main() {
   testWidgets('orders card shows the newest statuses with money', (tester) async {
     await _pumpCard(tester, ChatDataTopic.orders, orders: [_order()]);
     expect(find.text('Your recent orders'), findsOneWidget);
-    expect(find.textContaining('Shipped'), findsOneWidget);
+    expect(find.textContaining('Waiting for collection'), findsOneWidget);
     expect(find.textContaining('RM 1,780'), findsOneWidget);
   });
 

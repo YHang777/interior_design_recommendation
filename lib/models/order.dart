@@ -3,33 +3,39 @@ import 'dart:math';
 enum OrderStatus {
   pending,
   confirmed,
-  shipped,
-  delivered,
+  waitingCollection,
+  collected,
   cancelled;
 
   String get label => switch (this) {
         OrderStatus.pending => 'Pending',
         OrderStatus.confirmed => 'Confirmed',
-        OrderStatus.shipped => 'Shipped',
-        OrderStatus.delivered => 'Delivered',
+        OrderStatus.waitingCollection => 'Waiting for collection',
+        OrderStatus.collected => 'Collected',
         OrderStatus.cancelled => 'Cancelled',
       };
 
   OrderStatus? get next => switch (this) {
         OrderStatus.pending => OrderStatus.confirmed,
-        OrderStatus.confirmed => OrderStatus.shipped,
-        OrderStatus.shipped => OrderStatus.delivered,
+        OrderStatus.confirmed => OrderStatus.waitingCollection,
+        OrderStatus.waitingCollection => OrderStatus.collected,
         _ => null,
       };
 
   bool get isTerminal =>
-      this == OrderStatus.delivered || this == OrderStatus.cancelled;
+      this == OrderStatus.collected || this == OrderStatus.cancelled;
 
   static OrderStatus fromString(String s) {
-    return OrderStatus.values.firstWhere(
-      (e) => e.name == s.toLowerCase(),
-      orElse: () => OrderStatus.pending,
-    );
+    final key = s.trim().toLowerCase();
+    // Legacy delivery-era statuses from old documents.
+    return switch (key) {
+      'shipped' => OrderStatus.waitingCollection,
+      'delivered' => OrderStatus.collected,
+      _ => OrderStatus.values.firstWhere(
+          (e) => e.name.toLowerCase() == key,
+          orElse: () => OrderStatus.pending,
+        ),
+    };
   }
 
   // ── Transition guards (pure, shared by the repository write path) ──
@@ -49,6 +55,27 @@ enum OrderStatus {
       throw StateError(
           'A ${from.label.toLowerCase()} order cannot be cancelled.');
     }
+  }
+}
+
+enum PaymentStatus {
+  unpaid,
+  paid,
+  failed,
+  refunded;
+
+  String get label => switch (this) {
+        PaymentStatus.unpaid => 'Awaiting payment',
+        PaymentStatus.paid => 'Paid',
+        PaymentStatus.failed => 'Payment failed',
+        PaymentStatus.refunded => 'Refunded',
+      };
+
+  static PaymentStatus fromString(String? s) {
+    return PaymentStatus.values.firstWhere(
+      (e) => e.name == (s ?? '').trim().toLowerCase(),
+      orElse: () => PaymentStatus.unpaid,
+    );
   }
 }
 
@@ -130,19 +157,19 @@ class OrderInvoice {
 
   final int subtotal;
 
-  final int shippingFee;
-
   final int total;
 
   final String customerName;
   final String customerEmail;
   final String customerPhone;
-  final String shippingAddress;
   final String paymentMethod;
   final DateTime orderCreatedAt;
 
-  final int orderDiscount;
-  final int orderTax;
+  final int discountAllocated;
+  final int taxAllocated;
+
+  final String paymentIntentId;
+  final DateTime? paidAt;
 
   const OrderInvoice({
     required this.invoiceNumber,
@@ -156,16 +183,16 @@ class OrderInvoice {
     required this.issuedAt,
     required this.items,
     required this.subtotal,
-    required this.shippingFee,
     required this.total,
     required this.customerName,
     required this.customerEmail,
     required this.customerPhone,
-    required this.shippingAddress,
     required this.paymentMethod,
     required this.orderCreatedAt,
-    this.orderDiscount = 0,
-    this.orderTax = 0,
+    this.discountAllocated = 0,
+    this.taxAllocated = 0,
+    this.paymentIntentId = '',
+    this.paidAt,
   });
 
   int get lineCount => items.length;
@@ -186,7 +213,15 @@ class OrderInvoice {
     final myItems =
         order.items.where((i) => i.supplierId == supplierId).toList();
     final mySubtotal = myItems.fold<int>(0, (sum, i) => sum + i.lineTotal);
-    final myShipping = order.shippingShareFor(supplierId);
+    final orderSubtotal =
+        order.items.fold<int>(0, (sum, i) => sum + i.lineTotal);
+    int allocate(int whole) {
+      if (orderSubtotal <= 0 || whole == 0) return 0;
+      return ((whole * mySubtotal) / orderSubtotal).round();
+    }
+
+    final discountShare = allocate(order.discount);
+    final taxShare = allocate(order.tax);
     return OrderInvoice(
       invoiceNumber: invoiceNumber ??
           generateInvoiceNumber(at, supplierId: supplierId),
@@ -200,16 +235,16 @@ class OrderInvoice {
       issuedAt: at,
       items: myItems,
       subtotal: mySubtotal,
-      shippingFee: myShipping,
-      total: mySubtotal + myShipping,
+      total: mySubtotal - discountShare + taxShare,
       customerName: order.customerName,
       customerEmail: order.customerEmail,
       customerPhone: order.customerPhone,
-      shippingAddress: order.shippingAddress,
       paymentMethod: order.paymentMethod,
       orderCreatedAt: order.createdAt,
-      orderDiscount: order.discount,
-      orderTax: order.tax,
+      discountAllocated: discountShare,
+      taxAllocated: taxShare,
+      paymentIntentId: order.paymentIntentId,
+      paidAt: order.paidAt,
     );
   }
 
@@ -238,16 +273,16 @@ class OrderInvoice {
       issuedAt: _parseOrderDate(json['issuedAt']) ?? DateTime.now(),
       items: items,
       subtotal: (json['subtotal'] as num?)?.toInt() ?? 0,
-      shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 0,
       total: (json['total'] as num?)?.toInt() ?? 0,
       customerName: json['customerName']?.toString() ?? '',
       customerEmail: json['customerEmail']?.toString() ?? '',
       customerPhone: json['customerPhone']?.toString() ?? '',
-      shippingAddress: json['shippingAddress']?.toString() ?? '',
       paymentMethod: json['paymentMethod']?.toString() ?? '',
       orderCreatedAt: _parseOrderDate(json['orderCreatedAt']) ?? DateTime.now(),
-      orderDiscount: (json['orderDiscount'] as num?)?.toInt() ?? 0,
-      orderTax: (json['orderTax'] as num?)?.toInt() ?? 0,
+      discountAllocated: (json['discountAllocated'] as num?)?.toInt() ?? 0,
+      taxAllocated: (json['taxAllocated'] as num?)?.toInt() ?? 0,
+      paymentIntentId: json['paymentIntentId']?.toString() ?? '',
+      paidAt: _parseOrderDate(json['paidAt']),
     );
   }
 
@@ -263,16 +298,16 @@ class OrderInvoice {
         'issuedAt': issuedAt.toUtc().toIso8601String(),
         'items': items.map((i) => i.toJson()).toList(),
         'subtotal': subtotal,
-        'shippingFee': shippingFee,
         'total': total,
         'customerName': customerName,
         'customerEmail': customerEmail,
         'customerPhone': customerPhone,
-        'shippingAddress': shippingAddress,
         'paymentMethod': paymentMethod,
         'orderCreatedAt': orderCreatedAt.toUtc().toIso8601String(),
-        'orderDiscount': orderDiscount,
-        'orderTax': orderTax,
+        'discountAllocated': discountAllocated,
+        'taxAllocated': taxAllocated,
+        'paymentIntentId': paymentIntentId,
+        if (paidAt != null) 'paidAt': paidAt!.toUtc().toIso8601String(),
       };
 }
 
@@ -285,12 +320,13 @@ class Order {
   final String customerName;
   final String customerEmail;
   final String customerPhone;
-  final String shippingAddress;
   final List<OrderItem> items;
   final OrderStatus status;
+  final PaymentStatus paymentStatus;
   final String paymentMethod;
+  final String paymentIntentId;
+  final DateTime? paidAt;
   final int subtotal;
-  final int shippingFee;
   final int total;
 
   final int discount;
@@ -300,8 +336,6 @@ class Order {
   final String membershipTier;
 
   final List<String> supplierIds;
-
-  final Map<String, int> shippingBySupplier;
 
   final DateTime createdAt;
 
@@ -320,19 +354,19 @@ class Order {
     required this.customerName,
     required this.customerEmail,
     required this.customerPhone,
-    required this.shippingAddress,
     required this.items,
     required this.status,
     required this.paymentMethod,
     required this.subtotal,
-    required this.shippingFee,
     required this.total,
     required this.createdAt,
+    this.paymentStatus = PaymentStatus.unpaid,
+    this.paymentIntentId = '',
+    this.paidAt,
     this.discount = 0,
     this.tax = 0,
     this.membershipTier = '',
     this.supplierIds = const [],
-    this.shippingBySupplier = const {},
     this.statusHistory = const {},
     this.invoices = const {},
     this.refundStatus,
@@ -344,7 +378,6 @@ class Order {
         'fpx' => 'FPX Online Banking',
         'card' => 'Credit / Debit Card',
         'card_fpx' => 'Card / FPX',
-        'cod' => 'Cash on Delivery',
         'ewallet' => 'E-Wallet',
         _ => paymentMethod,
       };
@@ -357,14 +390,8 @@ class Order {
           .toSet()
           .toList();
 
-  int shippingShareFor(String supplierId) {
-    final recorded = shippingBySupplier[supplierId];
-    if (recorded != null) return recorded;
-    if (shippingBySupplier.isNotEmpty) return 0;
-    final ids = resolvedSupplierIds;
-    if (ids.length == 1 && ids.first == supplierId) return shippingFee;
-    return 0;
-  }
+  List<String> get supplierIdsInItemOrder =>
+      items.map((i) => i.supplierId).where((s) => s.isNotEmpty).toSet().toList();
 
   OrderInvoice? invoiceFor(String supplierId) => invoices[supplierId];
 
@@ -375,18 +402,18 @@ class Order {
     String? customerName,
     String? customerEmail,
     String? customerPhone,
-    String? shippingAddress,
     List<OrderItem>? items,
     OrderStatus? status,
+    PaymentStatus? paymentStatus,
     String? paymentMethod,
+    String? paymentIntentId,
+    DateTime? paidAt,
     int? subtotal,
-    int? shippingFee,
     int? total,
     int? discount,
     int? tax,
     String? membershipTier,
     List<String>? supplierIds,
-    Map<String, int>? shippingBySupplier,
     DateTime? createdAt,
     Map<String, DateTime>? statusHistory,
     Map<String, OrderInvoice>? invoices,
@@ -394,6 +421,7 @@ class Order {
     String? refundReason,
     int? refundAmount,
     bool clearRefund = false,
+    bool clearPaidAt = false,
   }) {
     return Order(
       id: id ?? this.id,
@@ -402,18 +430,18 @@ class Order {
       customerName: customerName ?? this.customerName,
       customerEmail: customerEmail ?? this.customerEmail,
       customerPhone: customerPhone ?? this.customerPhone,
-      shippingAddress: shippingAddress ?? this.shippingAddress,
       items: items ?? this.items,
       status: status ?? this.status,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
       paymentMethod: paymentMethod ?? this.paymentMethod,
+      paymentIntentId: paymentIntentId ?? this.paymentIntentId,
+      paidAt: clearPaidAt ? null : (paidAt ?? this.paidAt),
       subtotal: subtotal ?? this.subtotal,
-      shippingFee: shippingFee ?? this.shippingFee,
       total: total ?? this.total,
       discount: discount ?? this.discount,
       tax: tax ?? this.tax,
       membershipTier: membershipTier ?? this.membershipTier,
       supplierIds: supplierIds ?? this.supplierIds,
-      shippingBySupplier: shippingBySupplier ?? this.shippingBySupplier,
       createdAt: createdAt ?? this.createdAt,
       statusHistory: statusHistory ?? this.statusHistory,
       invoices: invoices ?? this.invoices,
@@ -435,12 +463,16 @@ class Order {
       customerName: json['customerName']?.toString() ?? '',
       customerEmail: json['customerEmail']?.toString() ?? '',
       customerPhone: json['customerPhone']?.toString() ?? '',
-      shippingAddress: json['shippingAddress']?.toString() ?? '',
       items: items,
       status: OrderStatus.fromString(json['status']?.toString() ?? 'pending'),
-      paymentMethod: json['paymentMethod']?.toString() ?? 'card_fpx',
+      // Orders written before the payment pipeline existed are treated as paid.
+      paymentStatus: json.containsKey('paymentStatus')
+          ? PaymentStatus.fromString(json['paymentStatus']?.toString())
+          : PaymentStatus.paid,
+      paymentMethod: json['paymentMethod']?.toString() ?? 'card',
+      paymentIntentId: json['paymentIntentId']?.toString() ?? '',
+      paidAt: _parseOrderDate(json['paidAt']),
       subtotal: (json['subtotal'] as num?)?.toInt() ?? 0,
-      shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 0,
       total: (json['total'] as num?)?.toInt() ?? 0,
       discount: (json['discount'] as num?)?.toInt() ?? 0,
       tax: (json['tax'] as num?)?.toInt() ?? 0,
@@ -450,7 +482,6 @@ class Order {
               .where((s) => s.isNotEmpty)
               .toList() ??
           const [],
-      shippingBySupplier: _parseShippingBySupplier(json['shippingBySupplier']),
       createdAt: json['createdAt'] != null
           ? _parseOrderDate(json['createdAt']) ?? DateTime.now()
           : DateTime.now(),
@@ -469,18 +500,18 @@ class Order {
         'customerName': customerName,
         'customerEmail': customerEmail,
         'customerPhone': customerPhone,
-        'shippingAddress': shippingAddress,
         'items': items.map((i) => i.toJson()).toList(),
         'status': status.name,
+        'paymentStatus': paymentStatus.name,
         'paymentMethod': paymentMethod,
+        if (paymentIntentId.isNotEmpty) 'paymentIntentId': paymentIntentId,
+        if (paidAt != null) 'paidAt': paidAt!.toUtc().toIso8601String(),
         'subtotal': subtotal,
-        'shippingFee': shippingFee,
         'total': total,
         'discount': discount,
         'tax': tax,
         'membershipTier': membershipTier,
         'supplierIds': resolvedSupplierIds,
-        'shippingBySupplier': shippingBySupplier,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'statusHistory': statusHistory.map(
             (status, when) => MapEntry(status, when.toUtc().toIso8601String())),
@@ -520,17 +551,6 @@ Map<String, DateTime> _parseStatusHistory(dynamic raw) {
     if (parsed != null) history[status] = parsed;
   });
   return history;
-}
-
-Map<String, int> _parseShippingBySupplier(dynamic raw) {
-  if (raw is! Map<String, dynamic>) return const {};
-  final shares = <String, int>{};
-  raw.forEach((supplierId, share) {
-    if (supplierId.isEmpty) return;
-    if (share is! num || share < 0) return;
-    shares[supplierId] = share.toInt();
-  });
-  return shares;
 }
 
 DateTime? _parseOrderDate(dynamic value) {

@@ -11,7 +11,6 @@ import '../models/order.dart';
 import '../models/product.dart';
 import '../models/product_category.dart';
 import '../models/review.dart';
-import '../models/saved_address.dart';
 import 'media/media_store.dart';
 import 'model_generation/model_glb_resolver.dart';
 
@@ -50,8 +49,6 @@ class MarketplaceRepository {
   ];
 
   static const AppConfigData _config = AppConfigData(
-    shippingFee: 25,
-    freeShippingThreshold: 500,
     currency: 'MYR',
     taxRate: 0.06,
     membershipTiers: [
@@ -74,8 +71,6 @@ class MarketplaceRepository {
       _db.collection(_usersCol).doc(uid).collection('cart');
   CollectionReference<Map<String, dynamic>> _userWishlist(String uid) =>
       _db.collection(_usersCol).doc(uid).collection('wishlist');
-  CollectionReference<Map<String, dynamic>> _userAddresses(String uid) =>
-      _db.collection(_usersCol).doc(uid).collection('addresses');
   CollectionReference<Map<String, dynamic>> _reviews(String productId) =>
       _products.doc(productId).collection('reviews');
 
@@ -224,56 +219,6 @@ class MarketplaceRepository {
 
   static String newOrderId() => _newId();
 
-  Future<Order> createOrder(Order order) async {
-    final id = order.id.isNotEmpty ? order.id : _newId();
-    final orderNumber =
-        'ORD-${_dateStamp(DateTime.now())}-${_rng.nextInt(9000) + 1000}';
-    final now = DateTime.now();
-
-    return _db.runTransaction((txn) async {
-      final doc = _orders.doc(id);
-
-      final existing = await txn.get(doc);
-      if (existing.exists) {
-        return Order.fromJson(existing.data()!);
-      }
-
-      final productDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
-      for (final item in order.items) {
-        final ref = _products.doc(item.productId);
-        final snapshot = await txn.get(ref);
-        productDocs[item.productId] = snapshot;
-        if (!snapshot.exists) {
-          throw StateError('"${item.name}" is no longer available.');
-        }
-        final product = Product.fromJson(snapshot.data()!);
-        if (!product.isActive) {
-          throw StateError('"${product.name}" is no longer on sale.');
-        }
-        if (product.stock < item.quantity) {
-          throw StateError(
-              'Insufficient stock for "${product.name}" '
-              '(only ${product.stock} left).');
-        }
-      }
-      productDocs.forEach((productId, snapshot) {
-        final product = Product.fromJson(snapshot.data()!);
-        final item = order.items.firstWhere((i) => i.productId == productId);
-        txn.update(
-            _products.doc(productId), {'stock': product.stock - item.quantity});
-      });
-
-      final toWrite = order.copyWith(
-        id: id,
-        orderNumber: orderNumber,
-        createdAt: now,
-        statusHistory: {OrderStatus.pending.name: now},
-      );
-      txn.set(doc, toWrite.toJson());
-      return toWrite;
-    });
-  }
-
   Future<Order?> fetchOrder(String orderId) async {
     if (orderId.isEmpty) return null;
     final snapshot = await _orders.doc(orderId).get();
@@ -298,12 +243,16 @@ class MarketplaceRepository {
       final now = DateTime.now();
       final current = Order.fromJson(snapshot.data()!);
       OrderStatus.ensureAdvance(current.status, status);
-      final updated = current.copyWith(
+      // Field-path update: touches only status + one history entry so the
+      // rules' affected-keys guard never sees payment/money fields drift.
+      txn.update(doc, {
+        'status': status.name,
+        'statusHistory.${status.name}': now.toUtc().toIso8601String(),
+      });
+      return current.copyWith(
         status: status,
         statusHistory: {...current.statusHistory, status.name: now},
       );
-      txn.set(doc, preserveStoredInvoices(updated.toJson(), snapshot.data()!));
-      return updated;
     });
   }
 
@@ -342,56 +291,16 @@ class MarketplaceRepository {
       );
 
       final accepts = order.status == OrderStatus.pending;
-      final invoices = {...order.invoices, supplierId: invoice};
-      final updated = accepts
-          ? order.copyWith(
-              status: OrderStatus.confirmed,
-              statusHistory:
-                  {...order.statusHistory, OrderStatus.confirmed.name: now},
-              invoices: invoices,
-            )
-          : order.copyWith(invoices: invoices);
-      txn.set(doc, updated.toJson());
+      // Field-path update: only the new invoice (plus the pending→confirmed
+      // step when this is the first accept) — never a full-document rewrite.
+      txn.update(doc, {
+        'invoices.$supplierId': invoice.toJson(),
+        if (accepts) 'status': OrderStatus.confirmed.name,
+        if (accepts)
+          'statusHistory.${OrderStatus.confirmed.name}':
+              now.toUtc().toIso8601String(),
+      });
       return invoice;
-    });
-  }
-
-  Future<Order> cancelOrder(String orderId) async {
-    return _db.runTransaction((txn) async {
-      final orderRef = _orders.doc(orderId);
-      final orderSnap = await txn.get(orderRef);
-      if (!orderSnap.exists) {
-        throw StateError('Order not found: $orderId');
-      }
-      final order = Order.fromJson(orderSnap.data()!);
-      if (order.status == OrderStatus.cancelled) return order;
-      OrderStatus.ensureCancellable(order.status);
-
-      final productRefs = <String, DocumentReference<Map<String, dynamic>>>{};
-      for (final item in order.items) {
-        productRefs[item.productId] = _products.doc(item.productId);
-      }
-      final productSnaps =
-          <String, DocumentSnapshot<Map<String, dynamic>>>{};
-      for (final entry in productRefs.entries) {
-        productSnaps[entry.key] = await txn.get(entry.value);
-      }
-      for (final entry in productSnaps.entries) {
-        final snap = entry.value;
-        if (!snap.exists) continue;
-        final product = Product.fromJson(snap.data()!);
-        final item = order.items.firstWhere((i) => i.productId == entry.key);
-        txn.update(entry.value.reference,
-            {'stock': product.stock + item.quantity});
-      }
-
-      final now = DateTime.now();
-      final updated = order.copyWith(
-        status: OrderStatus.cancelled,
-        statusHistory: {...order.statusHistory, OrderStatus.cancelled.name: now},
-      );
-      txn.set(orderRef, preserveStoredInvoices(updated.toJson(), orderSnap.data()!));
-      return updated;
     });
   }
 
@@ -438,42 +347,6 @@ class MarketplaceRepository {
 
   Future<void> removeFromWishlist(String uid, String productId) async {
     await _userWishlist(uid).doc(productId).delete();
-  }
-
-  // ── Saved addresses ─────────────────────────────────────────────────────
-
-  Stream<List<SavedAddress>> watchAddresses(String uid) {
-    return _userAddresses(uid).snapshots().map((snap) {
-      final list =
-          snap.docs.map((d) => SavedAddress.fromJson(d.data())).toList();
-      list.sort((a, b) {
-        if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
-        return b.createdAt.compareTo(a.createdAt);
-      });
-      return list;
-    });
-  }
-
-  Future<void> saveAddress(String uid, SavedAddress address) async {
-    await _userAddresses(uid).doc(address.id).set(address.toJson());
-  }
-
-  Future<void> deleteAddress(String uid, String addressId) async {
-    await _userAddresses(uid).doc(addressId).delete();
-  }
-
-  Future<void> setDefaultAddress(String uid, String addressId) async {
-    final col = _userAddresses(uid);
-    final snap = await col.get();
-    final batch = _db.batch();
-    for (final d in snap.docs) {
-      final shouldBeDefault = d.id == addressId;
-      final currentlyDefault = d.data()['isDefault'] == true;
-      if (currentlyDefault != shouldBeDefault) {
-        batch.update(d.reference, {'isDefault': shouldBeDefault});
-      }
-    }
-    await batch.commit();
   }
 
   // ── Reviews ─────────────────────────────────────────────────────────────
@@ -595,12 +468,5 @@ class MarketplaceRepository {
     }
     if (staged > 0) await batch.commit();
     return repaired;
-  }
-
-  static String _dateStamp(DateTime dt) {
-    final y = dt.year.toString().padLeft(4, '0');
-    final m = dt.month.toString().padLeft(2, '0');
-    final d = dt.day.toString().padLeft(2, '0');
-    return '$y$m$d';
   }
 }

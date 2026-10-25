@@ -278,9 +278,9 @@ class _RecentActivity extends ConsumerWidget {
         (Icons.receipt_long_outlined, AppColors.secondaryAccent),
       ActivityKind.orderConfirmed =>
         (Icons.check_circle_outline, AppColors.success),
-      ActivityKind.orderShipped =>
-        (Icons.local_shipping_outlined, AppColors.secondaryAccent),
-      ActivityKind.orderDelivered => (Icons.home_outlined, AppColors.success),
+      ActivityKind.orderReadyForCollection =>
+        (Icons.inventory_2_outlined, AppColors.secondaryAccent),
+      ActivityKind.orderCollected => (Icons.home_outlined, AppColors.success),
       ActivityKind.orderCancelled => (Icons.cancel_outlined, AppColors.error),
       ActivityKind.designSaved =>
         (Icons.design_services_outlined, AppColors.warning),

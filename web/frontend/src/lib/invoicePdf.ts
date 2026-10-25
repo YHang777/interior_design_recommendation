@@ -102,17 +102,19 @@ export function buildInvoice(order: AdminOrderDetail): jsPDF {
 
   partyBlock(colX, 'From', 'Intellar Marketplace', ['Online furniture marketplace']);
   partyBlock(col2X, 'To', order.customerName, [
-    order.shippingAddress,
     order.customerPhone,
     order.customerEmail,
   ]);
   y = Math.max(y, startPartyY) + 10;
 
   // ── Reference strip ────────────────────────────────────────────────────────
+  const paymentLabel = order.paymentMethod.trim()
+    ? `Payment: ${order.paymentMethod.trim()}${order.paymentStatus ? ` (${order.paymentStatus})` : ''}`
+    : '';
   const stripParts = [
     order.orderNumber.trim(),
     order.createdAt ? `Order placed ${shortDate(new Date(order.createdAt))}` : '',
-    order.paymentMethod.trim() ? `Payment: ${order.paymentMethod.trim()}` : '',
+    paymentLabel,
   ].filter(Boolean);
 
   ensure(30);
@@ -193,7 +195,6 @@ export function buildInvoice(order: AdminOrderDetail): jsPDF {
   y += 6;
   totalLine('Items subtotal', myr(order.subtotal));
   if (order.discount > 0) totalLine('Discount', `-${myr(order.discount)}`);
-  totalLine('Shipping', myr(order.shippingFee));
   if (order.tax > 0) totalLine('Tax', myr(order.tax));
   ensure(30);
   doc.setDrawColor(RULE[0], RULE[1], RULE[2]);

@@ -43,9 +43,6 @@ const productDetail: AdminProductDetail = {
   ...productRow,
   description: 'Three-seater in oatmeal linen.',
   images: ['https://cdn.example/1.jpg'],
-  shippingEnabled: true,
-  shippingFee: 25,
-  shippingLongDistanceNotice: false,
   ar3dStatus: 'ready',
   visionFlagged: false,
   supplierPhone: '012',
@@ -206,7 +203,6 @@ test('products → PATCH forwards the parsed patch', async () => {
         price: 799,
         originalPrice: null,
         isActive: false,
-        shippingLongDistanceNotice: true,
       });
       assert.equal(res.status, 200);
       const body = (await res.json()) as { product: AdminProductDetail };
@@ -220,7 +216,6 @@ test('products → PATCH forwards the parsed patch', async () => {
       price: 799,
       originalPrice: null,
       isActive: false,
-      shippingLongDistanceNotice: true,
     },
   });
 });
@@ -231,18 +226,6 @@ test('products → PATCH 400 on a negative price', async () => {
     assert.equal(res.status, 400);
     const body = (await res.json()) as { error: { code: string } };
     assert.equal(body.error.code, 'VALIDATION_ERROR');
-  });
-});
-
-test('products → PATCH 400 on a negative shipping fee', async () => {
-  await withServer({}, async (base) => {
-    assert.equal((await patch(base, 'sofa-1', { shippingFee: -5 })).status, 400);
-  });
-});
-
-test('products → PATCH 400 on a non-boolean shippingLongDistanceNotice', async () => {
-  await withServer({}, async (base) => {
-    assert.equal((await patch(base, 'sofa-1', { shippingLongDistanceNotice: 'true' })).status, 400);
   });
 });
 

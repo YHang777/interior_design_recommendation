@@ -214,9 +214,6 @@ export interface AdminProductRow {
 export interface AdminProductDetail extends AdminProductRow {
   description: string;
   images: string[];
-  shippingEnabled: boolean;
-  shippingFee: number;
-  shippingLongDistanceNotice: boolean;
   ar3dStatus: string;
   visionFlagged: boolean;
   supplierPhone: string;
@@ -234,9 +231,6 @@ export interface ProductUpdate {
   stock?: number;
   isActive?: boolean;
   isEcoFriendly?: boolean;
-  shippingEnabled?: boolean;
-  shippingFee?: number;
-  shippingLongDistanceNotice?: boolean;
 }
 
 export interface ListProductsResult {
@@ -254,7 +248,12 @@ export interface DeleteProductResult {
 
 // ── Orders admin ────────────────────────────────────────────────────────────
 
-export type AdminOrderStatus = 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+export type AdminOrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'waitingCollection'
+  | 'collected'
+  | 'cancelled';
 
 export interface AdminOrderItem {
   productId: string;
@@ -281,10 +280,16 @@ export interface AdminOrderRow {
 export interface AdminOrderDetail extends AdminOrderRow {
   customerEmail: string;
   customerPhone: string;
-  shippingAddress: string;
+  /** 'unpaid' | 'paid' | 'failed' | 'refunded'. */
+  paymentStatus: string;
+  /** Stripe PaymentIntent id; empty while unpaid. */
+  paymentIntentId: string;
+  /** ISO-8601 capture time; null while unpaid. */
+  paidAt: string | null;
+  refundStatus: string | null;
+  refundAmount: number | null;
   items: AdminOrderItem[];
   subtotal: number;
-  shippingFee: number;
   discount: number;
   tax: number;
   supplierIds: string[];

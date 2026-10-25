@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ordersApi } from '../api/api';
 import { ApiError } from '../api/client';
 import type { AdminOrderDetail, AdminOrderRow, AdminOrderStatus } from '../api/types';
-import { OrderStatusBadge } from '../components/Badge';
+import { OrderStatusBadge, PaymentStatusBadge } from '../components/Badge';
 import { DataTable, type Column, type SortState } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { IconBag, IconDownload, IconRefresh, IconX } from '../components/icons';
@@ -17,27 +17,47 @@ const STATUS_CHIPS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'pending', label: 'Pending' },
   { value: 'confirmed', label: 'Confirmed' },
-  { value: 'shipped', label: 'Shipped' },
-  { value: 'delivered', label: 'Delivered' },
+  { value: 'waitingCollection', label: 'Ready for collection' },
+  { value: 'collected', label: 'Collected' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
 const NEXT_LABEL: Partial<Record<AdminOrderStatus, string>> = {
-  confirmed: 'Confirmed',
-  shipped: 'Shipped',
-  delivered: 'Delivered',
+  confirmed: 'Accept',
+  waitingCollection: 'Mark ready',
+  collected: 'Mark collected',
 };
 
 const STATUS_NAME: Record<AdminOrderStatus, string> = {
   pending: 'Pending',
   confirmed: 'Confirmed',
+  waitingCollection: 'Ready for collection',
+  collected: 'Collected',
+  cancelled: 'Cancelled',
+};
+
+// Legacy keys can still appear in old statusHistory maps.
+const HISTORY_LABEL: Record<string, string> = {
+  ...STATUS_NAME,
   shipped: 'Shipped',
   delivered: 'Delivered',
-  cancelled: 'Cancelled',
 };
 
 function formatPrice(price: number): string {
   return `RM ${price.toLocaleString()}`;
+}
+
+function formatPaymentMethod(method: string): string {
+  switch (method) {
+    case 'card':
+      return 'Card';
+    case 'fpx':
+      return 'FPX';
+    case 'card_fpx':
+      return 'Card + FPX';
+    default:
+      return method || '—';
+  }
 }
 
 function formatDateTime(iso: string | null): string {
@@ -173,7 +193,7 @@ export function OrdersPage({ query }: { query: string }) {
         header: 'Status',
         sortValue: (r) => r.status,
         render: (r) => <OrderStatusBadge status={r.status} />,
-        width: '120px',
+        width: '170px',
       },
       {
         key: 'items',
@@ -182,6 +202,13 @@ export function OrdersPage({ query }: { query: string }) {
         render: (r) => r.itemCount,
         width: '70px',
         align: 'right',
+      },
+      {
+        key: 'payment',
+        header: 'Payment',
+        sortValue: (r) => r.paymentMethod,
+        render: (r) => formatPaymentMethod(r.paymentMethod),
+        width: '110px',
       },
       {
         key: 'total',
@@ -237,7 +264,7 @@ export function OrdersPage({ query }: { query: string }) {
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
 
-  const isTerminal = selected ? selected.status === 'delivered' || selected.status === 'cancelled' : true;
+  const isTerminal = selected ? selected.status === 'collected' || selected.status === 'cancelled' : true;
 
   const invoiceBtn = selected ? (
     <button className="btn btn-secondary btn-sm" onClick={() => downloadInvoice(selected)} disabled={busy !== null}>
@@ -348,17 +375,9 @@ export function OrdersPage({ query }: { query: string }) {
                 <span>{selected.customerPhone}</span>
               </div>
             )}
-            {selected.shippingAddress && (
-              <div className="review-meta-row">
-                <span className="review-meta-label">Ship to</span>
-                <span>{selected.shippingAddress}</span>
-              </div>
-            )}
             <div className="review-meta-row">
               <span className="review-meta-label">Placed</span>
-              <span>
-                {formatDateTime(selected.createdAt)} · {selected.paymentMethod || '—'}
-              </span>
+              <span>{formatDateTime(selected.createdAt)}</span>
             </div>
           </div>
 
@@ -394,12 +413,30 @@ export function OrdersPage({ query }: { query: string }) {
             </div>
             <div className="review-meta">
               <div className="review-meta-row">
-                <span className="review-meta-label">Subtotal</span>
-                <span>{formatPrice(selected.subtotal)}</span>
+                <span className="review-meta-label">Status</span>
+                <PaymentStatusBadge status={selected.paymentStatus} />
               </div>
               <div className="review-meta-row">
-                <span className="review-meta-label">Shipping</span>
-                <span>{formatPrice(selected.shippingFee)}</span>
+                <span className="review-meta-label">Method</span>
+                <span>{formatPaymentMethod(selected.paymentMethod)}</span>
+              </div>
+              {selected.paidAt && (
+                <div className="review-meta-row">
+                  <span className="review-meta-label">Paid</span>
+                  <span>{formatDateTime(selected.paidAt)}</span>
+                </div>
+              )}
+              {selected.paymentIntentId && (
+                <div className="review-meta-row">
+                  <span className="review-meta-label">Payment ref</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                    {selected.paymentIntentId}
+                  </span>
+                </div>
+              )}
+              <div className="review-meta-row">
+                <span className="review-meta-label">Subtotal</span>
+                <span>{formatPrice(selected.subtotal)}</span>
               </div>
               {selected.discount > 0 && (
                 <div className="review-meta-row">
@@ -429,7 +466,7 @@ export function OrdersPage({ query }: { query: string }) {
                 .sort((a, b) => a[1].localeCompare(b[1]))
                 .map(([name, at]) => (
                   <div className="review-meta-row" key={name}>
-                    <span className="review-meta-label">{name}</span>
+                    <span className="review-meta-label">{HISTORY_LABEL[name] ?? name}</span>
                     <span>{formatDateTime(at)}</span>
                   </div>
                 ))}
@@ -471,7 +508,7 @@ export function OrdersPage({ query }: { query: string }) {
           {!isTerminal && confirmCancel && (
             <div className="modal-actions">
               <span style={{ marginRight: 'auto', color: 'var(--text-muted)' }}>
-                Stock returns to sellers.
+                Stock returns to sellers. Paid orders are refunded.
               </span>
               <button className="btn btn-secondary" onClick={() => setConfirmCancel(false)} disabled={busy !== null}>
                 Keep order

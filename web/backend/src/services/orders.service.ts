@@ -30,27 +30,39 @@ export function defaultOrdersDeps(): OrdersDeps {
   };
 }
 
-const STATUSES: AdminOrderStatus[] = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
+const STATUSES: AdminOrderStatus[] = [
+  'pending',
+  'confirmed',
+  'waitingCollection',
+  'collected',
+  'cancelled',
+];
 const RANK: Record<AdminOrderStatus, number> = {
   pending: 0,
   confirmed: 1,
-  shipped: 2,
-  delivered: 3,
+  waitingCollection: 2,
+  collected: 3,
   cancelled: 99,
 };
 
 export function normalizeOrderStatus(raw: unknown): AdminOrderStatus {
   const s = typeof raw === 'string' ? raw.toLowerCase() : '';
-  if (STATUSES.includes(s as AdminOrderStatus)) return s as AdminOrderStatus;
+  // Case-insensitive match — 'waitingCollection' is camelCase, so a plain
+  // toLowerCase() compare against STATUSES would never hit it.
+  const match = STATUSES.find((t) => t.toLowerCase() === s);
+  if (match) return match;
+  // Legacy delivery-era statuses keep their place in the collection chain.
+  if (s === 'shipped') return 'waitingCollection';
+  if (s === 'delivered') return 'collected';
   return 'pending';
 }
 
 function isTerminal(status: AdminOrderStatus): boolean {
-  return status === 'delivered' || status === 'cancelled';
+  return status === 'collected' || status === 'cancelled';
 }
 
 /**
- * Admin transitions may skip steps forward (pending → shipped); the app's
+ * Admin transitions may skip steps forward (pending → collected); the app's
  * single-step ensureAdvance stays as-is for customer/supplier flows.
  */
 export function canTransition(from: AdminOrderStatus, to: AdminOrderStatus): boolean {
@@ -145,10 +157,14 @@ export function toOrderDetail(orderId: string, raw: Record<string, unknown>): Ad
     ...toOrderRow(orderId, data),
     customerEmail: asString(data.customerEmail),
     customerPhone: asString(data.customerPhone),
-    shippingAddress: asString(data.shippingAddress),
+    paymentStatus: asString(data.paymentStatus) || 'paid',
+    paymentIntentId: asString(data.paymentIntentId),
+    paidAt: toIso(data.paidAt),
+    refundStatus: data.refundStatus == null ? null : asString(data.refundStatus),
+    refundAmount:
+      data.refundAmount == null ? null : Math.round(asNumber(data.refundAmount)),
     items,
     subtotal: Math.round(asNumber(data.subtotal)),
-    shippingFee: Math.round(asNumber(data.shippingFee)),
     discount: Math.round(asNumber(data.discount)),
     tax: Math.round(asNumber(data.tax)),
     supplierIds,
@@ -215,6 +231,12 @@ export async function setOrderStatus(
   const nowIso = new Date().toISOString();
   const history = statusHistoryIso((snap.data() ?? {}).statusHistory);
   history[status] = nowIso;
+
+  if (status === 'cancelled' && asString((snap.data() ?? {}).paymentStatus) === 'paid') {
+    // Real money: the refund must land before stock/status move.
+    const { refundOrderIfPaid } = await import('./checkout.service');
+    await refundOrderIfPaid(orderId, db);
+  }
 
   if (status !== 'cancelled') {
     // Field-level update: items, money and invoices survive by construction.

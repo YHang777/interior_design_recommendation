@@ -6,6 +6,7 @@ import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../core/utils/pricing.dart';
 import '../../../../../models/order.dart';
+import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/price_summary.dart';
 import '../providers/marketplace_providers.dart';
@@ -75,10 +76,16 @@ class _SuccessView extends ConsumerWidget {
     final breakdown = PriceBreakdown.fromStored(
       subtotal: order.subtotal,
       discount: order.discount,
-      shippingFee: order.shippingFee,
       tax: order.tax,
       total: order.total,
     );
+
+    final liveProducts = {
+      for (final p
+          in ref.watch(marketplaceProductsProvider).valueOrNull ??
+              const <Product>[])
+        p.id: p,
+    };
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 32),
@@ -118,7 +125,7 @@ class _SuccessView extends ConsumerWidget {
         ),
         const SizedBox(height: 22),
         const Text(
-          'Order placed!',
+          'Payment successful!',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 24,
@@ -148,8 +155,8 @@ class _SuccessView extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         const Text(
-          'Your order is confirmed. You can track it anytime in your '
-          'orders.',
+          'Your payment is confirmed and your items are reserved. '
+          'You can track the order anytime in your orders.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 13,
@@ -160,20 +167,34 @@ class _SuccessView extends ConsumerWidget {
         const SizedBox(height: 24),
 
         _InfoCard(
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.local_shipping_outlined,
-                  size: 20, color: AppColors.accent),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  'Estimated delivery: 3–5 business days',
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary),
-                ),
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline,
+                      size: 20, color: AppColors.success),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Paid ${Formatters.myr(order.total)}'
+                      '${order.paymentMethodLabel.isEmpty ? '' : ' · ${order.paymentMethodLabel}'}',
+                      style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                  ),
+                ],
               ),
+              if (order.paymentIntentId.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Ref ${order.paymentIntentId}',
+                  style: const TextStyle(
+                      fontSize: 11.5, color: AppColors.textHint),
+                ),
+              ],
             ],
           ),
         ),
@@ -182,33 +203,59 @@ class _SuccessView extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('DELIVER TO',
+              const Text('PICKUP FROM',
                   style: TextStyle(
                       fontSize: 10.5,
                       letterSpacing: 0.8,
                       color: AppColors.textHint)),
-              const SizedBox(height: 6),
-              Text(order.customerName,
-                  style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 2),
-              Text(order.shippingAddress,
-                  style: const TextStyle(
-                      fontSize: 12.5,
-                      height: 1.4,
-                      color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              for (final supplierId in order.supplierIdsInItemOrder) ...[
+                if (supplierId != order.supplierIdsInItemOrder.first)
+                  const SizedBox(height: 8),
+                _pickupRow(order, supplierId, liveProducts),
+              ],
               const SizedBox(height: 8),
               Text(
-                '${order.paymentMethodLabel}'
-                '${order.customerPhone.trim().isEmpty ? '' : ' · ${order.customerPhone.trim()}'}',
+                '${order.customerName}'
+                '${order.customerPhone.trim().isEmpty ? '' : ' · ${order.customerPhone.trim()}'}'
+                ' — the supplier will contact you to arrange collection.',
                 style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary),
+                    fontSize: 11.5,
+                    height: 1.4,
+                    color: AppColors.textSecondary),
               ),
             ],
           ),
         ),
+        if (order.paymentStatus == PaymentStatus.paid &&
+            order.paymentIntentId.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _InfoCard(
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => context.pushNamed(
+                  RouteNames.orderReceipt,
+                  pathParameters: {'orderId': order.id},
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  side: BorderSide(
+                      color: AppColors.accent.withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.receipt_outlined, size: 18),
+                label: const Text('View payment receipt',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         _InfoCard(
           child: PriceSummaryCard(
@@ -278,6 +325,50 @@ class _InfoCard extends StatelessWidget {
       child: child,
     );
   }
+}
+
+Widget _pickupRow(
+  Order order,
+  String supplierId,
+  Map<String, Product> liveProducts,
+) {
+  final firstItem = order.items.firstWhere(
+    (it) => it.supplierId == supplierId,
+    orElse: () => order.items.first,
+  );
+  final supplier = liveProducts[firstItem.productId]?.supplier;
+  final name = supplier?.name.trim().isNotEmpty == true
+      ? supplier!.name.trim()
+      : 'Supplier store';
+  final address = supplier?.address.trim() ?? '';
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Icon(Icons.storefront_outlined,
+          size: 16, color: AppColors.accent),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(name,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            if (address.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(address,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: AppColors.textSecondary)),
+            ],
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _ConfirmationSkeleton extends StatelessWidget {

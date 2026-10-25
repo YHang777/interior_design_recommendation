@@ -17,6 +17,8 @@ android {
     ndkVersion = "28.2.13676358"
 
     compileOptions {
+        // flutter_stripe (Payments API) requires core library desugaring.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -45,6 +47,17 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+// sceneview → fuel pulls the deprecated kotlin-android-extensions-runtime,
+// whose kotlinx.android.parcel.* classes duplicate kotlin-parcelize-runtime
+// (flutter_stripe). The parcelize artifact is the drop-in replacement.
+configurations.all {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-android-extensions-runtime")
 }
 
 flutter {

@@ -7,7 +7,6 @@ import '../../../../../core/utils/formatters.dart';
 import '../../../../../core/utils/pricing.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/app_config_data.dart';
-import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
@@ -120,17 +119,13 @@ class CartScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 16),
                                 if (config == null)
-                                  const _FreeShippingSkeleton()
+                                  const _EstimateSkeleton()
                                 else
-                                  _FreeShippingCard(
-                                    shippingFee:
-                                        totalShippingFor(rows.map((r) => r.live)),
-                                    freeShippingThreshold:
-                                        config.freeShippingThreshold,
-                                    taxRate: config.taxRate,
+                                  _CartEstimateCard(
+                                    subtotal: subtotal,
                                     discountPercent:
                                         tier?.discountPercent ?? 0,
-                                    chargeableBase: subtotal,
+                                    taxRate: config.taxRate,
                                   ),
                                 const SizedBox(height: 12),
                                 for (var i = 0; i < rows.length; i++) ...[
@@ -186,58 +181,24 @@ class CartScreen extends ConsumerWidget {
   }
 }
 
-class _FreeShippingCard extends StatelessWidget {
-  const _FreeShippingCard({
-    required this.chargeableBase,
+class _CartEstimateCard extends StatelessWidget {
+  const _CartEstimateCard({
+    required this.subtotal,
     required this.discountPercent,
-    required this.shippingFee,
-    required this.freeShippingThreshold,
     required this.taxRate,
   });
 
-  final int chargeableBase;
+  final int subtotal;
   final int discountPercent;
-  final int shippingFee;
-  final int freeShippingThreshold;
   final double taxRate;
 
   @override
   Widget build(BuildContext context) {
-    if (shippingFee <= 0) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.celebration_outlined, size: 18, color: AppColors.success),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Free shipping on this cart',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.success,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
     final bd = computePriceBreakdown(
-      subtotal: chargeableBase,
+      subtotal: subtotal,
       discountPercent: discountPercent,
-      shippingFee: shippingFee,
-      freeShippingThreshold: freeShippingThreshold,
       taxRate: taxRate,
     );
-    final threshold = freeShippingThreshold;
-    final unlocked = bd.shippingFee == 0;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -248,62 +209,77 @@ class _FreeShippingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              Icon(
-                unlocked
-                    ? Icons.celebration_outlined
-                    : Icons.local_shipping_outlined,
-                size: 18,
-                color: unlocked ? AppColors.success : AppColors.accent,
-              ),
-              const SizedBox(width: 8),
+              Icon(Icons.handshake_outlined,
+                  size: 18, color: AppColors.success),
+              SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  unlocked
-                      ? "You've unlocked FREE shipping"
-                      : 'Free shipping unlocks at '
-                          '${Formatters.myr(threshold)}',
+                  'Self-collection — no delivery fee',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: unlocked
-                        ? AppColors.success
-                        : AppColors.textPrimary,
+                    color: AppColors.success,
                   ),
                 ),
               ),
             ],
           ),
-          if (!unlocked) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: (bd.chargeable / threshold).clamp(0.0, 1.0),
-                minHeight: 8,
-                backgroundColor: AppColors.divider,
-                color: AppColors.accent,
-              ),
-            ),
+          if (bd.discount > 0) ...[
             const SizedBox(height: 8),
-            Text(
-              'Add ${Formatters.myr(threshold - bd.chargeable)} more for '
-              'FREE shipping',
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Member discount',
+                    style: TextStyle(
+                        fontSize: 12.5, color: AppColors.textSecondary)),
+                Text('-${Formatters.myr(bd.discount)}',
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.success)),
+              ],
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Est. tax (${taxPercentLabel(taxRate)})',
+                  style: const TextStyle(
+                      fontSize: 12.5, color: AppColors.textSecondary)),
+              Text(Formatters.myr(bd.tax),
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Estimated total',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              Text(Formatters.myr(bd.total),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.accent)),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _FreeShippingSkeleton extends StatelessWidget {
-  const _FreeShippingSkeleton();
+class _EstimateSkeleton extends StatelessWidget {
+  const _EstimateSkeleton();
 
   @override
   Widget build(BuildContext context) {
@@ -319,12 +295,12 @@ class _FreeShippingSkeleton extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.local_shipping_outlined,
+              Icon(Icons.handshake_outlined,
                   size: 18, color: AppColors.textHint),
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Free shipping unlocks at …',
+                  'Working out your total…',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary,

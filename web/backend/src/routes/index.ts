@@ -11,6 +11,8 @@ import { createOrdersRouter } from './orders.routes';
 import { defaultOrdersDeps } from '../services/orders.service';
 import { createSettingsRouter } from './settings.routes';
 import { defaultSettingsDeps } from '../services/settings.service';
+import { createCheckoutRouter } from './checkout.routes';
+import { defaultCheckoutDeps } from '../services/checkout.service';
 import { firebaseConfigured } from '../config/firebase';
 import { verificationEmailConfigured } from '../services/verification-email.service';
 
@@ -40,3 +42,6 @@ apiRouter.use('/products', createProductsRouter(defaultProductsDeps()));
 apiRouter.use('/orders', createOrdersRouter(defaultOrdersDeps()));
 // Marketplace-wide settings (tax rate) — authenticate + requireAdmin applied inside.
 apiRouter.use('/settings', createSettingsRouter(defaultSettingsDeps()));
+// Customer checkout / payments (Stripe PaymentIntent + verify/abandon/cancel)
+// — authenticate applied inside. The webhook itself lives in app.ts (raw body).
+apiRouter.use('/checkout', createCheckoutRouter(defaultCheckoutDeps()));

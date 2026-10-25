@@ -19,7 +19,7 @@ class AppConfig {
       );
 
   static String get marketplaceApiUrl {
-    final fromLocal = LocalConfig.marketplaceApiUrl;
+    final fromLocal = LocalConfig.verificationApiUrl;
     final fromEnv = const String.fromEnvironment('MARKETPLACE_API_URL', defaultValue: '');
     String url = fromLocal.isNotEmpty ? fromLocal : fromEnv;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {

@@ -14,14 +14,16 @@ const orderIdParams = z.object({
 });
 
 const listQuery = z.object({
-  status: z.enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled']).optional(),
+  status: z
+    .enum(['pending', 'confirmed', 'waitingCollection', 'collected', 'cancelled'])
+    .optional(),
   q: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
 const statusBody = z.object({
-  status: z.enum(['pending', 'confirmed', 'shipped', 'delivered', 'cancelled']),
+  status: z.enum(['pending', 'confirmed', 'waitingCollection', 'collected', 'cancelled']),
 });
 
 export function createOrdersRouter(deps: OrdersDeps): Router {

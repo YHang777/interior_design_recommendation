@@ -27,7 +27,6 @@ void main() {
     int stock = 10,
     String owner = me,
     int? originalPrice,
-    int shippingFee = 0,
   }) {
     return Product(
       id: id,
@@ -47,8 +46,6 @@ void main() {
         email: 'seller@test.com',
       ),
       supplierId: owner,
-      shippingEnabled: shippingFee > 0,
-      shippingFee: shippingFee,
     );
   }
 
@@ -165,18 +162,19 @@ void main() {
     expect(find.text('Products'), findsNothing);
   });
 
-  testWidgets('rich product data (discount, shipping, stock pills) renders',
+  testWidgets('rich product data (discount, stock pills) renders',
       (tester) async {
     await pumpScreen(tester, [
       product('p1', 'Handcrafted Walnut Dining Table With Very Long Name',
-          stock: 0, originalPrice: 2500, shippingFee: 45),
+          stock: 0, originalPrice: 2500),
       product('p2', 'Velvet Lounge Chair', stock: 3, originalPrice: 1500),
     ]);
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('-50%'), findsOneWidget);
     expect(find.textContaining('Out of stock'), findsOneWidget);
-    expect(find.textContaining('Shipping'), findsOneWidget);
+    expect(find.textContaining('Low · 3 left'), findsOneWidget);
+    expect(find.textContaining('Shipping'), findsNothing);
   });
 
   testWidgets('populated catalogue also renders at 320dp', (tester) async {

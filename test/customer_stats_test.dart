@@ -21,7 +21,6 @@ Order _order({
     customerName: 'Aina',
     customerEmail: 'aina@example.com',
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, KL',
     items: [
       for (var i = 0; i < itemCount; i++)
         OrderItem(
@@ -36,7 +35,6 @@ Order _order({
     status: status,
     paymentMethod: 'fpx',
     subtotal: total,
-    shippingFee: 0,
     total: total,
     createdAt: createdAt ?? DateTime(2026, 9, 1),
     statusHistory: statusHistory,
@@ -67,8 +65,8 @@ void main() {
     test('cancelled orders never count (supplier revenue rule)', () {
       final orders = [
         _order(id: 'a', status: OrderStatus.pending),
-        _order(id: 'b', status: OrderStatus.shipped),
-        _order(id: 'c', status: OrderStatus.delivered),
+        _order(id: 'b', status: OrderStatus.waitingCollection),
+        _order(id: 'c', status: OrderStatus.collected),
         _order(id: 'd', status: OrderStatus.cancelled),
       ];
       expect(countPurchases(orders), 3);
@@ -110,21 +108,21 @@ void main() {
     });
 
     test('latest status event wins over createdAt for its timestamp', () {
-      final shippedAt = DateTime(2026, 9, 26, 15);
+      final readyAt = DateTime(2026, 9, 26, 15);
       final entries = buildRecentActivity(
         orders: [
           _order(
-            status: OrderStatus.shipped,
+            status: OrderStatus.waitingCollection,
             createdAt: DateTime(2026, 9, 20),
-            statusHistory: {OrderStatus.shipped.name: shippedAt},
+            statusHistory: {OrderStatus.waitingCollection.name: readyAt},
           ),
         ],
         designs: const [],
         now: now,
       );
-      expect(entries.first.kind, ActivityKind.orderShipped);
-      expect(entries.first.title, contains('shipped'));
-      expect(entries.first.timestamp, shippedAt);
+      expect(entries.first.kind, ActivityKind.orderReadyForCollection);
+      expect(entries.first.title, contains('ready for collection'));
+      expect(entries.first.timestamp, readyAt);
     });
 
     test('cancelled orders appear honestly with their own kind', () {
@@ -168,17 +166,17 @@ void main() {
           _order(
             id: 'old',
             orderNumber: 'ORD-OLD',
-            status: OrderStatus.shipped,
+            status: OrderStatus.waitingCollection,
             statusHistory: {
-              OrderStatus.shipped.name: DateTime(2026, 9, 10),
+              OrderStatus.waitingCollection.name: DateTime(2026, 9, 10),
             },
           ),
           _order(
             id: 'new',
             orderNumber: 'ORD-NEW',
-            status: OrderStatus.delivered,
+            status: OrderStatus.collected,
             statusHistory: {
-              OrderStatus.delivered.name: DateTime(2026, 9, 27),
+              OrderStatus.collected.name: DateTime(2026, 9, 27),
             },
           ),
         ],
@@ -188,9 +186,9 @@ void main() {
         now: now,
       );
       expect(entries.map((e) => e.title).toList(), [
-        'Order ORD-NEW delivered',
+        'Order ORD-NEW collected',
         'Saved “Mid”',
-        'Order ORD-OLD shipped',
+        'Order ORD-OLD is ready for collection',
       ]);
     });
 

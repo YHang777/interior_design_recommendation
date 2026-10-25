@@ -79,12 +79,9 @@ class PriceSummaryCard extends StatelessWidget {
             valueColor: AppColors.success,
           ),
         SummaryLine(
-          'Shipping',
-          breakdown.shippingFee == 0
-              ? 'FREE'
-              : Formatters.myr(breakdown.shippingFee),
-          valueColor:
-              breakdown.shippingFee == 0 ? AppColors.success : null,
+          'Self-collection',
+          'FREE',
+          valueColor: AppColors.success,
         ),
         SummaryLine(taxLabel, Formatters.myr(breakdown.tax)),
         Padding(

@@ -53,12 +53,26 @@ export function ApplicationStatusBadge({ status }: { status: ApplicationStatus }
 const ORDER_LABEL: Record<AdminOrderStatus, string> = {
   pending: 'Pending',
   confirmed: 'Confirmed',
-  shipped: 'Shipped',
-  delivered: 'Delivered',
+  waitingCollection: 'Ready for collection',
+  collected: 'Collected',
   cancelled: 'Cancelled',
 };
 
 /** Pill for orders/{id}.status. */
 export function OrderStatusBadge({ status }: { status: AdminOrderStatus }) {
   return <span className={`badge badge-status-${status}`}>{ORDER_LABEL[status]}</span>;
+}
+
+const PAYMENT_LABEL: Record<string, string> = {
+  unpaid: 'Unpaid',
+  paid: 'Paid',
+  failed: 'Failed',
+  refunded: 'Refunded',
+};
+
+/** Pill for orders/{id}.paymentStatus. */
+export function PaymentStatusBadge({ status }: { status: string }) {
+  return (
+    <span className={`badge badge-payment-${status}`}>{PAYMENT_LABEL[status] ?? status}</span>
+  );
 }

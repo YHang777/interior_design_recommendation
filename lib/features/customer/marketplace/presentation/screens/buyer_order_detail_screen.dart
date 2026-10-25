@@ -10,6 +10,7 @@ import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/product.dart';
 import '../../../../../models/review.dart';
+import '../../../../../services/marketplace_api.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
@@ -48,7 +49,7 @@ class _BuyerOrderDetailScreenState
 
     setState(() => _working = true);
     try {
-      await ref.read(marketplaceRepositoryProvider).cancelOrder(order.id);
+      await MarketplaceApi().cancelOrder(order.id);
       if (mounted) {
         showAppSnackbar(context, 'Order cancelled — stock restored',
             color: AppColors.error);
@@ -59,38 +60,6 @@ class _BuyerOrderDetailScreenState
             context,
             userMessage(e,
                 fallback: 'Could not cancel the order. Please try again.'),
-            color: AppColors.error, duration: const Duration(seconds: 4));
-      }
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
-  }
-
-  Future<void> _confirmDelivery(Order order) async {
-    final confirmed = await showConfirmDialog(
-      context,
-      title: 'Confirm delivery?',
-      message: 'Confirm that your items have arrived. This completes the '
-          'order and lets you rate each item.',
-      confirmLabel: 'Confirm delivery',
-    );
-    if (!confirmed || !mounted) return;
-
-    setState(() => _working = true);
-    try {
-      await ref
-          .read(marketplaceRepositoryProvider)
-          .updateOrderStatus(order.id, OrderStatus.delivered);
-      if (mounted) {
-        showAppSnackbar(context, 'Delivery confirmed — rate your items now',
-            color: AppColors.success, duration: const Duration(seconds: 3));
-      }
-    } catch (e) {
-      if (mounted) {
-        showAppSnackbar(
-            context,
-            userMessage(e,
-                fallback: 'Could not update the order. Please try again.'),
             color: AppColors.error, duration: const Duration(seconds: 4));
       }
     } finally {
@@ -249,30 +218,6 @@ class _BuyerOrderDetailScreenState
       );
       buttons.insert(1, const SizedBox(width: 10));
     }
-    if (order.status == OrderStatus.shipped) {
-      buttons.insert(
-        0,
-        SizedBox(
-          height: 52,
-          width: 160,
-          child: ElevatedButton(
-            onPressed: _working ? null : () => _confirmDelivery(order),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: const Text('Confirm delivery',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          ),
-        ),
-      );
-      buttons.insert(1, const SizedBox(width: 10));
-    }
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -309,7 +254,6 @@ class _OrderBody extends ConsumerWidget {
     final breakdown = PriceBreakdown.fromStored(
       subtotal: order.subtotal,
       discount: order.discount,
-      shippingFee: order.shippingFee,
       tax: order.tax,
       total: order.total,
     );
@@ -367,30 +311,82 @@ class _OrderBody extends ConsumerWidget {
         const SizedBox(height: 14),
         _sectionCard(
           context,
-          'Delivery',
+          'Payment & pickup',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _MetaRow(Icons.credit_card, order.paymentMethodLabel),
+              _MetaRow(
+                Icons.check_circle_outline,
+                order.paymentStatus.label,
+                sub: order.paidAt == null
+                    ? null
+                    : 'Paid ${Formatters.shortDateTime(order.paidAt!)}',
+              ),
+              const SizedBox(height: 8),
+              _MetaRow(
+                Icons.credit_card,
+                order.paymentMethodLabel,
+                sub: order.paymentIntentId.isEmpty
+                    ? null
+                    : 'Ref ${order.paymentIntentId}',
+              ),
               const SizedBox(height: 8),
               _MetaRow(Icons.event_outlined,
                   'Placed ${Formatters.shortDateTime(order.createdAt)}'),
               const SizedBox(height: 8),
               _MetaRow(
-                Icons.location_on_outlined,
+                Icons.person_outline,
                 order.customerName,
-                sub: order.shippingAddress,
+                sub: order.customerPhone.trim().isEmpty
+                    ? null
+                    : Formatters.phone(order.customerPhone.trim()),
               ),
-              if (order.customerPhone.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _MetaRow(Icons.phone_outlined,
-                    Formatters.phone(order.customerPhone.trim())),
-              ],
             ],
           ),
         ),
-        // ── Reviews: once delivered, one review per item per order ──────
-        if (order.status == OrderStatus.delivered) ...[
+        if (order.status != OrderStatus.cancelled) ...[
+          const SizedBox(height: 14),
+          _sectionCard(
+            context,
+            order.supplierIdsInItemOrder.length > 1
+                ? 'Pickup locations'
+                : 'Pickup location',
+            child: _PickupLocations(order: order, liveProducts: liveProducts),
+          ),
+        ],
+        if (order.paymentStatus == PaymentStatus.paid &&
+            order.paymentIntentId.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _sectionCard(
+            context,
+            'Payment receipt',
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => context.pushNamed(
+                  RouteNames.orderReceipt,
+                  pathParameters: {'orderId': order.id},
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  side: BorderSide(
+                      color: AppColors.accent.withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.receipt_outlined, size: 18),
+                label: const Text('View payment receipt',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              ),
+            ),
+          ),
+        ],
+        // ── Reviews: once collected, one review per item per order ──────
+        if (order.status == OrderStatus.collected) ...[
           const SizedBox(height: 14),
           _sectionCard(
             context,
@@ -460,6 +456,47 @@ Product? _liveProductFor(OrderItem item, Map<String, Product> liveProducts) {
   final product = liveProducts[item.productId];
   if (product == null) return null;
   return product.resolvedSupplierId == item.supplierId ? product : null;
+}
+
+// ── Pickup: one entry per supplier, address from the live catalogue ─────────
+
+class _PickupLocations extends StatelessWidget {
+  const _PickupLocations({required this.order, required this.liveProducts});
+
+  final Order order;
+  final Map<String, Product> liveProducts;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < order.supplierIdsInItemOrder.length; i++) {
+      final supplierId = order.supplierIdsInItemOrder[i];
+      final firstItem = order.items.firstWhere(
+        (it) => it.supplierId == supplierId,
+        orElse: () => order.items.first,
+      );
+      final supplier =
+          _liveProductFor(firstItem, liveProducts)?.supplier;
+      final name = supplier?.name.trim().isNotEmpty == true
+          ? supplier!.name.trim()
+          : 'Supplier store';
+      final address = supplier?.address.trim() ?? '';
+      if (i > 0) rows.add(const Divider(height: 14, thickness: 0.6));
+      rows.add(
+        _MetaRow(
+          Icons.storefront_outlined,
+          name,
+          sub: address.isEmpty
+              ? 'Contact the supplier to arrange collection'
+              : address,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows,
+    );
+  }
 }
 
 void _openInvoice(BuildContext context, OrderInvoice invoice) {
@@ -650,17 +687,17 @@ class _StatusTimeline extends StatelessWidget {
   static const _steps = [
     (OrderStatus.pending, 'Pending'),
     (OrderStatus.confirmed, 'Confirmed'),
-    (OrderStatus.shipped, 'Shipped'),
-    (OrderStatus.delivered, 'Delivered'),
+    (OrderStatus.waitingCollection, 'Ready for collection'),
+    (OrderStatus.collected, 'Collected'),
   ];
 
   String? _captionFor(int index) {
     if (index != order.status.index) return null;
     return switch (order.status) {
-      OrderStatus.pending => 'Awaiting seller confirmation',
-      OrderStatus.confirmed => 'Fulfilment in progress',
-      OrderStatus.shipped => 'On its way to you',
-      OrderStatus.delivered => 'Enjoy your new space!',
+      OrderStatus.pending => 'Awaiting supplier confirmation',
+      OrderStatus.confirmed => 'Your items are being prepared',
+      OrderStatus.waitingCollection => 'Collect from the supplier\'s store',
+      OrderStatus.collected => 'Enjoy your new space!',
       OrderStatus.cancelled => null,
     };
   }
@@ -670,8 +707,8 @@ class _StatusTimeline extends StatelessWidget {
     final reached = switch (order.status) {
       OrderStatus.pending => 1,
       OrderStatus.confirmed => 2,
-      OrderStatus.shipped => 3,
-      OrderStatus.delivered => 4,
+      OrderStatus.waitingCollection => 3,
+      OrderStatus.collected => 4,
       OrderStatus.cancelled => 0,
     };
 

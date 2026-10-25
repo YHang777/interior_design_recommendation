@@ -5,13 +5,16 @@ import 'package:interior_design_recommendation/models/order.dart';
 
 Order _order({
   List<OrderItem> items = const [],
-  int shippingFee = 0,
-  Map<String, int> shippingBySupplier = const {},
   List<String> supplierIds = const [],
   int discount = 0,
   int tax = 0,
   int subtotal = 0,
+  int total = 0,
   OrderStatus status = OrderStatus.pending,
+  PaymentStatus paymentStatus = PaymentStatus.paid,
+  String paymentMethod = 'fpx',
+  String paymentIntentId = '',
+  DateTime? paidAt,
   Map<String, OrderInvoice> invoices = const {},
 }) {
   return Order(
@@ -21,17 +24,17 @@ Order _order({
     customerName: 'Aina',
     customerEmail: 'aina@example.com',
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, Kuala Lumpur',
     items: items,
     status: status,
-    paymentMethod: 'fpx',
+    paymentStatus: paymentStatus,
+    paymentMethod: paymentMethod,
+    paymentIntentId: paymentIntentId,
+    paidAt: paidAt,
     subtotal: subtotal,
-    shippingFee: shippingFee,
-    total: subtotal + shippingFee,
+    total: total,
     discount: discount,
     tax: tax,
     supplierIds: supplierIds,
-    shippingBySupplier: shippingBySupplier,
     createdAt: DateTime(2026, 9, 29, 10, 30),
     invoices: invoices,
   );
@@ -84,6 +87,7 @@ void main() {
         ],
         supplierIds: ['s1', 's2'],
         subtotal: 320,
+        total: 320,
       );
 
       final inv = _issue(order);
@@ -93,72 +97,104 @@ void main() {
       expect(inv.unitCount, 3);
     });
 
-    test('total is this supplier’s subtotal plus their shipping share', () {
+    test('total is this supplier’s subtotal with nothing else added', () {
       final order = _order(
         items: [
           _item(unitPrice: 100, quantity: 2, supplierId: 's1'),
           _item(id: 'p2', unitPrice: 50, quantity: 1, supplierId: 's2'),
         ],
         supplierIds: ['s1', 's2'],
-        shippingFee: 25,
-        shippingBySupplier: {'s1': 15, 's2': 10},
         subtotal: 250,
+        total: 250,
       );
 
       final inv = _issue(order);
 
       expect(inv.subtotal, 200);
-      expect(inv.shippingFee, 15);
-      expect(inv.total, 215);
+      expect(inv.discountAllocated, 0);
+      expect(inv.taxAllocated, 0);
+      expect(inv.total, 200);
     });
 
-    test('legacy single-supplier order bills the whole shipping fee', () {
-      final order = _order(
-        items: [_item(unitPrice: 100, quantity: 1)],
-        shippingFee: 25,
-        subtotal: 100,
-      );
-
-      final inv = _issue(order);
-
-      expect(inv.shippingFee, 25);
-      expect(inv.total, 125);
-    });
-
-    test('unattributed multi-seller shipping is never invented', () {
+    test('allocates order discount proportionally to the item subtotal', () {
+      // s1 holds 200 of a 250 order → 4/5 of the RM10 discount.
       final order = _order(
         items: [
-          _item(unitPrice: 100, supplierId: 's1'),
-          _item(id: 'p2', unitPrice: 50, supplierId: 's2'),
+          _item(unitPrice: 100, quantity: 2, supplierId: 's1'),
+          _item(id: 'p2', unitPrice: 50, quantity: 1, supplierId: 's2'),
         ],
         supplierIds: ['s1', 's2'],
-        shippingFee: 25,
-        subtotal: 150,
+        discount: 10,
+        subtotal: 250,
+        total: 244,
       );
 
       final inv = _issue(order);
 
-      expect(inv.shippingFee, 0);
-      expect(inv.total, 100);
+      expect(inv.subtotal, 200);
+      expect(inv.discountAllocated, 8);
+      expect(inv.taxAllocated, 0);
+      expect(inv.total, 192);
     });
 
-    test('carries order-level discount and tax as reference only', () {
+    test('allocates order tax proportionally too', () {
+      final order = _order(
+        items: [
+          _item(unitPrice: 100, quantity: 2, supplierId: 's1'),
+          _item(id: 'p2', unitPrice: 50, quantity: 1, supplierId: 's2'),
+        ],
+        supplierIds: ['s1', 's2'],
+        tax: 15,
+        subtotal: 250,
+        total: 265,
+      );
+
+      final inv = _issue(order);
+
+      expect(inv.taxAllocated, 12);
+      expect(inv.total, 212);
+    });
+
+    test('a single-supplier order carries the whole discount and tax', () {
       final order = _order(
         items: [_item(unitPrice: 100)],
         discount: 10,
         tax: 6,
         subtotal: 100,
+        total: 96,
       );
 
       final inv = _issue(order);
 
-      expect(inv.orderDiscount, 10);
-      expect(inv.orderTax, 6);
-      expect(inv.total, 100);
+      expect(inv.discountAllocated, 10);
+      expect(inv.taxAllocated, 6);
+      expect(inv.total, 96);
     });
 
-    test('freezes the from/to blocks and order reference', () {
-      final order = _order(items: [_item()], subtotal: 100);
+    test('zero-subtotal orders never divide by zero', () {
+      final order = _order(
+        items: [_item(unitPrice: 0)],
+        discount: 10,
+        tax: 6,
+        subtotal: 0,
+        total: 0,
+      );
+
+      final inv = _issue(order);
+
+      expect(inv.discountAllocated, 0);
+      expect(inv.taxAllocated, 0);
+      expect(inv.total, 0);
+    });
+
+    test('freezes the from/to blocks, payment ref and order reference', () {
+      final order = _order(
+        items: [_item()],
+        subtotal: 100,
+        total: 100,
+        paymentIntentId: 'pi_3ABC',
+        paidAt: DateTime.utc(2026, 9, 29, 6, 0),
+      );
 
       final inv = _issue(
         order,
@@ -171,8 +207,10 @@ void main() {
       expect(inv.orderId, 'o1');
       expect(inv.supplierName, 'Studio Kayu');
       expect(inv.customerName, 'Aina');
-      expect(inv.shippingAddress, '1 Jalan Test, Kuala Lumpur');
+      expect(inv.customerPhone, '0123456789');
       expect(inv.paymentMethod, 'fpx');
+      expect(inv.paymentIntentId, 'pi_3ABC');
+      expect(inv.paidAt, DateTime.utc(2026, 9, 29, 6, 0));
       expect(inv.orderCreatedAt, DateTime(2026, 9, 29, 10, 30));
     });
   });
@@ -211,12 +249,13 @@ void main() {
           _item(unitPrice: 100, quantity: 2),
           _item(id: 'p2', name: 'Lamp', unitPrice: 40, supplierId: 's2'),
         ],
-        shippingFee: 25,
-        shippingBySupplier: {'s1': 15, 's2': 10},
         supplierIds: ['s1', 's2'],
         discount: 10,
         tax: 6,
         subtotal: 240,
+        total: 236,
+        paymentIntentId: 'pi_3ABC',
+        paidAt: DateTime.utc(2026, 9, 29, 6, 0),
       );
       final inv = _issue(order, invoiceNumber: 'INV-20260929-2222');
 
@@ -233,23 +272,27 @@ void main() {
       expect(back.items.length, 1);
       expect(back.items.first.name, 'Nordic Sofa');
       expect(back.subtotal, inv.subtotal);
-      expect(back.shippingFee, inv.shippingFee);
       expect(back.total, inv.total);
       expect(back.customerName, inv.customerName);
-      expect(back.shippingAddress, inv.shippingAddress);
+      expect(back.customerPhone, inv.customerPhone);
       expect(back.paymentMethod, inv.paymentMethod);
-      expect(back.orderDiscount, 10);
-      expect(back.orderTax, 6);
+      expect(back.discountAllocated, inv.discountAllocated);
+      expect(back.taxAllocated, inv.taxAllocated);
+      expect(back.paymentIntentId, inv.paymentIntentId);
+      expect(back.paidAt?.toUtc(), inv.paidAt?.toUtc());
       expect(back.issuedAt.toUtc(), inv.issuedAt.toUtc());
       expect(back.orderCreatedAt.toUtc(), inv.orderCreatedAt.toUtc());
     });
 
     test('Order.invoices survives an Order JSON round-trip', () {
-      final inv = _issue(_order(items: [_item()], subtotal: 100),
-          invoiceNumber: 'INV-20260929-3333');
+      final inv = _issue(
+        _order(items: [_item()], subtotal: 100, total: 100),
+        invoiceNumber: 'INV-20260929-3333',
+      );
       final order = _order(
         items: [_item()],
         subtotal: 100,
+        total: 100,
         status: OrderStatus.confirmed,
         invoices: {'s1': inv},
       );
@@ -261,7 +304,8 @@ void main() {
     });
 
     test('an order without invoices round-trips to an empty map', () {
-      final back = Order.fromJson(_order(items: [_item()], subtotal: 100).toJson());
+      final back = Order.fromJson(
+          _order(items: [_item()], subtotal: 100, total: 100).toJson());
 
       expect(back.invoices, isEmpty);
       expect(back.invoiceFor('s1'), isNull);
@@ -269,7 +313,7 @@ void main() {
 
     test('malformed invoice entries are dropped, not fatal', () {
       final back = Order.fromJson({
-        ..._order(items: [_item()], subtotal: 100).toJson(),
+        ..._order(items: [_item()], subtotal: 100, total: 100).toJson(),
         'invoices': {
           's1': 'not-a-map',
           's2': <String, dynamic>{'invoiceNumber': 'INV-20260929-4444'},
@@ -282,11 +326,14 @@ void main() {
     });
 
     test('copyWith preserves invoices unless replaced', () {
-      final inv = _issue(_order(items: [_item()], subtotal: 100),
-          invoiceNumber: 'INV-20260929-5555');
+      final inv = _issue(
+        _order(items: [_item()], subtotal: 100, total: 100),
+        invoiceNumber: 'INV-20260929-5555',
+      );
       final order = _order(
         items: [_item()],
         subtotal: 100,
+        total: 100,
         status: OrderStatus.pending,
         invoices: {'s1': inv},
       );
@@ -301,7 +348,7 @@ void main() {
   group('invoices stay invisible to the order rules', () {
     test('an invoice survives a byte-identical JSON round-trip', () {
       final inv = _issue(
-        _order(items: [_item()], subtotal: 100),
+        _order(items: [_item()], subtotal: 100, total: 100),
         invoiceNumber: 'INV-20260929-6666',
         issuedAt: DateTime.utc(2026, 9, 29, 6, 5, 0, 123),
       );
@@ -319,10 +366,13 @@ void main() {
       final order = _order(
         items: [_item()],
         subtotal: 100,
+        total: 100,
         status: OrderStatus.confirmed,
         invoices: {
-          's1': _issue(_order(items: [_item()], subtotal: 100),
-              invoiceNumber: 'INV-20260929-7777'),
+          's1': _issue(
+            _order(items: [_item()], subtotal: 100, total: 100),
+            invoiceNumber: 'INV-20260929-7777',
+          ),
         },
       );
 
@@ -340,7 +390,7 @@ void main() {
         },
       };
       final payload = <String, dynamic>{
-        'status': 'shipped',
+        'status': 'waitingCollection',
         'invoices': {
           's1': <String, dynamic>{'invoiceNumber': 'INV-NEW', 'total': 1},
         },
@@ -348,7 +398,7 @@ void main() {
 
       final out = preserveStoredInvoices(payload, stored);
 
-      expect(out['status'], 'shipped');
+      expect(out['status'], 'waitingCollection');
       expect(out['invoices'], same(stored['invoices']));
       expect((out['invoices'] as Map)['s1']['invoiceNumber'], 'INV-OLD');
     });

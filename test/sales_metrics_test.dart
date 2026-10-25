@@ -38,12 +38,10 @@ Order _order({
     customerName: 'Customer $customerId',
     customerEmail: '$customerId@example.com',
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, KL',
     items: lineItems,
     status: status,
-    paymentMethod: 'cod',
+    paymentMethod: 'card',
     subtotal: subtotal,
-    shippingFee: 0,
     total: subtotal,
     createdAt: createdAt ?? DateTime.utc(2026, 9, 1),
   );
@@ -304,27 +302,27 @@ void main() {
   });
 
   group('conversionRate', () {
-    test('delivered ÷ all orders; cancelled stays in the denominator', () {
+    test('collected ÷ all orders; cancelled stays in the denominator', () {
       final orders = [
-        _order(id: 'o1', status: OrderStatus.delivered),
-        _order(id: 'o2', status: OrderStatus.delivered),
+        _order(id: 'o1', status: OrderStatus.collected),
+        _order(id: 'o2', status: OrderStatus.collected),
         _order(id: 'o3', status: OrderStatus.cancelled),
       ];
 
       final rate = conversionRate(orders, _supplier);
 
       expect(rate, closeTo(2 / 3, 1e-9));
-      expect(deliveredCount(orders, _supplier), 2);
+      expect(collectedCount(orders, _supplier), 2);
     });
 
     test('null when the supplier has no orders', () {
       expect(conversionRate(const [], _supplier), isNull);
-      expect(deliveredCount(const [], _supplier), 0);
+      expect(collectedCount(const [], _supplier), 0);
     });
 
     test('ignores orders that don\'t involve this supplier', () {
       final orders = [
-        _order(id: 'o1', status: OrderStatus.delivered),
+        _order(id: 'o1', status: OrderStatus.collected),
         _order(
           id: 'o2',
           status: OrderStatus.pending,
@@ -333,7 +331,7 @@ void main() {
       ];
 
       expect(conversionRate(orders, _supplier), 1.0);
-      expect(deliveredCount(orders, _supplier), 1);
+      expect(collectedCount(orders, _supplier), 1);
     });
   });
 }

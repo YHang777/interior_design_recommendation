@@ -25,15 +25,11 @@ class MembershipTier {
 }
 
 class AppConfigData {
-  final int shippingFee;
-  final int freeShippingThreshold;
   final String currency;
   final double taxRate;
   final List<MembershipTier> membershipTiers;
 
   const AppConfigData({
-    required this.shippingFee,
-    required this.freeShippingThreshold,
     required this.currency,
     required this.taxRate,
     required this.membershipTiers,
@@ -54,9 +50,6 @@ class AppConfigData {
 
   factory AppConfigData.fromJson(Map<String, dynamic> json) {
     return AppConfigData(
-      shippingFee: (json['shippingFee'] as num?)?.toInt() ?? 25,
-      freeShippingThreshold:
-          (json['freeShippingThreshold'] as num?)?.toInt() ?? 500,
       currency: json['currency']?.toString() ?? 'MYR',
       taxRate: (json['taxRate'] as num?)?.toDouble() ?? 0.06,
       membershipTiers: (json['membershipTiers'] as List<dynamic>?)
@@ -68,16 +61,12 @@ class AppConfigData {
   }
 
   AppConfigData copyWith({double? taxRate}) => AppConfigData(
-        shippingFee: shippingFee,
-        freeShippingThreshold: freeShippingThreshold,
         currency: currency,
         taxRate: taxRate ?? this.taxRate,
         membershipTiers: membershipTiers,
       );
 
   Map<String, dynamic> toJson() => {
-        'shippingFee': shippingFee,
-        'freeShippingThreshold': freeShippingThreshold,
         'currency': currency,
         'taxRate': taxRate,
         'membershipTiers':

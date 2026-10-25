@@ -84,62 +84,54 @@ service cloud.firestore {
       }
     }
 
-    // ── Orders: only participants — the customer who placed the order and
-    // the suppliers fulfilling it — may read or update an order. Creation
-    // must claim the ordering customer, and nobody can delete an order.
-    // These rules line up with the app's queries: the customer watches
-    // `orders where customerId == me` and each supplier watches
-    // `orders where supplierIds array-contains me`, both of which are
-    // satisfied by the per-document conditions below.
+    // ── Orders: participants read; the backend creates and owns money;
+    // suppliers advance the collection lifecycle ──
+    //
+    // Checkout runs entirely server-side: `createCheckoutIntent` (Admin SDK)
+    // writes the unpaid order, the Stripe webhook / verify marks it paid, and
+    // cancel/refund go through the backend so stock and money move together.
+    // Clients therefore never create an order and never write payment state.
+    //
+    // The only client-side writers left are the suppliers on the order
+    // (marketplace_repository.dart): they advance status and attach their own
+    // invoice via field-path updates, which touch exactly
+    // {status, statusHistory, invoices} — the affected-keys whitelist below.
     match /orders/{orderId} {
-      // `resource` is null for a get() on a document that does not exist, and
-      // rules evaluate `resource.data.customerId` on that null as an error —
-      // which FAILS CLOSED (deny). `createOrder` opens its transaction with an
-      // idempotency pre-read of an order id it has only just generated, so that
-      // read always hit the missing-doc case, the whole transaction aborted,
-      // and no order was ever written. That is why checkout appeared to be a
-      // mock on both the buyer and supplier sides.
-      //
-      // Permit only the existence check on a missing document. The contents of
-      // an EXISTING order stay participant-only below, and list queries never
-      // see `resource == null`, so this widens nothing that holds data.
+      // `resource` is null for a get()/snapshot on a document that does not
+      // exist, and rules fail closed on `resource.data.customerId` there.
+      // The order screens watch a just-placed order id and need a clean
+      // "not found" instead of permission-denied, so the empty existence
+      // check stays open to signed-in users. It reveals no data: list
+      // queries never see `resource == null`.
       allow read: if signedIn() &&
           (resource == null ||
            request.auth.uid == resource.data.customerId ||
            request.auth.uid in resource.data.supplierIds);
-      allow create: if signedIn() &&
-          request.auth.uid == request.resource.data.customerId &&
-          // An order is created unpaid and un-invoiced. `invoices` is written
-          // later, by the supplier, when they accept. Letting it through here
-          // would let a buyer order with a receipt already attached.
-          (!('invoices' in request.resource.data) ||
-           request.resource.data.invoices.size() == 0);
+      // Server-only: an order doc carries live money fields (totals,
+      // paymentStatus, paymentIntentId) that a client write could forge.
+      allow create: if false;
       allow update: if signedIn() &&
-          (request.auth.uid == resource.data.customerId ||
-           request.auth.uid in resource.data.supplierIds) &&
-          // Invoices are the supplier's paperwork, issued at accept time. The
-          // customer is deliberately excluded: without this a buyer could
-          // rewrite the receipt on their own order. Only a supplier on this
-          // order may touch the map at all.
-          //
-          // This reads `diff().affectedKeys()`, which is VALUE-based — a write
-          // that re-sends an identical `invoices` map does not count as a
-          // change. That is what lets the repository keep using full-document
-          // `set()` on status changes, provided it writes the stored map back
-          // verbatim (`preserveStoredInvoices` in lib/models/order.dart).
-          // Without that helper, a parse→serialise drift would make a buyer's
-          // own Cancel look like an invoice edit and fail with
-          // permission-denied.
-          //
-          // NOTE: this checks WHO may write the map, not WHAT they may write.
-          // Closing it to "append only your own entry" needs per-key map
-          // diffs, which the rules language cannot express. A supplier on the
-          // order can therefore still rewrite a co-supplier's invoice value;
-          // see acceptOrderAndIssueInvoice for the in-app idempotency that
-          // keeps one invoice per supplier.
+          request.auth.uid in resource.data.supplierIds &&
+          // Terminal orders are frozen for clients: collected is final
+          // paperwork, cancelled is backend-owned (refund path above).
+          resource.data.status in
+            ['pending', 'confirmed', 'waitingCollection'] &&
+          // Suppliers may only touch lifecycle paperwork. Payment fields,
+          // totals, items, customer details and refunds are backend-owned —
+          // a forged `paymentStatus: 'paid'` here would unlock goods with
+          // zero money in Stripe.
+          request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'statusHistory', 'invoices']) &&
+          // Cancellation is the backend's job (it refunds first when the
+          // order is paid). A client-written 'cancelled' would skip the
+          // refund and orphan the Stripe charge.
           (!request.resource.data.diff(resource.data).affectedKeys()
-             .hasAny(['invoices']) ||
-           request.auth.uid in resource.data.supplierIds);
+             .hasAny(['status']) ||
+           request.resource.data.status in
+             ['confirmed', 'waitingCollection', 'collected']);
+      // Nobody deletes orders from a client — the backend anonymises
+      // account data in place so financial history survives.
+      allow delete: if false;
     }
 
     // ── App config: signed-in read; writes only via the admin backend ──
@@ -158,11 +150,6 @@ service cloud.firestore {
 
     // ── Per-user wishlist (owner only) ──
     match /users/{uid}/wishlist/{productId} {
-      allow read, write: if isOwner(uid);
-    }
-
-    // ── Per-user saved addresses (checkout address book, owner only) ──
-    match /users/{uid}/addresses/{addressId} {
       allow read, write: if isOwner(uid);
     }
 

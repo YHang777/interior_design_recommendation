@@ -53,8 +53,8 @@ class StatusBadge extends StatelessWidget {
   static Color colorForOrderStatus(OrderStatus status) => switch (status) {
         OrderStatus.pending => AppColors.warning,
         OrderStatus.confirmed => AppColors.secondaryAccent,
-        OrderStatus.shipped => const Color(0xFF3F51B5),
-        OrderStatus.delivered => AppColors.success,
+        OrderStatus.waitingCollection => const Color(0xFF3F51B5),
+        OrderStatus.collected => AppColors.success,
         OrderStatus.cancelled => AppColors.error,
       };
 

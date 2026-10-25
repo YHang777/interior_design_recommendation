@@ -23,7 +23,7 @@ final List<(ChatDataTopic, RegExp)> _stateRules = [
   ),
   (
     ChatDataTopic.orders,
-    RegExp(r'\borders?\b|shipped|track my|where.?s my (order|package|parcel)',
+    RegExp(r'\borders?\b|track my|pick ?up|where.?s my (order|package|parcel)',
         caseSensitive: false),
   ),
   (

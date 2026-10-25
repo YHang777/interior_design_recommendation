@@ -172,7 +172,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
         ])),
         const SizedBox(height: 14),
         _sectionCard('To', child: _partyBlock(name: invoice.customerName, lines: [
-          invoice.shippingAddress,
           if (invoice.customerPhone.trim().isNotEmpty)
             Formatters.phone(invoice.customerPhone.trim()),
           invoice.customerEmail,
@@ -188,6 +187,10 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
                   Formatters.shortDateTime(invoice.orderCreatedAt)),
               if (invoice.paymentMethod.trim().isNotEmpty)
                 _refRow('Payment', order.paymentMethodLabel),
+              if (invoice.paidAt != null)
+                _refRow('Paid', Formatters.shortDateTime(invoice.paidAt!)),
+              if (invoice.paymentIntentId.isNotEmpty)
+                _refRow('Payment ref', invoice.paymentIntentId),
             ],
           ),
         ),
@@ -225,23 +228,38 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
           child: Column(
             children: [
               SummaryLine('Items subtotal', Formatters.myr(invoice.subtotal)),
-              SummaryLine('Shipping', Formatters.myr(invoice.shippingFee)),
+              if (invoice.discountAllocated > 0)
+                SummaryLine(
+                  'Discount share',
+                  '−${Formatters.myr(invoice.discountAllocated)}',
+                  valueColor: AppColors.success,
+                ),
+              if (invoice.taxAllocated > 0)
+                SummaryLine('Tax share', Formatters.myr(invoice.taxAllocated)),
               Divider(height: 1, thickness: 1, color: AppColors.divider),
               SummaryLine(
-                'Total for this shipment',
+                'Invoice total',
                 Formatters.myr(invoice.total),
                 bold: true,
               ),
-              if (invoice.orderDiscount > 0 || invoice.orderTax > 0) ...[
-                const SizedBox(height: 6),
-                Text(
-                  _adjustmentNote(invoice),
-                  textAlign: TextAlign.right,
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: AppColors.textHint,
-                    height: 1.4,
-                  ),
+              if (invoice.paidAt != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    const Icon(Icons.check_circle,
+                        size: 14, color: AppColors.success),
+                    const SizedBox(width: 5),
+                    Text(
+                      'PAID ${Formatters.shortDate(invoice.paidAt!)}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        color: AppColors.success,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -261,15 +279,6 @@ class _OrderInvoiceScreenState extends ConsumerState<OrderInvoiceScreen> {
   }
 
   // ── Building blocks ────────────────────────────────────────────────────
-
-  String _adjustmentNote(OrderInvoice invoice) {
-    final parts = <String>[
-      if (invoice.orderDiscount > 0)
-        'Order-level discount: ${Formatters.myr(invoice.orderDiscount)}',
-      if (invoice.orderTax > 0) 'Tax: ${Formatters.myr(invoice.orderTax)}',
-    ];
-    return '${parts.join(' · ')} (not charged to this shipment)';
-  }
 
   Widget _sectionCard(String title, {required Widget child}) {
     return Container(

@@ -79,9 +79,6 @@ int myLineItemCount(Order order, String supplierId) =>
 int mySubtotal(Order order, String supplierId) => orderItemsForSupplier(order, supplierId)
     .fold(0, (sum, i) => sum + i.lineTotal);
 
-int myShipping(Order order, String supplierId) =>
-    order.shippingShareFor(supplierId);
-
 bool orderInvolvesSupplier(Order order, String supplierId) =>
     order.items.any((i) => i.supplierId == supplierId) ||
     order.resolvedSupplierIds.contains(supplierId);
@@ -93,14 +90,13 @@ Iterable<Order> revenueOrders(Iterable<Order> orders, String supplierId) =>
 
 int totalRevenue(Iterable<Order> orders, String supplierId) =>
     revenueOrders(orders, supplierId)
-        .fold(0, (sum, o) => sum + mySubtotal(o, supplierId) + myShipping(o, supplierId));
+        .fold(0, (sum, o) => sum + mySubtotal(o, supplierId));
 
 int revenueInMonth(Iterable<Order> orders, String supplierId, DateTime month) {
   return revenueOrders(orders, supplierId)
       .where((o) =>
           o.createdAt.year == month.year && o.createdAt.month == month.month)
-      .fold(0,
-          (sum, o) => sum + mySubtotal(o, supplierId) + myShipping(o, supplierId));
+      .fold(0, (sum, o) => sum + mySubtotal(o, supplierId));
 }
 
 // ─── Sales report metrics (pure — consumed by the sales report screen + PDF) ──
@@ -222,13 +218,13 @@ double? averageProductRating(Iterable<Product> products, String supplierId) {
   return weighted / count;
 }
 
-int deliveredCount(Iterable<Order> orders, String supplierId) => orders
+int collectedCount(Iterable<Order> orders, String supplierId) => orders
     .where((o) =>
-        orderInvolvesSupplier(o, supplierId) && o.status == OrderStatus.delivered)
+        orderInvolvesSupplier(o, supplierId) && o.status == OrderStatus.collected)
     .length;
 
 double? conversionRate(Iterable<Order> orders, String supplierId) {
   final all = orders.where((o) => orderInvolvesSupplier(o, supplierId)).length;
   if (all == 0) return null;
-  return deliveredCount(orders, supplierId) / all;
+  return collectedCount(orders, supplierId) / all;
 }

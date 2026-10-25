@@ -202,13 +202,10 @@ export interface AdminProductRow {
   createdAt: string | null;
 }
 
-/** Detail payload — adds seller copy, shipping and read-only echoes. */
+/** Detail payload — adds seller copy and read-only echoes. */
 export interface AdminProductDetail extends AdminProductRow {
   description: string;
   images: string[];
-  shippingEnabled: boolean;
-  shippingFee: number;
-  shippingLongDistanceNotice: boolean;
   /** products/{id}.ar3d.status — never written by the admin API. */
   ar3dStatus: string;
   /** products/{id}.vision.mismatch.flagged — the photo-flag queue's input. */
@@ -230,9 +227,6 @@ export interface ProductUpdate {
   stock?: number;
   isActive?: boolean;
   isEcoFriendly?: boolean;
-  shippingEnabled?: boolean;
-  shippingFee?: number;
-  shippingLongDistanceNotice?: boolean;
 }
 
 export interface ListProductsQuery {
@@ -260,7 +254,12 @@ export interface DeleteProductResult {
 
 // ── Orders admin (orders/* routes) ─────────────────────────────────────────
 
-export type AdminOrderStatus = 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+export type AdminOrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'waitingCollection'
+  | 'collected'
+  | 'cancelled';
 
 export interface AdminOrderItem {
   productId: string;
@@ -292,10 +291,15 @@ export interface AdminOrderRow {
 export interface AdminOrderDetail extends AdminOrderRow {
   customerEmail: string;
   customerPhone: string;
-  shippingAddress: string;
+  paymentStatus: string;
+  /** Stripe PaymentIntent id once the order is paid (empty while unpaid). */
+  paymentIntentId: string;
+  /** ISO-8601 capture time; null while unpaid. */
+  paidAt: string | null;
+  refundStatus: string | null;
+  refundAmount: number | null;
   items: AdminOrderItem[];
   subtotal: number;
-  shippingFee: number;
   discount: number;
   tax: number;
   supplierIds: string[];

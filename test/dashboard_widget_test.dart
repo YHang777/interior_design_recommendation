@@ -35,7 +35,6 @@ Order _order({
     customerName: 'Aina',
     customerEmail: 'aina@example.com',
     customerPhone: '0123456789',
-    shippingAddress: '1 Jalan Test, KL',
     items: const [
       OrderItem(
         productId: 'p1',
@@ -49,7 +48,6 @@ Order _order({
     status: status,
     paymentMethod: 'fpx',
     subtotal: total,
-    shippingFee: 0,
     total: total,
     createdAt: createdAt,
     statusHistory: statusHistory,
@@ -86,9 +84,9 @@ void main() {
       customerOrdersProvider.overrideWith((ref) => Stream.value([
         _order(
           orderNumber: 'ORD-42',
-          status: OrderStatus.delivered,
+          status: OrderStatus.collected,
           statusHistory: {
-            OrderStatus.delivered.name:
+            OrderStatus.collected.name:
                 now.subtract(const Duration(hours: 1)),
           },
           createdAt: now.subtract(const Duration(days: 2)),
@@ -117,12 +115,12 @@ void main() {
 
     expect(find.text('1'), findsNWidgets(2));
 
-    expect(find.text('Order ORD-42 delivered'), findsOneWidget);
+    expect(find.text('Order ORD-42 collected'), findsOneWidget);
     expect(find.text('Saved “Modern Loft”'), findsOneWidget);
     expect(find.text('1 item · RM 420'), findsOneWidget);
 
     expect(find.text('RM 5.2K'), findsNothing);
-    expect(find.text('Order #1234 Shipped'), findsNothing);
+    expect(find.text('Order #1234 Waiting for collection'), findsNothing);
     expect(find.text('Budget Alert'), findsNothing);
     expect(find.text('Kitchen renovation over budget'), findsNothing);
     expect(find.text('New design saved'), findsNothing);
@@ -145,7 +143,7 @@ void main() {
     expect(find.text('0'), findsNWidgets(2));
     expect(find.text('No activity yet'), findsOneWidget);
     expect(find.text('RM 5.2K'), findsNothing);
-    expect(find.text('Order #1234 Shipped'), findsNothing);
+    expect(find.text('Order #1234 Waiting for collection'), findsNothing);
   });
 
   testWidgets('a failed orders stream shows error states without crashing',

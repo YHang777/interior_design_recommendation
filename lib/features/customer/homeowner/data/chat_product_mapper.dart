@@ -1,4 +1,3 @@
-import '../../../../core/utils/formatters.dart';
 import '../../../../models/chat_session.dart';
 import '../../../../models/product.dart';
 import 'datasources/chat_datasource.dart';
@@ -26,14 +25,7 @@ String productFactsLine(Product product) {
   if (dims != null && dims.isComplete) {
     segments.add('Dimensions ${dims.label}');
   }
-  if (product.shippingCharge > 0) {
-    segments.add('Delivery ${Formatters.myr(product.shippingCharge)}');
-    if (product.shippingLongDistanceNotice) {
-      segments.add(Product.longDistanceNotice);
-    }
-  } else {
-    segments.add('Free delivery');
-  }
+  segments.add('Self-collection at seller');
   if (product.supplier.isVerified) segments.add('Verified seller');
   if (product.isEcoFriendly) segments.add('Eco-friendly');
   final discount = product.discountPercent;

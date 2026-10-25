@@ -79,14 +79,11 @@ test('row → supplierId falls back to nested supplier.id for legacy docs', () =
 
 // ── toProductDetail ──────────────────────────────────────────────────────────
 
-test('detail → adds copy, shipping and read-only echoes', () => {
+test('detail → adds copy and read-only echoes', () => {
   const detail = toProductDetail('sofa-1', {
     name: 'Linen Sofa',
     description: 'Three-seater in oatmeal linen.',
     images: ['https://cdn.example/1.jpg', 'https://cdn.example/2.jpg', '', 42],
-    shippingEnabled: true,
-    shippingFee: 25,
-    shippingLongDistanceNotice: true,
     ar3d: { status: 'ready', url: 'https://cdn.example/model.glb' },
     vision: { mismatch: { flagged: true, reason: 'photo shows a room' } },
     supplier: { id: 'seller-1', name: 'Nordic Home', phone: '012', email: 'n@e', verificationStatus: 'verified' },
@@ -94,9 +91,6 @@ test('detail → adds copy, shipping and read-only echoes', () => {
 
   assert.equal(detail.description, 'Three-seater in oatmeal linen.');
   assert.deepEqual(detail.images, ['https://cdn.example/1.jpg', 'https://cdn.example/2.jpg']);
-  assert.equal(detail.shippingEnabled, true);
-  assert.equal(detail.shippingFee, 25);
-  assert.equal(detail.shippingLongDistanceNotice, true);
   assert.equal(detail.ar3dStatus, 'ready');
   assert.equal(detail.visionFlagged, true);
   assert.equal(detail.supplierPhone, '012');
@@ -104,27 +98,17 @@ test('detail → adds copy, shipping and read-only echoes', () => {
   assert.equal(detail.supplierVerificationStatus, 'verified');
 });
 
-test('detail → shippingLongDistanceNotice is boolean-strict (no truthy strings)', () => {
-  const truthy = toProductDetail('p', { shippingLongDistanceNotice: 'true' });
-  assert.equal(truthy.shippingLongDistanceNotice, false);
-  const real = toProductDetail('p', { shippingLongDistanceNotice: true });
-  assert.equal(real.shippingLongDistanceNotice, true);
-});
-
-test('detail → empty doc: shipping defaults off, ar3d none, images empty', () => {
+test('detail → empty doc: ar3d none, images empty', () => {
   const detail = toProductDetail('empty-1', {});
   assert.equal(detail.description, '');
   assert.deepEqual(detail.images, []);
-  assert.equal(detail.shippingEnabled, false);
-  assert.equal(detail.shippingFee, 0);
-  assert.equal(detail.shippingLongDistanceNotice, false);
   assert.equal(detail.ar3dStatus, 'none');
   assert.equal(detail.visionFlagged, false);
 });
 
 // ── buildProductUpdateData ───────────────────────────────────────────────────
 
-test('update data → only the 12 editable fields pass through', () => {
+test('update data → only the 9 editable fields pass through', () => {
   const data = buildProductUpdateData({
     name: 'New Name',
     description: 'Updated copy.',
@@ -135,9 +119,6 @@ test('update data → only the 12 editable fields pass through', () => {
     stock: 8,
     isActive: false,
     isEcoFriendly: true,
-    shippingEnabled: true,
-    shippingFee: 15,
-    shippingLongDistanceNotice: true,
   });
 
   assert.deepEqual(Object.keys(data).sort(), [
@@ -149,9 +130,6 @@ test('update data → only the 12 editable fields pass through', () => {
     'name',
     'originalPrice',
     'price',
-    'shippingEnabled',
-    'shippingFee',
-    'shippingLongDistanceNotice',
     'stock',
   ]);
 });
@@ -164,10 +142,9 @@ test('update data → null originalPrice clears it; omitted fields stay out', ()
   assert.deepEqual(partial, { price: 100 });
 });
 
-test('update data → money and stock round to integers; negative fee clamps to 0', () => {
-  const data = buildProductUpdateData({ price: 99.6, stock: 3.4, shippingFee: -5, originalPrice: 120.2 });
+test('update data → money and stock round to integers', () => {
+  const data = buildProductUpdateData({ price: 99.6, stock: 3.4, originalPrice: 120.2 });
   assert.equal(data.price, 100);
   assert.equal(data.stock, 3);
-  assert.equal(data.shippingFee, 0);
   assert.equal(data.originalPrice, 120);
 });

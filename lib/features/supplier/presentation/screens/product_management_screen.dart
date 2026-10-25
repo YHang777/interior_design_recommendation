@@ -652,7 +652,6 @@ class _ProductTile extends StatelessWidget {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               _stockPill(product),
-                              _shippingPill(product),
                               InkWell(
                                 onTap: busy ? null : onEditStock,
                                 borderRadius: BorderRadius.circular(10),
@@ -831,15 +830,6 @@ class _ProductTile extends StatelessWidget {
     return _Pill(label: 'In stock · ${p.stock}', color: AppColors.success);
   }
 
-  Widget _shippingPill(Product p) {
-    final charge = p.shippingCharge;
-    if (charge > 0) {
-      return _Pill(
-          label: 'Shipping ${Formatters.myr(charge)}',
-          color: AppColors.secondaryAccent);
-    }
-    return _Pill(label: 'Free shipping', color: AppColors.success);
-  }
 }
 
 class _Pill extends StatelessWidget {

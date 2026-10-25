@@ -65,9 +65,6 @@ interface EditForm {
   stock: string;
   isActive: boolean;
   isEcoFriendly: boolean;
-  shippingEnabled: boolean;
-  shippingFee: string;
-  shippingLongDistanceNotice: boolean;
 }
 
 function toForm(d: AdminProductDetail): EditForm {
@@ -81,9 +78,6 @@ function toForm(d: AdminProductDetail): EditForm {
     stock: String(d.stock),
     isActive: d.isActive,
     isEcoFriendly: d.isEcoFriendly,
-    shippingEnabled: d.shippingEnabled,
-    shippingFee: String(d.shippingFee),
-    shippingLongDistanceNotice: d.shippingLongDistanceNotice,
   };
 }
 
@@ -160,7 +154,6 @@ export function ProductsPage({ query }: { query: string }) {
     try {
       const price = Number(form.price);
       const stock = Number(form.stock);
-      const shippingFee = Number(form.shippingFee);
       const originalPrice = form.originalPrice.trim() === '' ? null : Number(form.originalPrice);
       await productsApi.update(editing.productId, {
         name: form.name.trim(),
@@ -172,9 +165,6 @@ export function ProductsPage({ query }: { query: string }) {
         stock: Math.round(stock),
         isActive: form.isActive,
         isEcoFriendly: form.isEcoFriendly,
-        shippingEnabled: form.shippingEnabled,
-        shippingFee: Math.max(0, Math.round(shippingFee)),
-        shippingLongDistanceNotice: form.shippingLongDistanceNotice,
       });
       push('success', 'Product saved.');
       setEditing(null);
@@ -462,10 +452,6 @@ export function ProductsPage({ query }: { query: string }) {
               <label className="field-label" htmlFor="p-desc">Description</label>
               <textarea id="p-desc" className="input textarea" rows={4} value={form.description} maxLength={4000} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="p-shipfee">Shipping fee (RM)</label>
-              <input id="p-shipfee" className="input" type="number" min={0} value={form.shippingFee} onChange={(e) => setForm({ ...form, shippingFee: e.target.value })} />
-            </div>
             <div className="field checkbox-field">
               <label>
                 <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
@@ -474,14 +460,6 @@ export function ProductsPage({ query }: { query: string }) {
               <label>
                 <input type="checkbox" checked={form.isEcoFriendly} onChange={(e) => setForm({ ...form, isEcoFriendly: e.target.checked })} />
                 Eco-friendly
-              </label>
-              <label>
-                <input type="checkbox" checked={form.shippingEnabled} onChange={(e) => setForm({ ...form, shippingEnabled: e.target.checked })} />
-                Shipping enabled
-              </label>
-              <label>
-                <input type="checkbox" checked={form.shippingLongDistanceNotice} onChange={(e) => setForm({ ...form, shippingLongDistanceNotice: e.target.checked })} />
-                Long-distance notice
               </label>
             </div>
           </div>

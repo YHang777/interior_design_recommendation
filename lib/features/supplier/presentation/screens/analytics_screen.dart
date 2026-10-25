@@ -122,7 +122,7 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
   }
 
   int totalRevenueOf(List<Order> sold, String uid) =>
-      sold.fold(0, (sum, o) => sum + mySubtotal(o, uid) + myShipping(o, uid));
+      sold.fold(0, (sum, o) => sum + mySubtotal(o, uid));
 
   List<_Tally> _topProducts(List<Order> sold, String uid) {
     final byProduct = <String, _Tally>{};

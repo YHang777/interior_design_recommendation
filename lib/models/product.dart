@@ -281,17 +281,6 @@ class Product {
 
   final ProductVision? vision;
 
-  // ── Shipping (Task B: seller-configured delivery charges) ──
-
-  final bool shippingEnabled;
-
-  final int shippingFee;
-
-  final bool shippingLongDistanceNotice;
-
-  static const String longDistanceNotice =
-      'Deliveries over 30 km incur extra charges.';
-
   const Product({
     required this.id,
     required this.name,
@@ -313,9 +302,6 @@ class Product {
     this.dimensions,
     this.ar3d,
     this.vision,
-    this.shippingEnabled = false,
-    this.shippingFee = 0,
-    this.shippingLongDistanceNotice = false,
   });
 
   // ─── Computed ──────────────────────────────────────────────────────────
@@ -335,8 +321,6 @@ class Product {
     if (originalPrice == null || originalPrice! <= price) return null;
     return ((originalPrice! - price) / originalPrice! * 100).round();
   }
-
-  int get shippingCharge => shippingEnabled ? shippingFee : 0;
 
   // ─── copyWith ──────────────────────────────────────────────────────────
 
@@ -361,9 +345,6 @@ class Product {
     ProductDimensions? dimensions,
     Ar3dInfo? ar3d,
     ProductVision? vision,
-    bool? shippingEnabled,
-    int? shippingFee,
-    bool? shippingLongDistanceNotice,
     bool clearOriginalPrice = false,
     bool clearDimensions = false,
     bool clearAr3d = false,
@@ -392,10 +373,6 @@ class Product {
           clearDimensions ? null : (dimensions ?? this.dimensions),
       ar3d: clearAr3d ? null : (ar3d ?? this.ar3d),
       vision: clearVision ? null : (vision ?? this.vision),
-      shippingEnabled: shippingEnabled ?? this.shippingEnabled,
-      shippingFee: shippingFee ?? this.shippingFee,
-      shippingLongDistanceNotice:
-          shippingLongDistanceNotice ?? this.shippingLongDistanceNotice,
     );
   }
 
@@ -455,9 +432,6 @@ class Product {
       vision: json['vision'] is Map<String, dynamic>
           ? ProductVision.fromJson(json['vision'] as Map<String, dynamic>)
           : null,
-      shippingEnabled: json['shippingEnabled'] == true,
-      shippingFee: _parseShippingFee(json['shippingFee']),
-      shippingLongDistanceNotice: json['shippingLongDistanceNotice'] == true,
     );
   }
 
@@ -477,9 +451,6 @@ class Product {
         'rating': rating,
         'ratingCount': ratingCount,
         'isEcoFriendly': isEcoFriendly,
-        'shippingEnabled': shippingEnabled,
-        'shippingFee': shippingFee,
-        'shippingLongDistanceNotice': shippingLongDistanceNotice,
         if (originalPrice != null) 'originalPrice': originalPrice,
         if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
         if (dimensions != null) 'dimensions': dimensions!.toJson(),
@@ -500,16 +471,6 @@ DateTime? _parseDate(dynamic value) {
   return DateTime.tryParse(value.toString());
 }
 
-int _parseShippingFee(dynamic value) {
-  if (value is num) {
-    final fee = value.toInt();
-    return fee < 0 ? 0 : fee;
-  }
-  final parsed = int.tryParse(value?.toString() ?? '');
-  if (parsed == null || parsed < 0) return 0;
-  return parsed;
-}
-
 Map<String, dynamic> preserveStoredVision(
   Map<String, dynamic> json,
   Map<String, dynamic>? stored,
@@ -517,22 +478,3 @@ Map<String, dynamic> preserveStoredVision(
   if (stored == null || stored['vision'] == null) return json;
   return {...json, 'vision': stored['vision']};
 }
-
-// ── Product-level shipping math (checkout + order attribution) ─────────────
-
-Map<String, int> shippingBySupplierFor(Iterable<Product> products) {
-  final bySupplier = <String, int>{};
-  final seenProductIds = <String>{};
-  for (final product in products) {
-    final charge = product.shippingCharge;
-    if (charge <= 0) continue;
-    if (product.id.isNotEmpty && !seenProductIds.add(product.id)) continue;
-    final supplierId = product.resolvedSupplierId;
-    if (supplierId.isEmpty) continue;
-    bySupplier[supplierId] = (bySupplier[supplierId] ?? 0) + charge;
-  }
-  return bySupplier;
-}
-
-int totalShippingFor(Iterable<Product> products) =>
-    shippingBySupplierFor(products).values.fold(0, (sum, v) => sum + v);

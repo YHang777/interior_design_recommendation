@@ -221,11 +221,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         const SizedBox(height: 8),
                         _buildStockLine(product),
                         const SizedBox(height: 8),
-                        _buildShippingLine(product),
-                        if (product.shippingLongDistanceNotice) ...[
-                          const SizedBox(height: 10),
-                          _buildLongDistanceNotice(),
-                        ],
+                        _buildPickupLine(),
                         const SizedBox(height: 14),
                         const Divider(),
                         const SizedBox(height: 10),
@@ -554,58 +550,20 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
-  Widget _buildShippingLine(Product product) {
-    final charged = product.shippingCharge > 0;
-    final color = charged ? AppColors.textSecondary : AppColors.success;
-    return Row(
+  Widget _buildPickupLine() {
+    return const Row(
       children: [
-        Icon(Icons.local_shipping_outlined, size: 16, color: color),
-        const SizedBox(width: 6),
+        Icon(Icons.handshake_outlined, size: 16, color: AppColors.success),
+        SizedBox(width: 6),
         Expanded(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              charged
-                  ? 'Shipping: ${Formatters.myr(product.shippingCharge)}'
-                  : 'Free shipping',
-              maxLines: 1,
-              style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w500, color: color),
-            ),
+          child: Text(
+            'Self-collection — collect from the seller',
+            maxLines: 1,
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.success),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildLongDistanceNotice() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline,
-              size: 16, color: AppColors.warning),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              Product.longDistanceNotice,
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.4,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -695,8 +653,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                       ],
                     ),
                     if (supplier.address.isNotEmpty)
-                      Text(supplier.address,
-                          maxLines: 1,
+                      Text('Pickup at ${supplier.address}',
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 11, color: AppColors.textHint)),

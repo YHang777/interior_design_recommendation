@@ -311,7 +311,7 @@ pw.Widget _insightsTable(SalesReportData data) {
 
 pw.Widget _footerNote() {
   return pw.Text(
-    'Conversion rate = delivered ÷ all orders. Customer metrics derived '
+    'Conversion rate = collected ÷ all orders. Customer metrics derived '
     'from your order history. Cancelled orders excluded.',
     style: _muted(9),
   );

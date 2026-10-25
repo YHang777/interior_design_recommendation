@@ -33,12 +33,12 @@ import '../../features/customer/marketplace/presentation/screens/order_confirmat
 import '../../features/customer/marketplace/presentation/screens/order_history_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/buyer_order_detail_screen.dart';
 import '../../features/customer/marketplace/presentation/screens/wishlist_screen.dart';
-import '../../features/customer/marketplace/presentation/screens/saved_addresses_screen.dart';
 import '../../features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/customer/ar/data/furniture_model_library.dart';
 import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
 import '../../shared/screens/order_invoice_screen.dart';
+import '../../shared/screens/order_receipt_screen.dart';
 
 import 'route_names.dart';
 
@@ -178,13 +178,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (_, __) => _buildPage(const WishlistScreen()),
       ),
 
-      // ── Saved addresses (checkout address book, full-screen) ──
-      GoRoute(
-        path: '/profile/addresses',
-        name: RouteNames.homeownerSavedAddresses,
-        pageBuilder: (_, __) => _buildPage(const SavedAddressesScreen()),
-      ),
-
       // ── Supplier product form (create / edit, full-screen) ──
       GoRoute(
         path: '/supplier/products/new',
@@ -234,6 +227,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             orderId: state.pathParameters['orderId']!,
             supplierId: state.pathParameters['supplierId']!,
           ),
+        ),
+      ),
+
+      // ── Payment receipt (buyer, full-screen) ──
+      GoRoute(
+        path: '/orders/:orderId/receipt',
+        name: RouteNames.orderReceipt,
+        pageBuilder: (_, state) => _buildPage(
+          OrderReceiptScreen(orderId: state.pathParameters['orderId']!),
         ),
       ),
 

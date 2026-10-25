@@ -40,8 +40,8 @@ int countPurchases(List<Order> orders) =>
 enum ActivityKind {
   orderPlaced,
   orderConfirmed,
-  orderShipped,
-  orderDelivered,
+  orderReadyForCollection,
+  orderCollected,
   orderCancelled,
   designSaved,
 }
@@ -66,16 +66,16 @@ class ActivityEntry {
 ActivityKind _kindForStatus(OrderStatus status) => switch (status) {
       OrderStatus.pending => ActivityKind.orderPlaced,
       OrderStatus.confirmed => ActivityKind.orderConfirmed,
-      OrderStatus.shipped => ActivityKind.orderShipped,
-      OrderStatus.delivered => ActivityKind.orderDelivered,
+      OrderStatus.waitingCollection => ActivityKind.orderReadyForCollection,
+      OrderStatus.collected => ActivityKind.orderCollected,
       OrderStatus.cancelled => ActivityKind.orderCancelled,
     };
 
 String _verbForStatus(OrderStatus status) => switch (status) {
       OrderStatus.pending => 'placed',
       OrderStatus.confirmed => 'confirmed',
-      OrderStatus.shipped => 'shipped',
-      OrderStatus.delivered => 'delivered',
+      OrderStatus.waitingCollection => 'is ready for collection',
+      OrderStatus.collected => 'collected',
       OrderStatus.cancelled => 'cancelled',
     };
 

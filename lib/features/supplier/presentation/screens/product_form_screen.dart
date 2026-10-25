@@ -108,7 +108,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   final _descriptionKey = GlobalKey<FormFieldState<String>>();
   final _priceKey = GlobalKey<FormFieldState<String>>();
   final _originalPriceKey = GlobalKey<FormFieldState<String>>();
-  final _shippingFeeKey = GlobalKey<FormFieldState<String>>();
   final _widthKey = GlobalKey<FormFieldState<String>>();
   final _heightKey = GlobalKey<FormFieldState<String>>();
   final _depthKey = GlobalKey<FormFieldState<String>>();
@@ -117,7 +116,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _originalPriceCtrl;
   late final TextEditingController _descriptionCtrl;
-  late final TextEditingController _shippingFeeCtrl;
   late final TextEditingController _widthCtrl;
   late final TextEditingController _heightCtrl;
   late final TextEditingController _depthCtrl;
@@ -142,8 +140,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
   bool _isEco = false;
   bool _isActive = true;
 
-  bool _shippingEnabled = false;
-  bool _shippingNotice = false;
   String? _category;
   String? _style;
   List<_ImageEntry> _images = [];
@@ -162,7 +158,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _priceCtrl = TextEditingController();
     _originalPriceCtrl = TextEditingController();
     _descriptionCtrl = TextEditingController();
-    _shippingFeeCtrl = TextEditingController();
     _widthCtrl = TextEditingController();
     _heightCtrl = TextEditingController();
     _depthCtrl = TextEditingController();
@@ -189,10 +184,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _originalStock = p.stock;
     _isEco = p.isEcoFriendly;
     _isActive = p.isActive;
-    _shippingEnabled = p.shippingEnabled;
-    _shippingNotice = p.shippingLongDistanceNotice;
-    _shippingFeeCtrl.text =
-        p.shippingFee > 0 ? p.shippingFee.toString() : '';
     _removedOriginalUrls.clear();
     _images = p.resolvedImages.map((url) {
       return _ImageEntry(
@@ -219,7 +210,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     _priceCtrl.dispose();
     _originalPriceCtrl.dispose();
     _descriptionCtrl.dispose();
-    _shippingFeeCtrl.dispose();
     _widthCtrl.dispose();
     _heightCtrl.dispose();
     _depthCtrl.dispose();
@@ -607,9 +597,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
           : null,
       dimensions: _formDimensions,
       ar3d: _existing?.ar3d,
-      shippingEnabled: _shippingEnabled,
-      shippingFee: int.tryParse(_shippingFeeCtrl.text.trim()) ?? 0,
-      shippingLongDistanceNotice: _shippingNotice,
       createdAt: _existing?.createdAt,
     );
   }
@@ -638,7 +625,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       _descriptionKey,
       _priceKey,
       _originalPriceKey,
-      _shippingFeeKey,
       _widthKey,
       _heightKey,
       _depthKey,
@@ -913,8 +899,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
                       const SizedBox(height: 14),
                       _buildPricingSection(),
                       const SizedBox(height: 14),
-                      _buildShippingSection(),
-                      const SizedBox(height: 14),
                       _buildDimensionsSection(),
                       const SizedBox(height: 14),
                       _buildPreviewSection(preview),
@@ -967,9 +951,6 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
       ratingCount: _existing?.ratingCount ?? 0,
       originalPrice: original,
       dimensions: _formDimensions,
-      shippingEnabled: _shippingEnabled,
-      shippingFee: int.tryParse(_shippingFeeCtrl.text.trim()) ?? 0,
-      shippingLongDistanceNotice: _shippingNotice,
     );
   }
 
@@ -1460,130 +1441,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     );
   }
 
-  // ── Section 4: Shipping ─────────────────────────────────────────────────
-
-  Widget _buildShippingSection() {
-    return _SectionCard(
-      title: 'Shipping',
-      subtitle: 'Delivery charges buyers pay for this product',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _shippingEnabled,
-            onChanged: (v) {
-              _onAnyChange();
-              setState(() => _shippingEnabled = v);
-            },
-            activeTrackColor: AppColors.accent,
-            title: Text(
-              'Charge for delivery',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            subtitle: Text(
-              _shippingEnabled
-                  ? 'On — the fee below is added at checkout'
-                  : 'Off — buyers get free shipping for this product',
-              style:
-                  GoogleFonts.poppins(fontSize: 11, color: AppColors.textHint),
-            ),
-            secondary: const Icon(Icons.local_shipping_outlined,
-                color: AppColors.secondaryAccent),
-          ),
-          const SizedBox(height: 4),
-          _AppInput(
-            label: 'Delivery fee (RM)',
-            icon: Icons.payments_outlined,
-            controller: _shippingFeeCtrl,
-            fieldKey: _shippingFeeKey,
-            enabled: _shippingEnabled,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            hint: 'e.g. 25',
-            helperText: _shippingEnabled
-                ? 'Charged once per order, regardless of quantity'
-                : 'Turn on delivery charges to set a fee',
-            validator: (v) {
-              if (!_shippingEnabled) return null;
-              final t = v?.trim() ?? '';
-              if (t.isEmpty) {
-                return 'Delivery fee is required when charging';
-              }
-              final value = int.tryParse(t);
-              if (value == null) return 'Enter a whole number (RM)';
-              if (value < 0) return 'Fee cannot be negative';
-              if (value > 1000) return 'Max RM 1,000';
-              return null;
-            },
-            onChanged: _onAnyChange,
-          ),
-          const SizedBox(height: 6),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _shippingNotice,
-            onChanged: (v) {
-              _onAnyChange();
-              setState(() => _shippingNotice = v);
-            },
-            activeTrackColor: AppColors.accent,
-            title: Text(
-              'Long-distance notice',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            subtitle: Text(
-              'Tell buyers that deliveries over 30 km incur extra charges',
-              style:
-                  GoogleFonts.poppins(fontSize: 11, color: AppColors.textHint),
-            ),
-            secondary:
-                const Icon(Icons.route_outlined, color: AppColors.warning),
-          ),
-          if (_shippingNotice) ...[
-            const SizedBox(height: 4),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.info_outline,
-                      size: 16, color: AppColors.warning),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      Product.longDistanceNotice,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ── Section 5: Dimensions (for 3D & AR) ────────────────────────────────
+  // ── Section 4: Dimensions (for 3D & AR) ────────────────────────────────
 
   Widget _buildDimensionsSection() {
     return _SectionCard(
@@ -1905,7 +1763,6 @@ class _AppInput extends StatefulWidget {
     this.maxLines = 1,
     this.minLines,
     this.onChanged,
-    this.enabled = true,
   });
 
   final String label;
@@ -1921,8 +1778,6 @@ class _AppInput extends StatefulWidget {
   final int maxLines;
   final int? minLines;
   final VoidCallback? onChanged;
-
-  final bool enabled;
 
   @override
   State<_AppInput> createState() => _AppInputState();
@@ -1985,7 +1840,6 @@ class _AppInputState extends State<_AppInput> {
       validator: widget.validator,
       keyboardType: widget.keyboardType,
       inputFormatters: widget.inputFormatters,
-      enabled: widget.enabled,
       maxLines: widget.maxLines,
       minLines: widget.minLines,
       maxLength: widget.maxLength,
