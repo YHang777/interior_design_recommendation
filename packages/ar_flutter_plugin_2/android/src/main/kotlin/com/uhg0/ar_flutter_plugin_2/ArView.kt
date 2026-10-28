@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import com.google.ar.core.Anchor.CloudAnchorState
 import com.google.ar.core.Config
 import com.google.ar.core.Frame
+import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
@@ -134,6 +135,8 @@ class ArView(
                 "snapshot" -> handleSnapshot(result)
                 "disableCamera" -> handleDisableCamera(result)
                 "enableCamera" -> handleEnableCamera(result)
+                "refinePlane" -> handleRefinePlane(call, result)
+                "hitTest" -> handleHitTest(call, result)
                 else -> result.notImplemented()
             }
         }
@@ -534,10 +537,18 @@ class ArView(
                     pointCloudNodes.toList().forEach { removePointCloudNode(it) }
                 }
 
-                onFrame = { frameTime ->
+                // SceneView's ARSceneView.onFrame() ALREADY calls
+                // session.update() once per rendered frame and delivers the
+                // result here via onSessionUpdated. Calling update() again in
+                // an onFrame lambda (as this plugin used to) advances ARCore
+                // TWICE per frame — ARCore's contract is exactly one update()
+                // per frame, and breaking it destabilizes tracking, making
+                // detected planes jitter and float above the real floor. Never
+                // call session.update() here; just consume `frame`.
+                onSessionUpdated = { _, frame ->
                     try {
                         if (!isSessionPaused) {
-                            session?.update()?.let { frame ->
+                            run {
                                 latestFrame = frame
                                 if (showAnimatedGuide) {
                                     frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
@@ -664,53 +675,20 @@ class ArView(
                             }
                             true
                         } else {
-                            session?.update()?.let { frame ->
-                                latestFrame = frame
+                            // Hit-test against the frame the render loop already
+                            // produced. Calling session.update() here (as this
+                            // used to) is an EXTRA update ARCore never expects
+                            // mid-gesture — it desyncs tracking. `latestFrame` is
+                            // refreshed every frame by onSessionUpdated above.
+                            latestFrame?.let { frame ->
                                 val hitResults = frame.hitTest(motionEvent)
-
-                                val planeHits =
-                                    hitResults
-                                        .filter { hit ->
-                                            val trackable = hit.trackable
-                                            trackable is Plane &&
-                                                    trackable.trackingState == TrackingState.TRACKING
-                                        }.map { hit ->
-                                            val plane = hit.trackable as Plane
-                                            val pose = hit.hitPose
-                                            mapOf(
-                                                "type" to 1,
-                                                "distance" to hit.distance.toDouble(),
-                                                "position" to
-                                                    mapOf(
-                                                        "x" to pose.tx().toDouble(),
-                                                        "y" to pose.ty().toDouble(),
-                                                        "z" to pose.tz().toDouble(),
-                                                    ),
-                                                // REAL surface orientation — without this every
-                                                // hit looked horizontally-flat to the app.
-                                                "rotation" to
-                                                    mapOf(
-                                                        "x" to pose.qx().toDouble(),
-                                                        "y" to pose.qy().toDouble(),
-                                                        "z" to pose.qz().toDouble(),
-                                                        "w" to pose.qw().toDouble(),
-                                                    ),
-                                                // 1 = horizontal (upward-facing), 2 = vertical,
-                                                // 0 = downward-facing (ceiling) / unknown.
-                                                "planeType" to when (plane.type) {
-                                                    Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
-                                                    Plane.Type.VERTICAL -> 2
-                                                    else -> 0
-                                                },
-                                                // Polygon extent — lets the app refuse still-tiny
-                                                // newborn planes (anchors on them drift later).
-                                                "planeExtent" to
-                                                    mapOf(
-                                                        "x" to plane.extentX.toDouble(),
-                                                        "z" to plane.extentZ.toDouble(),
-                                                    ),
-                                            )
-                                        }
+                                val planeHits = hitResults
+                                    .filter { hit ->
+                                        val trackable = hit.trackable
+                                        trackable is Plane &&
+                                                trackable.trackingState ==
+                                                TrackingState.TRACKING
+                                    }.map { hit -> serializePlaneHit(hit) }
                                 notifyPlaneOrPointTap(planeHits)
                             }
                             true
@@ -1008,7 +986,10 @@ class ArView(
 
     private fun handleGetCameraPose(result: MethodChannel.Result) {
         try {
-            val frame = sceneView.session?.update()
+            // Read the current camera pose from the frame the render loop
+            // already updated. Calling session.update() here (as this used to)
+            // injects an unsolicited extra update and desyncs tracking.
+            val frame = latestFrame
             val cameraPose = frame?.camera?.pose
             if (cameraPose != null) {
                 val poseData =
@@ -1033,6 +1014,132 @@ class ArView(
             }
         } catch (e: Exception) {
             result.error("CAMERA_POSE_ERROR", e.message, null)
+        }
+    }
+
+    /**
+     * Fits a plane to ARCore's raw point cloud around a seed point, so the app
+     * can place on a freshly-fitted surface instead of ARCore's jittery plane
+     * polygon. Returns null fields when there isn't enough data to fit.
+     * Args: seedX/seedY/seedZ (world), radiusM, wantHorizontal (bool).
+     */
+    private fun serializePlaneHit(hit: HitResult): Map<String, Any> {
+        val plane = hit.trackable as Plane
+        val pose = hit.hitPose
+        return mapOf(
+            "type" to 1,
+            "distance" to hit.distance.toDouble(),
+            "position" to
+                mapOf(
+                    "x" to pose.tx().toDouble(),
+                    "y" to pose.ty().toDouble(),
+                    "z" to pose.tz().toDouble(),
+                ),
+            // REAL surface orientation — without this every
+            // hit looked horizontally-flat to the app.
+            "rotation" to
+                mapOf(
+                    "x" to pose.qx().toDouble(),
+                    "y" to pose.qy().toDouble(),
+                    "z" to pose.qz().toDouble(),
+                    "w" to pose.qw().toDouble(),
+                ),
+            // 1 = horizontal (upward-facing), 2 = vertical,
+            // 0 = downward-facing (ceiling) / unknown.
+            "planeType" to when (plane.type) {
+                Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
+                Plane.Type.VERTICAL -> 2
+                else -> 0
+            },
+            // Polygon extent — lets the app refuse still-tiny
+            // newborn planes (anchors on them drift later).
+            "planeExtent" to
+                mapOf(
+                    "x" to plane.extentX.toDouble(),
+                    "z" to plane.extentZ.toDouble(),
+                ),
+        )
+    }
+
+    private fun handleHitTest(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val args = call.arguments as? Map<*, *>
+            val x = (args?.get("x") as? Number)?.toFloat()
+            val y = (args?.get("y") as? Number)?.toFloat()
+            val frame = latestFrame
+            if (x == null || y == null || frame == null) {
+                result.success(emptyList<Map<String, Any>>())
+                return
+            }
+            val hits = frame
+                .hitTest(x, y)
+                .filter { hit ->
+                    hit.trackable is Plane &&
+                        hit.trackable.trackingState == TrackingState.TRACKING
+                }
+                .map { hit -> serializePlaneHit(hit) }
+            result.success(hits)
+        } catch (e: Exception) {
+            result.error("HIT_TEST_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleRefinePlane(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val seedX = (call.argument<Number>("seedX"))?.toFloat()
+            val seedY = (call.argument<Number>("seedY"))?.toFloat()
+            val seedZ = (call.argument<Number>("seedZ"))?.toFloat()
+            val radiusM = (call.argument<Number>("radiusM"))?.toFloat() ?: 0.6f
+            val wantHorizontal = call.argument<Boolean>("wantHorizontal") ?: true
+
+            if (seedX == null || seedY == null || seedZ == null) {
+                result.error("INVALID_ARGUMENT", "seedX/seedY/seedZ required", null)
+                return
+            }
+
+            // Use the frame the render loop already produced — never call
+            // session.update() here (that desyncs tracking; see onSessionUpdated).
+            val frame = latestFrame
+            if (frame == null) {
+                result.success(null)
+                return
+            }
+
+            val cloud = frame.acquirePointCloud()
+            try {
+                val points = cloud.points
+                val fit = PlaneRefiner.refine(
+                    points = points,
+                    seedX = seedX,
+                    seedY = seedY,
+                    seedZ = seedZ,
+                    radiusM = radiusM,
+                    wantHorizontal = wantHorizontal,
+                )
+                if (fit == null) {
+                    result.success(null)
+                } else {
+                    result.success(
+                        mapOf(
+                            "centerX" to fit.centerX,
+                            "centerY" to fit.centerY,
+                            "centerZ" to fit.centerZ,
+                            "normalX" to fit.normalX,
+                            "normalY" to fit.normalY,
+                            "normalZ" to fit.normalZ,
+                            "inlierCount" to fit.inlierCount,
+                            "pointCount" to fit.pointCount,
+                            "rmsError" to fit.rmsError,
+                            "confidence" to fit.confidence,
+                        )
+                    )
+                }
+            } finally {
+                cloud.release()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "refinePlane failed", e)
+            result.error("REFINE_PLANE_ERROR", e.message, null)
         }
     }
 

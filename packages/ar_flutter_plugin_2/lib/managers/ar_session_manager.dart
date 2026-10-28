@@ -5,6 +5,7 @@ import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
 import 'package:ar_flutter_plugin_2/models/ar_anchor.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
+import 'package:ar_flutter_plugin_2/models/ar_plane_fit.dart';
 import 'package:ar_flutter_plugin_2/utils/json_converters.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ typedef ARHitResultHandler = void Function(List<ARHitTestResult> hits);
 typedef ARPlaneResultHandler = void Function(int planeCount);
 typedef ARPlanesUpdateHandler = void Function(List<ARPlaneInfo> planes);
 typedef ErrorHandler = void Function(String error);
+typedef TrackingFailureHandler = void Function(String? reason);
 
 class ARSessionManager {
   late MethodChannel _channel;
@@ -31,6 +33,8 @@ class ARSessionManager {
   ARPlanesUpdateHandler? onPlanesUpdate;
 
   ErrorHandler? onError;
+
+  TrackingFailureHandler? onTrackingFailure;
 
   ARSessionManager(int id, this.buildContext, this.planeDetectionConfig,
       {this.debug = false}) {
@@ -115,6 +119,51 @@ class ARSessionManager {
     });
   }
 
+  /// Fits a plane to ARCore's raw point cloud around [seed] and returns a
+  /// refined surface (center + unit normal + confidence in 0..1), or null if
+  /// there wasn't enough data to fit. This is more accurate than ARCore's
+  /// plane polygon for placement, and the confidence lets callers refuse
+  /// cluttered / untrustworthy surfaces.
+  Future<ArPlaneFit?> refinePlane({
+    required Vector3 seed,
+    double radiusM = 0.6,
+    bool wantHorizontal = true,
+  }) async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'refinePlane',
+        {
+          'seedX': seed.x,
+          'seedY': seed.y,
+          'seedZ': seed.z,
+          'radiusM': radiusM,
+          'wantHorizontal': wantHorizontal,
+        },
+      );
+      if (raw == null) return null;
+      return ArPlaneFit.fromMap(Map<String, dynamic>.from(raw));
+    } catch (e) {
+      if (debug) print('refinePlane error: $e');
+      return null;
+    }
+  }
+
+  Future<List<ARHitTestResult>> hitTest(double xPx, double yPx) async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('hitTest', {
+        'x': xPx,
+        'y': yPx,
+      });
+      if (raw == null) return const [];
+      return raw
+          .map((e) => ARHitTestResult.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e) {
+      if (debug) print('hitTest error: $e');
+      return const [];
+    }
+  }
+
   Future<void> _platformCallHandler(MethodCall call) {
     if (debug) {
       print('_platformCallHandler call ${call.method} ${call.arguments}');
@@ -163,6 +212,9 @@ class ARSessionManager {
                 .toList();
             handler(planes);
           }
+          break;
+        case 'onTrackingFailure':
+          onTrackingFailure?.call(call.arguments as String?);
           break;
         case 'dispose':
           _channel.invokeMethod<void>("dispose");

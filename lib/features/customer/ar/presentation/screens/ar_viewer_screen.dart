@@ -30,6 +30,10 @@ import '../../data/placement_policy.dart';
 import '../../data/glb_file_saver.dart';
 import '../../data/glb_generator.dart';
 import '../../data/room_finishes.dart';
+import '../../data/placement_reticle.dart';
+import '../../data/scan_coach.dart';
+import '../widgets/placement_reticle.dart';
+import '../widgets/scan_coach_overlay.dart';
 
 class _PlacedItem {
   const _PlacedItem(this.label, this.node, this.anchor);
@@ -166,6 +170,38 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return ArPlacementPolicy.liveFloorYFromPlanes(_livePlanes);
   }
 
+  // ─── Scan coach ───
+
+  bool _scanCoachDismissed = false;
+
+  bool _scanCoachCompleted = false;
+
+  DateTime? _sessionStartedAt;
+
+  String? _trackingIssue;
+
+  DateTime? _trackingIssueAt;
+
+  String? _scanCoachKey;
+
+  Timer? _scanCoachReadyTimer;
+
+  Timer? _scanCoachTicker;
+
+  bool get _scanCoachActive =>
+      !_scanCoachCompleted &&
+      _arError == null &&
+      !_arUnresponsive &&
+      _sessionStartedAt != null;
+
+  bool get _scanCoachVisible => _scanCoachActive && !_scanCoachDismissed;
+
+  bool get _scanCoachHelpAvailable => _scanCoachActive && _scanCoachDismissed;
+
+  ReticleState _reticle = const ReticleState(ReticleStatus.searching);
+
+  Timer? _reticleTimer;
+
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
   double get _bottomBarHeight =>
@@ -201,6 +237,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _watchdog?.cancel();
     _chipTimer?.cancel();
     _generationTicker?.cancel();
+    _scanCoachReadyTimer?.cancel();
+    _scanCoachTicker?.cancel();
+    _reticleTimer?.cancel();
     _stopRotateHold();
     _session?.dispose();
     super.dispose();
@@ -361,6 +400,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _session = session;
     _objects = objects;
     _anchors = anchors;
+    _sessionStartedAt = DateTime.now();
 
     _session!.onInitialize(
       showAnimatedGuide: false,
@@ -386,6 +426,18 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       if (!mounted) return;
       _livePlanes = planes;
       _livePlanesAt = DateTime.now();
+      _maybeUpdateScanCoach();
+    };
+    _session!.onTrackingFailure = (reason) {
+      if (!mounted) return;
+      if (reason == null || reason == 'NONE') {
+        _trackingIssue = null;
+        _trackingIssueAt = null;
+      } else {
+        _trackingIssue = reason;
+        _trackingIssueAt = DateTime.now();
+      }
+      _maybeUpdateScanCoach();
     };
     _session!.onError = (error) {
       if (mounted) setState(() => _arError = error);
@@ -393,6 +445,117 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _objects!.onNodeTap = _onNodeTap;
 
     _startWatchdog();
+    _startScanCoachTicker();
+    _startReticlePoll();
+  }
+
+  void _startScanCoachTicker() {
+    _scanCoachTicker?.cancel();
+    _scanCoachTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_scanCoachVisible) return;
+      _maybeUpdateScanCoach();
+    });
+  }
+
+  ScanCoachState _computeScanCoach() {
+    final now = DateTime.now();
+    final fresh = _livePlanesAt != null &&
+        now.difference(_livePlanesAt!) <= _liveFloorFreshFor;
+    final issueAt = _trackingIssueAt;
+    final issue =
+        issueAt != null && now.difference(issueAt) < const Duration(seconds: 3)
+            ? _trackingIssue
+            : null;
+    return ScanCoach.evaluate(
+      planes: fresh ? _livePlanes : const <ARPlaneInfo>[],
+      elapsed: _sessionStartedAt == null
+          ? Duration.zero
+          : now.difference(_sessionStartedAt!),
+      trackingIssue: issue,
+    );
+  }
+
+  void _maybeUpdateScanCoach() {
+    final state = _computeScanCoach();
+    final key = '${state.step.index}|${state.ready ? 1 : 0}|'
+        '${(state.progress * 20).round()}|${state.tip}';
+    if (key == _scanCoachKey) return;
+    _scanCoachKey = key;
+    if (state.ready && !_scanCoachCompleted && _scanCoachReadyTimer == null) {
+      _scanCoachReadyTimer = Timer(const Duration(seconds: 6), () {
+        if (!mounted) return;
+        setState(() => _scanCoachCompleted = true);
+      });
+    } else if (!state.ready && _scanCoachReadyTimer != null) {
+      _scanCoachReadyTimer?.cancel();
+      _scanCoachReadyTimer = null;
+    }
+    setState(() {});
+  }
+
+  void _markScanCoachDone() {
+    _scanCoachCompleted = true;
+    _scanCoachReadyTimer?.cancel();
+    _scanCoachReadyTimer = null;
+  }
+
+  void _startReticlePoll() {
+    _reticleTimer?.cancel();
+    _reticleTimer = Timer.periodic(const Duration(milliseconds: 350), (_) {
+      _pollReticle();
+    });
+  }
+
+  Future<void> _pollReticle() async {
+    if (!mounted || _session == null) return;
+    if (_arError != null || !_arCoreAvailable || _checking || _arUnresponsive) {
+      return;
+    }
+    final size = MediaQuery.sizeOf(context);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final hits =
+        await _session!.hitTest(size.width / 2 * dpr, size.height / 2 * dpr);
+    if (!mounted) return;
+    setState(() {
+      _reticle = ReticleAdvisor.evaluate(
+        hits: hits,
+        intent: _reticleIntent,
+        liveFloorY: _currentLiveFloorY,
+      );
+    });
+  }
+
+  PlacementType get _reticleIntent {
+    if (_roomMode) {
+      final pending = _pendingFinish;
+      if (pending == null) return PlacementType.any;
+      return pending.kindWord == 'floor'
+          ? PlacementType.floor
+          : PlacementType.wall;
+    }
+    final entry = _selectedEntry;
+    return entry?.isProduct == true
+        ? PlacementType.floor
+        : entry?.item?.placement ?? PlacementType.floor;
+  }
+
+  String get _reticleLabel {
+    switch (_reticle.status) {
+      case ReticleStatus.locked:
+        if (_roomMode && _pendingFinish == null) return 'Choose a finish';
+        final intent = _reticleIntent;
+        if (intent == PlacementType.wall) return 'Tap to place on the wall';
+        if (intent == PlacementType.floor) return 'Tap to place';
+        return 'Tap to place here';
+      case ReticleStatus.searching:
+        return 'Keep scanning';
+      case ReticleStatus.noFloorYet:
+        return 'Scan the floor first';
+      case ReticleStatus.tooFar:
+        return 'Too far — step closer';
+      case ReticleStatus.tooClose:
+        return 'Too close — step back';
+    }
   }
 
   Future<void> _onPlaneOrPointTap(List<ARHitTestResult> hits) async {
@@ -461,6 +624,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         _placed.add(placed);
         _sessionWasLive = true;
         _finishChipText = null;
+        _markScanCoachDone();
       });
       if (entry.isProduct) _showProductChip();
     } finally {
@@ -506,8 +670,29 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       return null;
     }
 
+    // Refine the surface from ARCore's raw point cloud (RANSAC). A confident
+    // fit beats ARCore's jittery plane polygon, which is what made placed
+    // items drift / float. Fall back to the raw hit when the fit is weak
+    // (clutter, too few points) — never worse than before.
+    final seed = hit.worldTransform.getTranslation();
+    final fit = await _session?.refinePlane(
+      seed: seed,
+      radiusM: 0.6,
+      wantHorizontal: requiredPlacement != PlacementType.wall,
+    );
+    final useRefined = fit != null &&
+        fit.confidence >= ArPlacementPolicy.minRefinedConfidence &&
+        (requiredPlacement != PlacementType.floor ||
+            fit.normal.y.abs() > 0.85);
+
     final anchor = ARPlaneAnchor(
-        transformation: _anchorTransformFor(hit, requiredPlacement));
+      transformation: useRefined
+          ? ArPlacementPolicy.refinedAnchorTransform(
+              fit,
+              isFloor: requiredPlacement != PlacementType.wall,
+            )
+          : _anchorTransformFor(hit, requiredPlacement),
+    );
     final anchorOk = await _anchors?.addAnchor(anchor) ?? false;
     if (anchorOk != true) {
       _showMessage('Could not create anchor — keep moving your phone.');
@@ -747,6 +932,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         _placed.add(placed);
         _sessionWasLive = true;
         _finishChipText = 'Placed ${pending.label}';
+        _markScanCoachDone();
       });
       _showProductChip();
     } finally {
@@ -1125,6 +1311,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
 
+        if (_sessionStartedAt != null &&
+            _arError == null &&
+            !_arUnresponsive &&
+            !_busy)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child:
+                    PlacementReticle(state: _reticle, label: _reticleLabel),
+              ),
+            ),
+          ),
+
         Positioned(
           top: 0,
           left: 0,
@@ -1183,6 +1382,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                       ),
                     ),
                   ),
+                  if (_scanCoachHelpAvailable)
+                    IconButton(
+                      icon:
+                          const Icon(Icons.help_outline, color: Colors.white),
+                      tooltip: 'Scanning help',
+                      onPressed: () =>
+                          setState(() => _scanCoachDismissed = false),
+                    ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep_outlined,
                         color: Colors.white),
@@ -1195,32 +1402,47 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ),
         ),
 
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            child: Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 56, left: 24, right: 24),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _hintText,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                      fontSize: 12, color: Colors.white),
+        if (!_scanCoachVisible)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Center(
+                child: Container(
+                  margin:
+                      const EdgeInsets.only(top: 56, left: 24, right: 24),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _hintText,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                        fontSize: 12, color: Colors.white),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+
+        if (_scanCoachVisible)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: ScanCoachOverlay(
+                state: _computeScanCoach(),
+                onDismiss: () => setState(() => _scanCoachDismissed = true),
+              ),
+            ),
+          ),
 
         if (_arError != null) _buildArErrorOverlay(),
 

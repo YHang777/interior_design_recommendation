@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
+import 'package:ar_flutter_plugin_2/models/ar_plane_fit.dart';
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:vector_math/vector_math_64.dart' hide Colors;
 
@@ -23,6 +24,16 @@ class ArPlacementPolicy {
   static const double wallPanelHalfDepthM = 0.025;
 
   static const double yTieEpsilonM = 0.05;
+
+  // Apple-style distance window: too-near hits are pose noise, hits past a
+  // room's reach are misfires. Keeps placement and the reticle honest.
+  static const double minPlacementDistanceM = 0.25;
+
+  static const double maxPlacementDistanceM = 4.0;
+
+  static bool distanceIsPlausible(ARHitTestResult hit) =>
+      hit.distance >= minPlacementDistanceM &&
+      hit.distance <= maxPlacementDistanceM;
 
   static bool isHorizontalPlane(ARHitTestResult hit) {
     final type = hit.planeType;
@@ -74,6 +85,7 @@ class ArPlacementPolicy {
       final ez = h.planeExtentZ;
       if (ex == null || ez == null) continue;
       if (ex < minFloorExtentM || ez < minFloorExtentM) continue;
+      if (!distanceIsPlausible(h)) continue;
       final y = worldY(h);
       if (!y.isFinite) continue;
       if ((y - liveFloorY).abs() > maxAboveLiveFloorM) continue;
@@ -105,6 +117,7 @@ class ArPlacementPolicy {
       final ez = h.planeExtentZ;
       if (ex == null || ez == null) continue;
       if (ex < minWallExtentM || ez < minWallExtentM) continue;
+      if (!distanceIsPlausible(h)) continue;
       final normalY = h.worldTransform.getColumn(1).y;
       if (normalY.abs() > maxWallNormalY) continue;
       final extent = math.max(ex, ez);
@@ -120,6 +133,7 @@ class ArPlacementPolicy {
     for (final h in hits) {
       if (h.type != ARHitTestResultType.plane) continue;
       if (!planeIsLargeEnough(h)) continue;
+      if (!distanceIsPlausible(h)) continue;
       return h;
     }
     return null;
@@ -146,6 +160,37 @@ class ArPlacementPolicy {
         p.x + ux * halfDepthM,
         p.y,
         p.z + uz * halfDepthM,
+      ))
+      ..rotateY(yaw);
+  }
+
+  /// Minimum RANSAC-fit confidence before we trust a refined plane over
+  /// ARCore's own hit pose. Below this we fall back to the raw hit.
+  static const double minRefinedConfidence = 0.35;
+
+  /// Builds an anchor transform from a RANSAC-refined plane fit, which is
+  /// more accurate than ARCore's jittery plane polygon. Floor fits are placed
+  /// at the fitted center with identity rotation (model is authored Y-up);
+  /// wall fits are offset halfDepth along the normal and yawed so model +Z
+  /// faces out from the wall.
+  static Matrix4 refinedAnchorTransform(
+    ArPlaneFit fit, {
+    required bool isFloor,
+    double halfDepthM = wallPanelHalfDepthM,
+  }) {
+    final n = fit.normal;
+    if (isFloor) {
+      return Matrix4.identity()..setTranslation(fit.center);
+    }
+    final nxz = math.sqrt(n.x * n.x + n.z * n.z);
+    final ux = nxz < 1e-6 ? 0.0 : n.x / nxz;
+    final uz = nxz < 1e-6 ? 1.0 : n.z / nxz;
+    final yaw = wallAnchorYaw(Vector3(n.x, n.y, n.z));
+    return Matrix4.identity()
+      ..setTranslation(Vector3(
+        fit.center.x + ux * halfDepthM,
+        fit.center.y,
+        fit.center.z + uz * halfDepthM,
       ))
       ..rotateY(yaw);
   }

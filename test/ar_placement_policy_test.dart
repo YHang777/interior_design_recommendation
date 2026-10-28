@@ -271,6 +271,38 @@ void main() {
     });
   });
 
+  group('ArPlacementPolicy distance window', () {
+    test('chooseFloorHit rejects a floor hit beyond 4 m', () {
+      final far = horizontalPlane(
+          x: 0, y: 0, z: 5, extentX: 4.0, extentZ: 4.0, distance: 5.0);
+      expect(ArPlacementPolicy.chooseFloorHit([far], liveFloorY: 0.0), isNull);
+    });
+
+    test('chooseFloorHit rejects a floor hit closer than 0.25 m', () {
+      final near = horizontalPlane(
+          x: 0, y: 0, z: 0.1, extentX: 2.0, extentZ: 2.0, distance: 0.1);
+      expect(ArPlacementPolicy.chooseFloorHit([near], liveFloorY: 0.0), isNull);
+    });
+
+    test('chooseWallHit rejects a wall beyond 4 m', () {
+      final far =
+          verticalPlane(x: 0, z: 5, extentX: 3.0, extentZ: 2.5, distance: 5.0);
+      expect(ArPlacementPolicy.chooseWallHit([far]), isNull);
+    });
+
+    test('chooseAnyHit rejects a plane beyond 4 m', () {
+      final far = horizontalPlane(
+          x: 0, y: 0, z: 5, extentX: 3.0, extentZ: 3.0, distance: 4.5);
+      expect(ArPlacementPolicy.chooseAnyHit([far]), isNull);
+    });
+
+    test('an in-window hit still passes', () {
+      final ok = horizontalPlane(
+          x: 0, y: 0, z: 2, extentX: 3.0, extentZ: 3.0, distance: 2.0);
+      expect(ArPlacementPolicy.chooseAnyHit([ok]), same(ok));
+    });
+  });
+
   group('ArPlacementPolicy.chooseAnyHit (unchanged behaviour)', () {
     test('picks the closest plane of any orientation', () {
       final floor = horizontalPlane(
