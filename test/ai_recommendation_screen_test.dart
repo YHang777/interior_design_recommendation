@@ -14,6 +14,7 @@ import 'package:interior_design_recommendation/features/customer/homeowner/data/
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/screens/ai_recommendation_screen.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_data_card.dart';
+import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_quick_select_sheet.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/widgets/chat_suggestion_card.dart';
 import 'package:interior_design_recommendation/models/cart_item.dart';
@@ -123,6 +124,16 @@ String _inputText(WidgetTester tester) =>
 
 Finder _chip(String label) => find.widgetWithText(ChoiceChip, label);
 
+Future<void> _openQuickSelect(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('ai-quick-select')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _closeQuickSelect(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.close));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _send(WidgetTester tester, String text) async {
   await tester.enterText(find.byType(TextField), text);
   await tester.pump();
@@ -157,6 +168,12 @@ void main() {
     expect(find.text('Room Type'), findsNothing);
     expect(find.text('Welcome to the design assistant'), findsOneWidget);
 
+    // Quick options hide behind the sheet, not inline chip rows.
+    expect(find.byKey(const ValueKey('ai-quick-select')), findsOneWidget);
+    expect(_chip('Modern'), findsNothing);
+    expect(_chip('Living Room'), findsNothing);
+
+    await _openQuickSelect(tester);
     expect(_chip('Modern'), findsOneWidget);
     expect(_chip('Living Room'), findsOneWidget);
     expect(capture.calls, 0);
@@ -166,6 +183,7 @@ void main() {
       (tester) async {
     final capture = _ChatCapture();
     await _pumpScreen(tester, capture);
+    await _openQuickSelect(tester);
 
     await tester.tap(_chip('Modern'));
     await tester.pump();
@@ -186,15 +204,43 @@ void main() {
     expect(capture.calls, 0);
   });
 
+  testWidgets('a suggested question fills the input and closes the sheet',
+      (tester) async {
+    final capture = _ChatCapture();
+    await _pumpScreen(tester, capture);
+    await _openQuickSelect(tester);
+
+    final prompt = find.descendant(
+      of: find.byType(ChatQuickSelectSheet),
+      matching: find.text('Suggest a style for my living room'),
+    );
+    await tester.scrollUntilVisible(
+      prompt,
+      40,
+      scrollable: find.descendant(
+        of: find.byType(ChatQuickSelectSheet),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.tap(prompt);
+    await tester.pumpAndSettle();
+
+    expect(_chip('Modern'), findsNothing);
+    expect(_inputText(tester), 'Suggest a style for my living room');
+    expect(capture.calls, 0);
+  });
+
   testWidgets('sending ships the transcript and chip context to the proxy',
       (tester) async {
     final capture = _ChatCapture();
     await _pumpScreen(tester, capture);
 
+    await _openQuickSelect(tester);
     await tester.tap(_chip('Modern'));
     await tester.pump();
     await tester.tap(_chip('Living Room'));
     await tester.pump();
+    await _closeQuickSelect(tester);
     await _send(tester, 'Best sofa for this room?');
 
     expect(find.text('Best sofa for this room?'), findsOneWidget);

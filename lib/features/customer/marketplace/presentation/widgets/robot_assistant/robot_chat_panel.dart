@@ -16,6 +16,7 @@ import '../../../../homeowner/presentation/widgets/chat_card_actions.dart';
 import '../../../../homeowner/presentation/widgets/chat_data_card.dart';
 import '../../../../homeowner/presentation/widgets/chat_proactive_chip_bar.dart';
 import '../../../../homeowner/presentation/widgets/chat_suggestion_card.dart';
+import '../../../../homeowner/presentation/widgets/chat_typing_bubble.dart';
 import '../../providers/marketplace_providers.dart';
 
 const List<String> kProductDetailQuickQuestions = [
@@ -388,45 +389,18 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
   }
 
   Widget _buildTypingBubble() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 5),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppColors.accent.withValues(alpha: 0.08),
-              AppColors.accentLight.withValues(alpha: 0.04),
+    return ChatTypingBubble(
+      statuses: widget.focusProduct != null
+          ? const [
+              'Thinking…',
+              'Checking this product…',
+              'Finding the best match…',
+            ]
+          : const [
+              'Thinking…',
+              'Checking the catalogue…',
+              'Finding the best match…',
             ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(18),
-            topRight: Radius.circular(18),
-            bottomLeft: Radius.circular(4),
-            bottomRight: Radius.circular(18),
-          ),
-        ),
-        child: SizedBox(
-          height: 20,
-          width: 40,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(3, (i) {
-              return Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-              );
-            }),
-          ),
-        ),
-      ),
     );
   }
 }

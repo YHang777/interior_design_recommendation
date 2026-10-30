@@ -6,7 +6,7 @@ import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/chat_session.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
-import '../../../../../shared/widgets/filter_chip_bar.dart';
+import '../../../../../shared/widgets/floating_nav_bar.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
@@ -17,8 +17,9 @@ import '../../data/datasources/chat_datasource.dart';
 import '../providers/design_providers.dart';
 import '../widgets/chat_card_actions.dart';
 import '../widgets/chat_data_card.dart';
-import '../widgets/chat_proactive_chip_bar.dart';
+import '../widgets/chat_quick_select_sheet.dart';
 import '../widgets/chat_suggestion_card.dart';
+import '../widgets/chat_typing_bubble.dart';
 
 class AiRecommendationScreen extends ConsumerStatefulWidget {
   const AiRecommendationScreen({super.key});
@@ -71,22 +72,6 @@ class _AiRecommendationScreenState
 
   String get _composedPhrase =>
       [_chipStyle, _chipRoom].whereType<String>().join(' ').trim();
-
-  void _onStyleChip(String style) {
-    setState(() {
-      _chipStyle = _chipStyle == style ? null : style;
-      _fillInputWithPhrase();
-    });
-    _syncContextToSession();
-  }
-
-  void _onRoomChip(String room) {
-    setState(() {
-      _chipRoom = _chipRoom == room ? null : room;
-      _fillInputWithPhrase();
-    });
-    _syncContextToSession();
-  }
 
   void _fillInputWithPhrase() {
     _msgCtrl.text = _composedPhrase;
@@ -226,6 +211,9 @@ class _AiRecommendationScreenState
   @override
   Widget build(BuildContext context) {
     ref.watch(marketplaceProductsProvider);
+    // Keeps budget/cart/orders/designs streams subscribed from mount so the
+    // first send reads warm data instead of racing an unwatched stream.
+    ref.watch(chatStatePayloadProvider);
     final history = ref.watch(chatHistoryProvider);
 
     ref.listen(chatHistoryProvider, (previous, next) {
@@ -373,78 +361,110 @@ class _AiRecommendationScreenState
     );
   }
 
-  // ─── Composer: quick shortcuts above the input ─────────────────────────────
+  // ─── Composer: quick actions live behind a sheet, not inline chips ─────────
+
+  void _openQuickSelect() {
+    showChatQuickSelectSheet(
+      context,
+      style: _chipStyle,
+      room: _chipRoom,
+      styles: _styles,
+      rooms: _rooms,
+      fillers: _promptSuggestions,
+      onStyle: (value) {
+        setState(() {
+          _chipStyle = value;
+          _fillInputWithPhrase();
+        });
+        _syncContextToSession();
+      },
+      onRoom: (value) {
+        setState(() {
+          _chipRoom = value;
+          _fillInputWithPhrase();
+        });
+        _syncContextToSession();
+      },
+      onPrompt: _fillSuggestion,
+    );
+  }
 
   Widget _buildComposer(BuildContext context) {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      padding: EdgeInsets.fromLTRB(
+        12,
+        8,
+        12,
+        keyboardOpen ? 12 : 12 + kFloatingNavBarClearance,
+      ),
+      child: Row(
         children: [
-          FilterChipBar<String>(
-            options: _styles,
-            selected: _chipStyle,
-            onSelected: _onStyleChip,
-          ),
-          const SizedBox(height: 4),
-          FilterChipBar<String>(
-            options: _rooms,
-            selected: _chipRoom,
-            onSelected: _onRoomChip,
-          ),
-          const SizedBox(height: 4),
-          ChatProactiveChipBar(
-            onPrompt: _fillSuggestion,
-            fillers: _promptSuggestions,
-          ),
-          const SizedBox(height: 4),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(28),
+              shape: BoxShape.circle,
               border: Border.all(color: AppColors.border),
             ),
-            child: Row(
-              children: [
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _msgCtrl,
-                    style: GoogleFonts.poppins(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Ask about designs...',
-                      hintStyle: GoogleFonts.poppins(
-                          color: AppColors.textHint, fontSize: 14),
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 12),
+            child: IconButton(
+              key: const ValueKey('ai-quick-select'),
+              tooltip: 'Quick actions',
+              icon: const Icon(Icons.bolt, size: 20, color: AppColors.accent),
+              onPressed: _openQuickSelect,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _msgCtrl,
+                      style: GoogleFonts.poppins(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Ask about designs...',
+                        hintStyle: GoogleFonts.poppins(
+                            color: AppColors.textHint, fontSize: 14),
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
                     ),
-                    onSubmitted: (_) => _sendMessage(),
                   ),
-                ),
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [AppColors.accent, AppColors.accentLight],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [AppColors.accent, AppColors.accentLight],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
                     ),
-                    shape: BoxShape.circle,
+                    child: IconButton(
+                      icon: const Icon(Icons.send,
+                          color: Colors.white, size: 20),
+                      onPressed: _sendMessage,
+                    ),
                   ),
-                  child: IconButton(
-                    icon: const Icon(Icons.send,
-                        color: Colors.white, size: 20),
-                    onPressed: _sendMessage,
-                  ),
-                ),
-                const SizedBox(width: 4),
-              ],
+                  const SizedBox(width: 4),
+                ],
+              ),
             ),
           ),
         ],
@@ -507,45 +527,12 @@ class _AiRecommendationScreenState
   }
 
   Widget _buildTypingBubble() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 5),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppColors.accent.withValues(alpha: 0.08),
-              AppColors.accentLight.withValues(alpha: 0.04),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(18),
-            topRight: Radius.circular(18),
-            bottomLeft: Radius.circular(4),
-            bottomRight: Radius.circular(18),
-          ),
-        ),
-        child: SizedBox(
-          height: 20,
-          width: 40,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(3, (i) {
-              return Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-              );
-            }),
-          ),
-        ),
-      ),
+    return const ChatTypingBubble(
+      statuses: [
+        'Thinking…',
+        'Gathering ideas that fit…',
+        'Checking the catalogue…',
+      ],
     );
   }
 }

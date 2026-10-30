@@ -45,136 +45,146 @@ class ChatSuggestionCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => actions.openProduct(s.productId),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: ProductImage(
-                      imageUrl: s.image,
-                      width: 56,
-                      height: 56,
-                      errorIconSize: 20,
-                    ),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => actions.openProduct(s.productId),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: ProductImage(
+                    imageUrl: s.image,
+                    width: 56,
+                    height: 56,
+                    errorIconSize: 20,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          s.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
                         ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        Formatters.myr(s.price),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.accent,
+                        ),
+                      ),
+                      if (s.reason.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          Formatters.myr(s.price),
+                          s.reason,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.poppins(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.accent,
+                            fontSize: 11,
+                            color: AppColors.textSecondary,
+                            height: 1.25,
                           ),
                         ),
-                        if (s.reason.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            s.reason,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              color: AppColors.textSecondary,
-                              height: 1.25,
-                            ),
-                          ),
-                        ],
                       ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => actions.addToCart(s),
+                icon: const Icon(Icons.add_shopping_cart, size: 16),
+                label: Text(
+                  'Add',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.accent,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 34),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              if (showPlace)
+                TextButton.icon(
+                  onPressed: () => actions.placeInLayout(s),
+                  icon: const Icon(Icons.weekend_outlined, size: 16),
+                  label: Text(
+                    'Place',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.secondaryAccent,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 34),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              PopupMenuButton<_CardOverflow>(
+                icon: const Icon(Icons.more_vert, size: 18),
+                padding: EdgeInsets.zero,
+                tooltip: 'More actions',
+                color: AppColors.surface,
+                onSelected: (choice) => _onChoice(ref, choice),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: _CardOverflow.open,
+                    child: Text('Open product'),
+                  ),
+                  PopupMenuItem(
+                    value: _CardOverflow.wishlist,
+                    child: Text(
+                        saved ? 'Remove from wishlist' : 'Save to wishlist'),
+                  ),
+                  if (inCart) ...[
+                    const PopupMenuItem(
+                      value: _CardOverflow.qtyPlus,
+                      child: Text('Increase quantity'),
+                    ),
+                    const PopupMenuItem(
+                      value: _CardOverflow.qtyMinus,
+                      child: Text('Decrease quantity'),
+                    ),
+                    const PopupMenuItem(
+                      value: _CardOverflow.remove,
+                      child: Text('Remove from cart'),
+                    ),
+                  ] else
+                    const PopupMenuItem(
+                      value: _CardOverflow.similar,
+                      child: Text('See similar'),
+                    ),
                 ],
               ),
-            ),
-          ),
-          TextButton.icon(
-            onPressed: () => actions.addToCart(s),
-            icon: const Icon(Icons.add_shopping_cart, size: 16),
-            label: Text(
-              'Add',
-              style: GoogleFonts.poppins(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: const Size(0, 36),
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-          if (showPlace)
-            TextButton.icon(
-              onPressed: () => actions.placeInLayout(s),
-              icon: const Icon(Icons.weekend_outlined, size: 16),
-              label: Text(
-                'Place',
-                style: GoogleFonts.poppins(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.secondaryAccent,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(0, 36),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          PopupMenuButton<_CardOverflow>(
-            icon: const Icon(Icons.more_vert, size: 18),
-            padding: EdgeInsets.zero,
-            tooltip: 'More actions',
-            color: AppColors.surface,
-            onSelected: (choice) => _onChoice(ref, choice),
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: _CardOverflow.open,
-                child: Text('Open product'),
-              ),
-              PopupMenuItem(
-                value: _CardOverflow.wishlist,
-                child: Text(saved ? 'Remove from wishlist' : 'Save to wishlist'),
-              ),
-              if (inCart) ...[
-                const PopupMenuItem(
-                  value: _CardOverflow.qtyPlus,
-                  child: Text('Increase quantity'),
-                ),
-                const PopupMenuItem(
-                  value: _CardOverflow.qtyMinus,
-                  child: Text('Decrease quantity'),
-                ),
-                const PopupMenuItem(
-                  value: _CardOverflow.remove,
-                  child: Text('Remove from cart'),
-                ),
-              ] else
-                const PopupMenuItem(
-                  value: _CardOverflow.similar,
-                  child: Text('See similar'),
-                ),
             ],
           ),
         ],
