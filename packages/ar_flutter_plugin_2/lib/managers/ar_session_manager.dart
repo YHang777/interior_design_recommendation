@@ -56,6 +56,24 @@ class ARSessionManager {
     }
   }
 
+  // World → clip matrix for drawing over the camera feed (projection * view,
+  // display orientation included), or null when the camera isn't ready.
+  Future<Matrix4?> getCameraViewProjection() async {
+    try {
+      final raw =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('getCameraMatrices', {});
+      if (raw == null) return null;
+      final projection = Matrix4.fromList(
+          (raw['projection'] as List<dynamic>).cast<double>());
+      final view =
+          Matrix4.fromList((raw['view'] as List<dynamic>).cast<double>());
+      return projection * view;
+    } catch (e) {
+      if (debug) print('getCameraViewProjection error: $e');
+      return null;
+    }
+  }
+
   Future<Matrix4?> getPose(ARAnchor anchor) async {
     try {
       if (anchor.name.isEmpty) {

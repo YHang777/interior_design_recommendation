@@ -73,7 +73,19 @@ class MarketplaceApi {
 
   Uri _uri(String path) {
     final base = AppConfig.marketplaceApiUrl.trim();
-    return Uri.parse('${base.endsWith('/') ? base.substring(0, base.length - 1) : base}$path');
+    // Checkout lives under /api on the unified host (same as /api/ai, /api/tripo).
+    return Uri.parse(
+        '${base.endsWith('/') ? base.substring(0, base.length - 1) : base}/api$path');
+  }
+
+  /// Pings the API so a sleeping host (e.g. Render cold start) wakes while
+  /// the user fills in the checkout form, not while they wait on Pay now.
+  Future<void> warmUp() async {
+    try {
+      await _client
+          .get(_uri('/health'))
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>> _post(

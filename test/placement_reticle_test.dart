@@ -130,6 +130,36 @@ void main() {
       expect(s.status, ReticleStatus.locked);
     });
 
+    test('any intent with a known floor refuses a table top', () {
+      final s = ReticleAdvisor.evaluate(
+        hits: [
+          horizontalPlane(
+              x: 0, y: 0.75, z: 1, extentX: 1.5, extentZ: 1.1),
+        ],
+        intent: PlacementType.any,
+        liveFloorY: 0,
+      );
+      expect(s.status, ReticleStatus.searching);
+    });
+
+    test('a vouched floor fragment locks the reticle', () {
+      final fragment = horizontalPlane(
+          x: 0, y: 0, z: 1, extentX: 0.8, extentZ: 0.7);
+      final without = ReticleAdvisor.evaluate(
+        hits: [fragment],
+        intent: PlacementType.floor,
+        liveFloorY: 0,
+      );
+      expect(without.status, ReticleStatus.searching);
+      final vouched = ReticleAdvisor.evaluate(
+        hits: [fragment],
+        intent: PlacementType.floor,
+        liveFloorY: 0,
+        vouchedFloor: (_) => true,
+      );
+      expect(vouched.status, ReticleStatus.locked);
+    });
+
     test('only feature points → searching, never locked', () {
       final s = ReticleAdvisor.evaluate(
         hits: [featurePoint()],

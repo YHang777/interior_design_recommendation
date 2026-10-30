@@ -27,20 +27,25 @@ import '../../data/ar_product_entry.dart';
 import '../../data/furniture_model_library.dart';
 import '../../data/glb_bounds.dart';
 import '../../data/placement_policy.dart';
+import '../../data/plane_memory.dart';
+import '../../data/finish_footprint.dart';
 import '../../data/glb_file_saver.dart';
 import '../../data/glb_generator.dart';
 import '../../data/room_finishes.dart';
 import '../../data/placement_reticle.dart';
+import '../../data/plane_overlay_math.dart';
 import '../../data/scan_coach.dart';
 import '../widgets/placement_reticle.dart';
+import '../widgets/plane_overlay.dart';
 import '../widgets/scan_coach_overlay.dart';
 
 class _PlacedItem {
-  const _PlacedItem(this.label, this.node, this.anchor);
+  _PlacedItem(this.label, this.node, this.anchor, {this.footprint});
 
   final String label;
   final ARNode node;
   final ARAnchor anchor;
+  FinishFootprint? footprint;
 }
 
 class _PendingFinish {
@@ -50,6 +55,8 @@ class _PendingFinish {
     required this.nodeName,
     required this.filePath,
     required this.scaleMeters,
+    required this.footprintWidthM,
+    required this.footprintHeightM,
   });
 
   final String kindWord;
@@ -61,6 +68,10 @@ class _PendingFinish {
   final String filePath;
 
   final double scaleMeters;
+
+  final double footprintWidthM;
+
+  final double footprintHeightM;
 }
 
 class _BarEntry {
@@ -162,13 +173,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   static const Duration _liveFloorFreshFor = Duration(seconds: 2);
 
-  double? get _currentLiveFloorY {
-    final at = _livePlanesAt;
-    if (at == null || DateTime.now().difference(at) > _liveFloorFreshFor) {
-      return null;
-    }
-    return ArPlacementPolicy.liveFloorYFromPlanes(_livePlanes);
-  }
+  // Persistent per-plane state: smoothing + reclassification, and a room
+  // floor estimate that survives the floor leaving view and self-corrects
+  // when new frames confirm a surface is furniture or a wall.
+  final PlaneMemory _planeMemory = PlaneMemory();
+
+  double? get _currentLiveFloorY => _planeMemory.isFresh ? _planeMemory.floorY : null;
 
   // ─── Scan coach ───
 
@@ -201,6 +211,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   ReticleState _reticle = const ReticleState(ReticleStatus.searching);
 
   Timer? _reticleTimer;
+
+  // ─── Smoothed plane overlay ───
+
+  Timer? _overlayTimer;
+
+  Matrix4? _overlayViewProjection;
+
+  List<PlaneQuad> _overlayQuads = const [];
 
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
@@ -240,6 +258,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachReadyTimer?.cancel();
     _scanCoachTicker?.cancel();
     _reticleTimer?.cancel();
+    _overlayTimer?.cancel();
     _stopRotateHold();
     _session?.dispose();
     super.dispose();
@@ -405,7 +424,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _session!.onInitialize(
       showAnimatedGuide: false,
       showFeaturePoints: false,
-      showPlanes: true,
+      // SceneView's raw ARCore polygons are replaced by the smoothed,
+      // class-colored overlay drawn from the plane memory.
+      showPlanes: false,
       handleTaps: true,
       handlePans: true,
       handleRotation: true,
@@ -424,7 +445,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     };
     _session!.onPlanesUpdate = (planes) {
       if (!mounted) return;
-      _livePlanes = planes;
+      _planeMemory.ingest(planes);
+      _livePlanes = _planeMemory.smoothedPlanes();
       _livePlanesAt = DateTime.now();
       _maybeUpdateScanCoach();
     };
@@ -443,17 +465,66 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       if (mounted) setState(() => _arError = error);
     };
     _objects!.onNodeTap = _onNodeTap;
+    _objects!.onRotationEnd = (name, transform) {
+      if (!mounted) return;
+      _syncFootprintFromTransform(name, transform);
+    };
+    _objects!.onPanEnd = (name, transform) {
+      if (!mounted) return;
+      _syncFootprintFromTransform(name, transform);
+    };
 
     _startWatchdog();
     _startScanCoachTicker();
     _startReticlePoll();
+    _startPlaneOverlayTick();
   }
 
   void _startScanCoachTicker() {
     _scanCoachTicker?.cancel();
-    _scanCoachTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+    _scanCoachTicker = Timer.periodic(const Duration(seconds: 1), (_) async {
+      // Feed the camera height to the plane memory — the floor sits ~1–2 m
+      // below a handheld phone, which is what keeps table tops from ever
+      // being mistaken for it.
+      final pose = await _session?.getCameraPose();
+      if (pose != null) {
+        _planeMemory.noteCameraY(pose.getTranslation().y);
+      }
       if (!mounted || !_scanCoachVisible) return;
       _maybeUpdateScanCoach();
+    });
+  }
+
+  void _startPlaneOverlayTick() {
+    _overlayTimer?.cancel();
+    _overlayTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+      _refreshPlaneOverlay();
+    });
+    _refreshPlaneOverlay();
+  }
+
+  Future<void> _refreshPlaneOverlay() async {
+    final session = _session;
+    if (session == null || !mounted) return;
+    final vp = await session.getCameraViewProjection();
+    if (!mounted || vp == null) return;
+    final quads = <PlaneQuad>[];
+    for (final p in _planeMemory.smoothedPlanes()) {
+      final cls = _planeMemory.classOf(p.id);
+      if (cls != PlaneClass.floor && cls != PlaneClass.wall) continue;
+      quads.add(PlaneQuad(
+        center: Vector3(p.centerX, p.centerY, p.centerZ),
+        yaw: p.yaw,
+        extentX: p.extentX,
+        extentZ: p.extentZ,
+        vertical: p.planeType == 2,
+        kind:
+            cls == PlaneClass.floor ? PlaneQuadKind.floor : PlaneQuadKind.wall,
+      ));
+    }
+    setState(() {
+      _overlayViewProjection = vp;
+      _overlayQuads = quads;
     });
   }
 
@@ -472,6 +543,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ? Duration.zero
           : now.difference(_sessionStartedAt!),
       trackingIssue: issue,
+      floorY: _planeMemory.floorY,
+      floorCoverageM: fresh ? _planeMemory.floorCoverageExtentM() : null,
     );
   }
 
@@ -516,11 +589,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final hits =
         await _session!.hitTest(size.width / 2 * dpr, size.height / 2 * dpr);
     if (!mounted) return;
+    final intent = _reticleIntent;
     setState(() {
       _reticle = ReticleAdvisor.evaluate(
-        hits: hits,
-        intent: _reticleIntent,
+        hits: _memoryFiltered(hits, intent),
+        intent: intent,
         liveFloorY: _currentLiveFloorY,
+        vouchedFloor: _vouchedFloor,
+        vouchedWall: _vouchedWall,
       );
     });
   }
@@ -633,11 +709,51 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 
   static Matrix4 _anchorTransformFor(
-      ARHitTestResult hit, PlacementType placement) {
+    ARHitTestResult hit,
+    PlacementType placement, {
+    Vector3? cameraPosition,
+  }) {
     if (placement == PlacementType.wall) {
       return ArPlacementPolicy.wallAnchorTransform(hit);
     }
-    return Matrix4.copy(hit.worldTransform);
+    return ArPlacementPolicy.floorAnchorTransform(hit,
+        cameraPosition: cameraPosition);
+  }
+
+  // Floor queries only ever ask the floor stream, wall queries only the
+  // wall stream — the two detections stay separate end to end.
+  bool _vouchedFloor(ARHitTestResult hit) {
+    final p = hit.worldTransform.getTranslation();
+    return _planeMemory.knowsFloorAt(p.x, p.z) ||
+        _planeMemory.classNear(p.x, p.y, p.z, planeType: 1) == PlaneClass.floor;
+  }
+
+  bool _vouchedWall(ARHitTestResult hit) {
+    final p = hit.worldTransform.getTranslation();
+    return _planeMemory.classNear(p.x, p.y, p.z, planeType: 2) ==
+        PlaneClass.wall;
+  }
+
+  // A surface the memory already classified as furniture never hosts floor
+  // placement, and one it knows is too small never hosts a wall — floor
+  // detection can never bleed onto walls or furniture, or the reverse.
+  List<ARHitTestResult> _memoryFiltered(
+      List<ARHitTestResult> hits, PlacementType intent) {
+    return hits.where((h) {
+      final p = h.worldTransform.getTranslation();
+      if (intent != PlacementType.wall &&
+          ArPlacementPolicy.isHorizontalPlane(h)) {
+        final cls = _planeMemory.classNear(p.x, p.y, p.z, planeType: 1);
+        return cls != PlaneClass.elevatedSurface &&
+            cls != PlaneClass.smallSurface;
+      }
+      if (intent != PlacementType.floor &&
+          !ArPlacementPolicy.isHorizontalPlane(h)) {
+        final cls = _planeMemory.classNear(p.x, p.y, p.z, planeType: 2);
+        return cls != PlaneClass.smallSurface;
+      }
+      return true;
+    }).toList();
   }
 
   Future<_PlacedItem?> _placeNodeAtTap(
@@ -646,22 +762,29 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     String label, {
     String failureMessage = 'Could not place the item.',
     PlacementType requiredPlacement = PlacementType.any,
+    FinishFootprint Function(Matrix4 transform)? footprintOf,
   }) async {
     final ARHitTestResult? hit;
+    final liveFloorY = _currentLiveFloorY;
+    final candidates = _memoryFiltered(hits, requiredPlacement);
     switch (requiredPlacement) {
       case PlacementType.floor:
-        final liveFloorY = _currentLiveFloorY;
         if (liveFloorY == null) {
           _showLiveFloorScanHint();
           return null;
         }
-        hit = ArPlacementPolicy.chooseFloorHit(hits, liveFloorY: liveFloorY);
+        hit = ArPlacementPolicy.chooseFloorHit(candidates,
+            liveFloorY: liveFloorY, vouchedFloor: _vouchedFloor);
         break;
       case PlacementType.wall:
-        hit = ArPlacementPolicy.chooseWallHit(hits);
+        hit = ArPlacementPolicy.chooseWallHit(candidates,
+            vouchedWall: _vouchedWall);
         break;
       case PlacementType.any:
-        hit = ArPlacementPolicy.chooseAnyHit(hits);
+        hit = ArPlacementPolicy.chooseAnyHit(candidates,
+            liveFloorY: liveFloorY,
+            vouchedFloor: _vouchedFloor,
+            vouchedWall: _vouchedWall);
         break;
     }
 
@@ -669,6 +792,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       _showPlacementHint(requiredPlacement);
       return null;
     }
+
+    // Placed items face the phone instead of a fixed world direction.
+    final cameraPose = await _session?.getCameraPose();
+    final cameraPos = cameraPose?.getTranslation();
 
     // Refine the surface from ARCore's raw point cloud (RANSAC). A confident
     // fit beats ARCore's jittery plane polygon, which is what made placed
@@ -685,14 +812,34 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         (requiredPlacement != PlacementType.floor ||
             fit.normal.y.abs() > 0.85);
 
-    final anchor = ARPlaneAnchor(
-      transformation: useRefined
-          ? ArPlacementPolicy.refinedAnchorTransform(
-              fit,
-              isFloor: requiredPlacement != PlacementType.wall,
-            )
-          : _anchorTransformFor(hit, requiredPlacement),
-    );
+    final transform = useRefined
+        ? ArPlacementPolicy.refinedAnchorTransform(
+            fit,
+            isFloor: requiredPlacement != PlacementType.wall,
+            anchorAt: seed,
+            cameraPosition: cameraPos,
+          )
+        : _anchorTransformFor(hit, requiredPlacement,
+            cameraPosition: cameraPos);
+
+    // Floor tiles / wall panels may never stack — stacked patches z-fight
+    // and read as multiple tiles glued together in AR.
+    FinishFootprint? footprint;
+    final makeFootprint = footprintOf;
+    if (makeFootprint != null) {
+      final fp = makeFootprint(transform);
+      for (final p in _placed) {
+        final existing = p.footprint;
+        if (existing != null && fp.overlaps(existing)) {
+          _showMessage('That spot is already covered — tap next to it.',
+              color: AppColors.primaryLight);
+          return null;
+        }
+      }
+      footprint = fp;
+    }
+
+    final anchor = ARPlaneAnchor(transformation: transform);
     final anchorOk = await _anchors?.addAnchor(anchor) ?? false;
     if (anchorOk != true) {
       _showMessage('Could not create anchor — keep moving your phone.');
@@ -704,7 +851,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       _showMessage(failureMessage);
       return null;
     }
-    return _PlacedItem(label, node, anchor);
+    return _PlacedItem(label, node, anchor, footprint: footprint);
   }
 
   void _showLiveFloorScanHint() {
@@ -855,8 +1002,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               '${_hexColor(colorArgb)}.glb';
       final path = await saveGlbToAppDocuments(bytes, fileName: fileName);
 
-      final scaleMeters = _maxExtentMeters(bytes) ??
-          (isFloor ? selection.floorSizeM : RoomFinishCatalog.wallHeightM);
+      final bounds = _glbBounds(bytes);
+      final scaleMeters = bounds == null
+          ? _fallbackExtent(isFloor, selection)
+          : math.max(bounds.widthM, math.max(bounds.heightM, bounds.depthM));
+      final footprintWidthM = bounds?.widthM ?? _fallbackExtent(isFloor, selection);
+      final footprintHeightM = (isFloor ? bounds?.depthM : bounds?.heightM) ??
+          _fallbackExtent(isFloor, selection);
 
       final palette = isFloor
           ? RoomFinishCatalog.colorsForFloor(selection.floorType)
@@ -878,6 +1030,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               '${_hexColor(colorArgb)}',
           filePath: path,
           scaleMeters: scaleMeters,
+          footprintWidthM: footprintWidthM,
+          footprintHeightM: footprintHeightM,
         );
       });
     } catch (e) {
@@ -888,14 +1042,21 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
-  double? _maxExtentMeters(Uint8List bytes) {
+  GlbBounds? _glbBounds(Uint8List bytes) {
     try {
-      final b = GlbBounds.fromGlbBytes(bytes);
-      final m = math.max(b.widthM, math.max(b.heightM, b.depthM));
-      return m.isFinite && m > 0 ? m : null;
+      return GlbBounds.fromGlbBytes(bytes);
     } catch (_) {
       return null;
     }
+  }
+
+  double _fallbackExtent(bool isFloor, FinishSelection selection) {
+    if (isFloor) {
+      return selection.floorSizeM > 0
+          ? selection.floorSizeM
+          : RoomFinishCatalog.defaultFloorSizeM;
+    }
+    return RoomFinishCatalog.wallHeightM;
   }
 
   static String _hexColor(int argb) => argb.toRadixString(16).padLeft(8, '0');
@@ -925,6 +1086,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         pending.label,
         failureMessage: 'Could not load the ${pending.kindWord} finish.',
         requiredPlacement: requiredPlacement,
+        footprintOf: (t) => FinishFootprint.fromTransform(
+          pending.kindWord == 'floor' ? FinishKind.floor : FinishKind.wall,
+          t,
+          widthM: pending.footprintWidthM,
+          heightM: pending.footprintHeightM,
+        ),
       );
       if (placed == null) return;
       if (!mounted) return;
@@ -946,10 +1113,40 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     setState(() {
       _selectedNodeName = nodeNames.first;
       _sessionWasLive = true;
+      _rotateSliderValue = 0;
     });
   }
 
   static const double _rotateStepRad = 15.0 * math.pi / 180.0;
+
+  // Slider thumb position = total yaw applied to the selected item since it
+  // was selected (0 = the face-the-phone orientation it was placed with).
+  double _rotateSliderValue = 0;
+
+  static double _wrapRad(double v) {
+    const twoPi = 2 * math.pi;
+    var x = (v + math.pi) % twoPi;
+    if (x < 0) x += twoPi;
+    return x - math.pi;
+  }
+
+  // Gesture rotations and drags happen natively — resync the finish
+  // footprint from the node's world transform so the no-stacking check
+  // stays honest after the user turns or moves a tile.
+  void _syncFootprintFromTransform(String name, Matrix4 transform) {
+    for (final p in _placed) {
+      if (p.node.name != name && p.anchor.name != name) continue;
+      final fp = p.footprint;
+      if (fp == null) return;
+      p.footprint = FinishFootprint.fromTransform(
+        fp.kind,
+        transform,
+        widthM: fp.widthM,
+        heightM: fp.heightM,
+      );
+      return;
+    }
+  }
 
   Future<void> _rotateSelected(double deltaYawRad) async {
     final selected = _selectedNodeName;
@@ -962,9 +1159,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       }
     }
     if (entry == null) return;
+    _rotateSliderValue = _wrapRad(_rotateSliderValue + deltaYawRad);
     try {
       await _objects?.rotateNodeY(entry.node.name, deltaYawRad);
     } catch (_) {
+    }
+    final fp = entry.footprint;
+    if (fp != null) {
+      entry.footprint = fp.withYaw(fp.yaw + deltaYawRad);
     }
   }
 
@@ -1310,6 +1512,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           onARViewCreated: _onArViewCreated,
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
+
+        if (_overlayViewProjection != null && _overlayQuads.isNotEmpty)
+          Positioned.fill(
+            child: PlaneOverlay(
+              viewProjection: _overlayViewProjection!,
+              quads: _overlayQuads,
+            ),
+          ),
 
         if (_sessionStartedAt != null &&
             _arError == null &&
@@ -1903,15 +2113,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             tooltip: 'Rotate left — tap for 15°, hold to turn slowly',
             dirSign: 1.0,
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              'Turn',
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Colors.white70,
-              ),
+          SizedBox(
+            width: 148,
+            child: Slider(
+              value: _rotateSliderValue.clamp(-math.pi, math.pi),
+              min: -math.pi,
+              max: math.pi,
+              onChanged: (v) {
+                _rotateSelected(v - _rotateSliderValue);
+                setState(() {});
+              },
+              activeColor: AppColors.accent,
+              inactiveColor: Colors.white24,
+              thumbColor: Colors.white,
             ),
           ),
           _buildRotateButton(
@@ -1936,7 +2150,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         message: tooltip,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => _rotateSelected(dirSign * _rotateStepRad),
+          onTap: () {
+            _rotateSelected(dirSign * _rotateStepRad);
+            setState(() {});
+          },
           onLongPressStart: (_) => _beginRotateHold(dirSign),
           onLongPressEnd: (_) => _stopRotateHold(),
           onLongPressCancel: _stopRotateHold,

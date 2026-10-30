@@ -52,7 +52,7 @@ void main() {
         elapsed: Duration.zero,
       );
       expect(s.step, ScanCoachStep.sweepFloor);
-      expect(s.progress, closeTo(0.5, 0.01));
+      expect(s.progress, closeTo(0.35, 0.01));
     });
 
     test('wider floor asks to map more', () {
@@ -66,7 +66,7 @@ void main() {
 
     test('both axes at the placement gate → ready', () {
       final s = ScanCoach.evaluate(
-        planes: [_floor(x: 0.9, z: 0.7)],
+        planes: [_floor(x: 1.1, z: 1.0)],
         elapsed: Duration.zero,
       );
       expect(s.step, ScanCoachStep.ready);
@@ -79,7 +79,7 @@ void main() {
       final s = ScanCoach.evaluate(
         planes: [
           _floor(x: 0.2, z: 0.2),
-          _floor(x: 0.8, z: 0.75),
+          _floor(x: 1.2, z: 1.1),
         ],
         elapsed: Duration.zero,
       );
@@ -98,13 +98,89 @@ void main() {
 
     test('tracking issue overrides the step tip', () {
       final s = ScanCoach.evaluate(
-        planes: [_floor(x: 0.9, z: 0.7)],
+        planes: [_floor(x: 1.1, z: 1.0)],
         elapsed: Duration.zero,
         trackingIssue: 'INSUFFICIENT_LIGHT',
       );
       expect(s.ready, isTrue);
       expect(s.hasIssue, isTrue);
       expect(s.tip, contains('Too dark'));
+    });
+
+    test('a table top does not fake floor coverage', () {
+      final s = ScanCoach.evaluate(
+        planes: [
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: 0.75,
+            centerZ: 0,
+            extentX: 1.4,
+            extentZ: 1.1,
+          ),
+        ],
+        elapsed: Duration.zero,
+        floorY: 0,
+      );
+      expect(s.ready, isFalse);
+      expect(s.tip, 'That looks like furniture — scan the open floor');
+    });
+
+    test('floor-level coverage still counts beside furniture', () {
+      final s = ScanCoach.evaluate(
+        planes: [
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: -0.5,
+            centerZ: 0,
+            extentX: 1.2,
+            extentZ: 1.1,
+          ),
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: 0.75,
+            centerZ: 0,
+            extentX: 1.4,
+            extentZ: 1.1,
+          ),
+        ],
+        elapsed: Duration.zero,
+        floorY: -0.5,
+      );
+      expect(s.ready, isTrue);
+    });
+
+    test('merged floor coverage from the memory can lift a sweep to ready',
+        () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 0.6, z: 0.7)],
+        elapsed: Duration.zero,
+        floorY: -0.5,
+        floorCoverageM: 1.4,
+      );
+      expect(s.ready, isTrue);
+      expect(s.progress, 1.0);
+    });
+
+    test('zero merged coverage never fakes readiness', () {
+      final s = ScanCoach.evaluate(
+        planes: [
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: 0.75,
+            centerZ: 0,
+            extentX: 1.4,
+            extentZ: 1.1,
+          ),
+        ],
+        elapsed: Duration.zero,
+        floorY: 0,
+        floorCoverageM: 0.0,
+      );
+      expect(s.ready, isFalse);
     });
 
     test('NONE or unknown tracking reasons are ignored', () {

@@ -31,22 +31,40 @@ class ScanCoach {
 
   static const double sweepDoneCoverageM = 0.45;
 
+  // Horizontal planes this far above the known floor are furniture tops —
+  // they must not count as floor coverage.
+  static const double floorLevelToleranceM = 0.3;
+
   static const Duration stillHintAfter = Duration(seconds: 4);
 
   static ScanCoachState evaluate({
     required List<ARPlaneInfo> planes,
     required Duration elapsed,
     String? trackingIssue,
+    double? floorY,
+    double? floorCoverageM,
   }) {
-    // Coverage = the smaller extent of the best floor plane — the same gate
-    // placement uses (both axes must fit the item footprint).
+    // Coverage = the smaller extent of the best FLOOR-level plane — the same
+    // gate placement uses (both axes must fit the item footprint). A table
+    // top scanned before the floor must not fake "Ready". [floorCoverageM]
+    // is the plane memory's merged floor region, which several small ARCore
+    // patches accumulate into — it can only raise coverage, never lower it.
     var coverage = 0.0;
     var sawPlane = false;
+    var sawElevated = false;
     for (final p in planes) {
       if (!p.isHorizontal) continue;
+      if (floorY != null && (p.centerY - floorY).abs() > floorLevelToleranceM) {
+        sawElevated = true;
+        continue;
+      }
       sawPlane = true;
       final c = math.min(p.extentX, p.extentZ);
       if (c > coverage) coverage = c;
+    }
+    if (floorCoverageM != null && floorCoverageM > coverage) {
+      coverage = floorCoverageM;
+      sawPlane = true;
     }
     final ready = coverage >= ArPlacementPolicy.minFloorExtentM;
     final progress =
@@ -66,7 +84,9 @@ class ScanCoach {
       step: step,
       ready: ready,
       progress: progress,
-      tip: issue ?? _baseTip(step, elapsed: elapsed, sawPlane: sawPlane),
+      tip: issue ??
+          _baseTip(step,
+              elapsed: elapsed, sawPlane: sawPlane, sawElevated: sawElevated),
       hasIssue: issue != null,
     );
   }
@@ -75,9 +95,13 @@ class ScanCoach {
     ScanCoachStep step, {
     required Duration elapsed,
     required bool sawPlane,
+    bool sawElevated = false,
   }) {
     switch (step) {
       case ScanCoachStep.findFloor:
+        if (!sawPlane && sawElevated) {
+          return 'That looks like furniture — scan the open floor';
+        }
         if (!sawPlane && elapsed >= stillHintAfter) {
           return 'Check the lighting and hold still';
         }

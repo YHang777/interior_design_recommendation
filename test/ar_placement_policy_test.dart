@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
+import 'package:ar_flutter_plugin_2/models/ar_plane_fit.dart';
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/placement_policy.dart';
@@ -146,7 +147,7 @@ void main() {
     test('first-tap-on-table with a KNOWN live floor → REJECTED (0.5 m up)',
         () {
       final table = horizontalPlane(
-          x: 0, y: 0.5, z: 1.5, extentX: 1.2, extentZ: 0.8, distance: 1.5);
+          x: 0, y: 0.5, z: 1.5, extentX: 1.4, extentZ: 1.1, distance: 1.5);
       final chosen = ArPlacementPolicy.chooseFloorHit([table], liveFloorY: 0.0);
       expect(chosen, isNull,
           reason: 'a table 0.5 m above the live floor is not the floor');
@@ -154,7 +155,7 @@ void main() {
 
     test('floor + table in one hit list → the FLOOR wins', () {
       final table = horizontalPlane(
-          x: 0, y: 0.75, z: 1.5, extentX: 1.2, extentZ: 0.8, distance: 1.5);
+          x: 0, y: 0.75, z: 1.5, extentX: 1.4, extentZ: 1.1, distance: 1.5);
       final floor = horizontalPlane(
           x: 0, y: 0.02, z: 2.2, extentX: 4.0, extentZ: 4.0, distance: 2.4);
       final chosen =
@@ -165,7 +166,7 @@ void main() {
 
     test('prefers the lowest world-Y among valid candidates', () {
       final raised = horizontalPlane(
-          x: 0, y: 0.15, z: 1.5, extentX: 1.6, extentZ: 0.9, distance: 1.5);
+          x: 0, y: 0.15, z: 1.5, extentX: 1.6, extentZ: 1.1, distance: 1.5);
       final floor = horizontalPlane(
           x: 0, y: 0.0, z: 2.0, extentX: 3.0, extentZ: 3.0, distance: 2.2);
       final chosen =
@@ -377,6 +378,184 @@ void main() {
       expect(yaw, closeTo(-math.pi / 2, 1e-9));
 
       expect(ArPlacementPolicy.wallAnchorYaw(Vector3(0, 0, 1)), closeTo(0, 1e-9));
+    });
+  });
+
+  group('ArPlacementPolicy furniture rejection (chairs / tables)', () {
+    test('a chair seat is never a floor, even with a floor-sized footprint',
+        () {
+      final seat = horizontalPlane(
+          x: 0, y: 0.45, z: 1.5, extentX: 1.2, extentZ: 1.1, distance: 1.6);
+      expect(ArPlacementPolicy.chooseFloorHit([seat], liveFloorY: 0.0), isNull);
+    });
+
+    test('the height gate is 0.15 m: 0.16 up is refused, 0.10 is fine', () {
+      final top = horizontalPlane(
+          x: 0, y: 0.16, z: 1.5, extentX: 1.2, extentZ: 1.1, distance: 1.6);
+      expect(ArPlacementPolicy.chooseFloorHit([top], liveFloorY: 0.0), isNull);
+      final low = horizontalPlane(
+          x: 0, y: 0.10, z: 1.5, extentX: 1.2, extentZ: 1.1, distance: 1.6);
+      expect(
+          ArPlacementPolicy.chooseFloorHit([low], liveFloorY: 0.0), same(low));
+    });
+
+    test('a chair back is never a wall', () {
+      final back =
+          verticalPlane(x: 0, z: 1.5, extentX: 0.9, extentZ: 0.5);
+      expect(ArPlacementPolicy.chooseWallHit([back]), isNull);
+    });
+
+    test('a table skirt or cabinet side is never a wall', () {
+      final skirt =
+          verticalPlane(x: 0, z: 1.5, extentX: 1.8, extentZ: 0.75);
+      final cabinet =
+          verticalPlane(x: 0, z: 1.5, extentX: 1.8, extentZ: 0.6);
+      expect(ArPlacementPolicy.chooseWallHit([skirt, cabinet]), isNull);
+    });
+
+    test('a tall wardrobe side still qualifies as a wall-like surface', () {
+      final wardrobe =
+          verticalPlane(x: 0, z: 1.5, extentX: 2.0, extentZ: 1.0);
+      expect(ArPlacementPolicy.chooseWallHit([wardrobe]), same(wardrobe));
+    });
+
+    test('chooseAnyHit with a known floor refuses a table top', () {
+      final top = horizontalPlane(
+          x: 0, y: 0.75, z: 1.5, extentX: 1.5, extentZ: 1.1, distance: 1.6);
+      expect(ArPlacementPolicy.chooseAnyHit([top], liveFloorY: 0.0), isNull);
+    });
+  });
+
+  group('ArPlacementPolicy.faceCameraYaw / floorAnchorTransform', () {
+    test('yaw turns model +Z toward the camera', () {
+      expect(
+        ArPlacementPolicy.faceCameraYaw(Vector3.zero(), Vector3(0, 1.5, 3)),
+        closeTo(0, 1e-9),
+      );
+      expect(
+        ArPlacementPolicy.faceCameraYaw(Vector3.zero(), Vector3(3, 1.5, 0)),
+        closeTo(math.pi / 2, 1e-9),
+      );
+      expect(
+        ArPlacementPolicy.faceCameraYaw(Vector3.zero(), Vector3(0, 1.5, -3)),
+        closeTo(math.pi, 1e-9),
+      );
+    });
+
+    test('floor anchor stands the model up and faces it at the phone', () {
+      final hit =
+          horizontalPlane(x: 1, y: 0, z: 2, extentX: 3, extentZ: 3);
+      final m = ArPlacementPolicy.floorAnchorTransform(hit,
+          cameraPosition: Vector3(1, 1.5, 5));
+      final t = m.getTranslation();
+      expect(t.x, closeTo(1, 1e-9));
+      expect(t.y, closeTo(0, 1e-9));
+      expect(t.z, closeTo(2, 1e-9));
+      final modelZ = m.getColumn(2);
+      expect(modelZ.z, greaterThan(0.99),
+          reason: 'model +Z points from the item toward the camera');
+    });
+  });
+
+  group('ArPlacementPolicy memory vouch (fragment relief)', () {
+    test('a small floor fragment is refused without a vouch and accepted '
+        'with one', () {
+      final fragment = horizontalPlane(
+          x: 0, y: 0, z: 1.5, extentX: 0.8, extentZ: 0.7, distance: 1.5);
+      expect(ArPlacementPolicy.chooseFloorHit([fragment], liveFloorY: 0.0),
+          isNull);
+      final chosen = ArPlacementPolicy.chooseFloorHit([fragment],
+          liveFloorY: 0.0, vouchedFloor: (_) => true);
+      expect(chosen, same(fragment));
+    });
+
+    test('the vouch never bypasses the height gate', () {
+      final table = horizontalPlane(
+          x: 0, y: 0.75, z: 1.5, extentX: 1.5, extentZ: 1.1, distance: 1.5);
+      expect(
+        ArPlacementPolicy.chooseFloorHit([table],
+            liveFloorY: 0.0, vouchedFloor: (_) => true),
+        isNull,
+      );
+    });
+
+    test('the vouch never bypasses the distance window', () {
+      final far = horizontalPlane(
+          x: 0, y: 0, z: 5, extentX: 0.8, extentZ: 0.8, distance: 5.0);
+      expect(
+        ArPlacementPolicy.chooseFloorHit([far],
+            liveFloorY: 0.0, vouchedFloor: (_) => true),
+        isNull,
+      );
+    });
+
+    test('a wall fragment is refused without a vouch and accepted with one',
+        () {
+      final sliver = verticalPlane(x: 0, z: 2.0, extentX: 1.0, extentZ: 0.6);
+      expect(ArPlacementPolicy.chooseWallHit([sliver]), isNull);
+      expect(
+        ArPlacementPolicy.chooseWallHit([sliver], vouchedWall: (_) => true),
+        same(sliver),
+      );
+    });
+
+    test('chooseAnyHit honors the matching vouch only', () {
+      final fragment = horizontalPlane(
+          x: 0, y: 0, z: 1.5, extentX: 0.8, extentZ: 0.7, distance: 1.5);
+      expect(
+          ArPlacementPolicy.chooseAnyHit([fragment], liveFloorY: 0.0), isNull);
+      expect(
+        ArPlacementPolicy.chooseAnyHit([fragment],
+            liveFloorY: 0.0, vouchedFloor: (_) => true),
+        same(fragment),
+      );
+    });
+  });
+
+  group('ArPlacementPolicy.refinedAnchorTransform (tap projection)', () {
+    ArPlaneFit fit({Vector3? center, Vector3? normal}) => ArPlaneFit(
+          center: center ?? Vector3(0, 0, 0),
+          normal: normal ?? Vector3(0, 1, 0),
+          inlierCount: 40,
+          pointCount: 50,
+          rmsError: 0.006,
+          confidence: 0.9,
+        );
+
+    test('floor fit anchors at the TAP, not the inlier centroid', () {
+      final m = ArPlacementPolicy.refinedAnchorTransform(
+        fit(center: Vector3(0.4, 0.01, -0.2)),
+        isFloor: true,
+        anchorAt: Vector3(2, 0.01, 3),
+        cameraPosition: Vector3(2, 1.5, 6),
+      );
+      final t = m.getTranslation();
+      expect(t.x, closeTo(2, 1e-9));
+      expect(t.y, closeTo(0.01, 1e-9));
+      expect(t.z, closeTo(3, 1e-9));
+    });
+
+    test('tilted fit: the tap is projected onto the fitted plane', () {
+      final m = ArPlacementPolicy.refinedAnchorTransform(
+        fit(normal: Vector3(0.6, 0.8, 0)),
+        isFloor: true,
+        anchorAt: Vector3(2, 99, 0),
+      );
+      final t = m.getTranslation();
+      // Plane 0.6x + 0.8y = 0 → y = -0.75x = -1.5 at x = 2.
+      expect(t.y, closeTo(-1.5, 1e-9));
+    });
+
+    test('floor fit faces the camera', () {
+      final m = ArPlacementPolicy.refinedAnchorTransform(
+        fit(),
+        isFloor: true,
+        anchorAt: Vector3(0, 0, 0),
+        cameraPosition: Vector3(3, 1.5, 0),
+      );
+      final modelZ = m.getColumn(2);
+      expect(modelZ.x, closeTo(1, 1e-6));
+      expect(modelZ.z, closeTo(0, 1e-6));
     });
   });
 }

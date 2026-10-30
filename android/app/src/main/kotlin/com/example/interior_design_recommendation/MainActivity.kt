@@ -1,11 +1,13 @@
 package com.example.interior_design_recommendation
 
 import android.content.pm.PackageManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+// flutter_stripe's PaymentSheet needs a FragmentActivity host; a plain
+// FlutterActivity makes presentPaymentSheet throw before the sheet renders.
+class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 

@@ -37,6 +37,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    // Wake the payment host now so Pay now doesn't absorb a cold start.
+    MarketplaceApi().warmUp();
     final user = ref.read(currentUserProvider);
     _nameCtrl = TextEditingController(text: user?.name ?? '');
     _phoneCtrl = TextEditingController(text: user?.phone ?? '');
@@ -155,6 +157,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       createdOrderId = intent.orderId;
 
       phase = 'sheet';
+      if (intent.clientSecret.isEmpty || intent.publishableKey.isEmpty) {
+        throw PaymentApiException(
+            'Payments are not set up yet. Please try again later.');
+      }
       Stripe.publishableKey = intent.publishableKey;
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(

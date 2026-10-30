@@ -21,6 +21,8 @@ class ReticleAdvisor {
     required List<ARHitTestResult> hits,
     required PlacementType intent,
     double? liveFloorY,
+    bool Function(ARHitTestResult hit)? vouchedFloor,
+    bool Function(ARHitTestResult hit)? vouchedWall,
   }) {
     ARHitTestResult? chosen;
     switch (intent) {
@@ -28,13 +30,17 @@ class ReticleAdvisor {
         if (liveFloorY == null) {
           return const ReticleState(ReticleStatus.noFloorYet);
         }
-        chosen = ArPlacementPolicy.chooseFloorHit(hits, liveFloorY: liveFloorY);
+        chosen = ArPlacementPolicy.chooseFloorHit(hits,
+            liveFloorY: liveFloorY, vouchedFloor: vouchedFloor);
         break;
       case PlacementType.wall:
-        chosen = ArPlacementPolicy.chooseWallHit(hits);
+        chosen = ArPlacementPolicy.chooseWallHit(hits, vouchedWall: vouchedWall);
         break;
       case PlacementType.any:
-        chosen = ArPlacementPolicy.chooseAnyHit(hits);
+        chosen = ArPlacementPolicy.chooseAnyHit(hits,
+            liveFloorY: liveFloorY,
+            vouchedFloor: vouchedFloor,
+            vouchedWall: vouchedWall);
         break;
     }
     if (chosen != null) {

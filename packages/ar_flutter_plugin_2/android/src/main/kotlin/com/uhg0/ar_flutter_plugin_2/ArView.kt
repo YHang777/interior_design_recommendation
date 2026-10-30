@@ -23,6 +23,7 @@ import com.google.ar.core.Pose
 import com.google.ar.core.TrackingState
 import com.uhg0.ar_flutter_plugin_2.Serialization.deserializePoseParts
 import com.uhg0.ar_flutter_plugin_2.Serialization.serializeHitResult
+import com.uhg0.ar_flutter_plugin_2.Serialization.serializePose
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -59,6 +60,8 @@ import io.github.sceneview.math.Scale
 import io.github.sceneview.math.colorOf
 import io.github.sceneview.loaders.MaterialLoader
 import com.google.ar.core.exceptions.SessionPausedException
+import kotlin.math.abs
+import kotlin.math.atan2
 
 class ArView(
     context: Context,
@@ -113,6 +116,15 @@ class ArView(
     // and only drop it once it stops tracking. Read/merged on the frame thread.
     private val livePlanes = mutableMapOf<Plane, Map<String, Any>>()
 
+    // Stable integer id per ARCore Plane, so the app's PlaneMemory can keep
+    // per-plane history (smoothing + reclassification) across telemetry
+    // frames. ARCore exposes no public trackable id, so we mint our own.
+    private val planeIds = java.util.IdentityHashMap<Plane, Int>()
+    private var nextPlaneId = 1
+
+    private fun planeIdFor(plane: Plane): Int =
+        planeIds.getOrPut(plane) { nextPlaneId++ }
+
     // Throttle for the onPlanesUpdate telemetry: stream the live plane
     // snapshot to Flutter every ~3rd frame (not every frame) to keep the
     // channel traffic cheap. Counter is only touched on the frame thread.
@@ -132,6 +144,7 @@ class ArView(
                 "dispose" -> dispose()
                 "getAnchorPose" -> handleGetAnchorPose(call, result)
                 "getCameraPose" -> handleGetCameraPose(result)
+                "getCameraMatrices" -> handleGetCameraMatrices(result)
                 "snapshot" -> handleSnapshot(result)
                 "disableCamera" -> handleDisableCamera(result)
                 "enableCamera" -> handleEnableCamera(result)
@@ -612,20 +625,14 @@ class ArView(
                                 // refined — keeps counting as "seen" until it stops
                                 // tracking. Payload is center + type + extent only (cheap).
                                 frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
-                                    if (plane.trackingState == TrackingState.TRACKING) {
-                                        val c = plane.centerPose.translation
-                                        livePlanes[plane] = mapOf(
-                                            "planeType" to when (plane.type) {
-                                                Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
-                                                Plane.Type.VERTICAL -> 2
-                                                else -> 0
-                                            },
-                                            "centerX" to c[0].toDouble(),
-                                            "centerY" to c[1].toDouble(),
-                                            "centerZ" to c[2].toDouble(),
-                                            "extentX" to plane.extentX.toDouble(),
-                                            "extentZ" to plane.extentZ.toDouble(),
-                                        )
+                                    // Subsumed planes are absorbed into a larger
+                                    // one — drop them so the app never counts a
+                                    // table top twice (once alone, once inside
+                                    // the floor polygon it merged into).
+                                    if (plane.trackingState == TrackingState.TRACKING &&
+                                        plane.subsumedBy == null
+                                    ) {
+                                        livePlanes[plane] = planeTelemetry(plane)
                                     } else {
                                         livePlanes.remove(plane)
                                     }
@@ -989,31 +996,86 @@ class ArView(
             // Read the current camera pose from the frame the render loop
             // already updated. Calling session.update() here (as this used to)
             // injects an unsolicited extra update and desyncs tracking.
-            val frame = latestFrame
-            val cameraPose = frame?.camera?.pose
+            val cameraPose = latestFrame?.camera?.pose
             if (cameraPose != null) {
-                val poseData =
-                    mapOf(
-                        "position" to
-                            mapOf(
-                                "x" to cameraPose.tx(),
-                                "y" to cameraPose.ty(),
-                                "z" to cameraPose.tz(),
-                            ),
-                        "rotation" to
-                            mapOf(
-                                "x" to cameraPose.rotationQuaternion[0],
-                                "y" to cameraPose.rotationQuaternion[1],
-                                "z" to cameraPose.rotationQuaternion[2],
-                                "w" to cameraPose.rotationQuaternion[3],
-                            ),
-                    )
-                result.success(poseData)
+                // Column-major 4x4 — the exact format the Dart side
+                // (MatrixConverter.fromJson) expects. This handler used to
+                // return a {position, rotation} map, which the cast rejected,
+                // so getCameraPose() silently returned null every call.
+                result.success(serializePose(cameraPose).toList())
             } else {
                 result.error("NO_CAMERA_POSE", "Camera pose is not available", null)
             }
         } catch (e: Exception) {
             result.error("CAMERA_POSE_ERROR", e.message, null)
+        }
+    }
+
+    // Cheap center + type + extent + yaw snapshot for the app's plane memory
+    // and overlay. Extents are remapped so extentX always spans the yaw
+    // direction: for a vertical plane that is the horizontal span, with
+    // extentZ as the vertical span.
+    private fun planeTelemetry(plane: Plane): Map<String, Any> {
+        val c = plane.centerPose.translation
+        val m = FloatArray(16)
+        plane.centerPose.toMatrix(m, 0)
+        val type = when (plane.type) {
+            Plane.Type.HORIZONTAL_UPWARD_FACING -> 1
+            Plane.Type.VERTICAL -> 2
+            else -> 0
+        }
+        var extentX = plane.extentX.toDouble()
+        var extentZ = plane.extentZ.toDouble()
+        val yaw = if (type == 2) {
+            // Vertical plane: local +Y is the outward normal; yaw is the
+            // normal's world yaw, so the wall spans width along
+            // (cos yaw, 0, -sin yaw) and height along world up.
+            val xIsHeight = abs(m[1]) > abs(m[9])
+            if (xIsHeight) {
+                extentX = plane.extentZ.toDouble()
+                extentZ = plane.extentX.toDouble()
+            }
+            atan2(m[4].toDouble(), m[6].toDouble())
+        } else {
+            // Horizontal plane: yaw of the local +Z axis — +Z maps to
+            // (sin yaw, 0, cos yaw), matching the app's footprint convention.
+            atan2(m[8].toDouble(), m[10].toDouble())
+        }
+        return mapOf(
+            "id" to planeIdFor(plane),
+            "planeType" to type,
+            "centerX" to c[0].toDouble(),
+            "centerY" to c[1].toDouble(),
+            "centerZ" to c[2].toDouble(),
+            "extentX" to extentX,
+            "extentZ" to extentZ,
+            "yaw" to yaw,
+        )
+    }
+
+    // The render-ready camera pair: getViewMatrix() incorporates the display
+    // orientation and getProjectionMatrix() the display rotation (both
+    // column-major), so projection * view maps world → clip exactly like the
+    // camera feed the AR content is drawn over.
+    private fun handleGetCameraMatrices(result: MethodChannel.Result) {
+        try {
+            val camera = latestFrame?.camera
+            if (camera == null) {
+                result.error("NO_CAMERA", "Camera is not available", null)
+                return
+            }
+            val projection = FloatArray(16)
+            camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
+            val view = FloatArray(16)
+            camera.getViewMatrix(view, 0)
+            result.success(
+                mapOf(
+                    "projection" to projection.map { it.toDouble() },
+                    "view" to view.map { it.toDouble() },
+                )
+            )
+        } catch (e: Exception) {
+            result.error("CAMERA_MATRICES_ERROR", e.message, null)
         }
     }
 
@@ -1156,24 +1218,10 @@ class ArView(
 
             val anchor = sceneView.session?.allAnchors?.find { it.cloudAnchorId == anchorId }
             if (anchor != null) {
-                val anchorPose = anchor.pose
-                val poseData =
-                    mapOf(
-                        "position" to
-                            mapOf(
-                                "x" to anchorPose.tx(),
-                                "y" to anchorPose.ty(),
-                                "z" to anchorPose.tz(),
-                            ),
-                        "rotation" to
-                            mapOf(
-                                "x" to anchorPose.rotationQuaternion[0],
-                                "y" to anchorPose.rotationQuaternion[1],
-                                "z" to anchorPose.rotationQuaternion[2],
-                                "w" to anchorPose.rotationQuaternion[3],
-                            ),
-                    )
-                result.success(poseData)
+                // Column-major 4x4, matching MatrixConverter.fromJson on the
+                // Dart side (this used to send a {position, rotation} map that
+                // the cast rejected, so getPose() always returned null).
+                result.success(serializePose(anchor.pose).toList())
             } else {
                 result.error("ANCHOR_NOT_FOUND", "Anchor with ID $anchorId not found", null)
             }

@@ -40,8 +40,7 @@ class _BuyerOrderDetailScreenState
     final confirmed = await showConfirmDialog(
       context,
       title: 'Cancel this order?',
-      message: 'The order will be cancelled and the stock for every item '
-          'will be restored. This cannot be undone.',
+      message: 'The order will be cancelled. This cannot be undone.',
       confirmLabel: 'Cancel order',
       destructive: true,
     );
@@ -51,8 +50,7 @@ class _BuyerOrderDetailScreenState
     try {
       await MarketplaceApi().cancelOrder(order.id);
       if (mounted) {
-        showAppSnackbar(context, 'Order cancelled — stock restored',
-            color: AppColors.error);
+        showAppSnackbar(context, 'Order cancelled', color: AppColors.error);
       }
     } catch (e) {
       if (mounted) {
@@ -663,8 +661,11 @@ class _CancelledBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Payment & stock restored'
-                  '${cancelDate == null ? '' : ' on ${Formatters.shortDateTime(cancelDate)}'}',
+                  '${switch (order.paymentStatus) {
+                    PaymentStatus.refunded => 'Payment refunded',
+                    PaymentStatus.paid => 'Refund on its way',
+                    _ => 'Nothing was charged',
+                  }}${cancelDate == null ? '' : ' on ${Formatters.shortDateTime(cancelDate)}'}',
                   style: const TextStyle(
                     fontSize: 11.5,
                     color: AppColors.textSecondary,
