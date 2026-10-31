@@ -135,14 +135,19 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Camera not available'), findsOneWidget);
 
+    // Let the camera snackbar expire — it floats over the bottom bar
+    // where the Add furniture button lives.
+    await tester.pump(const Duration(seconds: 5));
+    await _settle(tester);
+
     // Open the furniture picker and place an item on the plan. The sheet
     // title repeats the button label, so the same text is on screen twice.
     await tester.tap(find.text('Add furniture'));
     await _settle(tester);
     expect(find.text('Add furniture'), findsAtLeastNWidgets(1));
-    final sofaTile = find.text('Sofa').last;
-    if (sofaTile.evaluate().isNotEmpty) {
-      await tester.tap(sofaTile);
+    final sofaOptions = find.text('Sofa');
+    if (sofaOptions.evaluate().isNotEmpty) {
+      await tester.tap(sofaOptions.last);
       await _settle(tester);
     }
     expect(tester.takeException(), isNull);

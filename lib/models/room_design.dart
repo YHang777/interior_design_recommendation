@@ -1,3 +1,14 @@
+import 'dart:ui' show Offset;
+
+List<Offset> _parseWalls(dynamic raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final e in raw)
+      if (e is List && e.length >= 2 && e[0] is num && e[1] is num)
+        Offset((e[0] as num).toDouble(), (e[1] as num).toDouble()),
+  ];
+}
+
 class FurniturePlacement {
   final String id;
   final String name;
@@ -85,6 +96,7 @@ class RoomDesign {
   final double widthCm;
   final double heightCm;
   final List<FurniturePlacement> furniture;
+  final List<Offset> walls;
   final List<String> detectedItems;
   final String? imagePath;
   final DateTime createdAt;
@@ -98,6 +110,7 @@ class RoomDesign {
     this.widthCm = 400,
     this.heightCm = 500,
     this.furniture = const [],
+    this.walls = const [],
     this.detectedItems = const [],
     this.imagePath,
     required this.createdAt,
@@ -112,6 +125,7 @@ class RoomDesign {
     double? widthCm,
     double? heightCm,
     List<FurniturePlacement>? furniture,
+    List<Offset>? walls,
     List<String>? detectedItems,
     String? imagePath,
     bool clearImagePath = false,
@@ -126,6 +140,7 @@ class RoomDesign {
       widthCm: widthCm ?? this.widthCm,
       heightCm: heightCm ?? this.heightCm,
       furniture: furniture ?? this.furniture,
+      walls: walls ?? this.walls,
       detectedItems: detectedItems ?? this.detectedItems,
       imagePath: clearImagePath ? null : (imagePath ?? this.imagePath),
       createdAt: createdAt ?? this.createdAt,
@@ -141,6 +156,7 @@ class RoomDesign {
         'widthCm': widthCm,
         'heightCm': heightCm,
         'furniture': furniture.map((f) => f.toJson()).toList(),
+        'walls': [for (final w in walls) [w.dx, w.dy]],
         'detectedItems': detectedItems,
         if (imagePath != null) 'imagePath': imagePath,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -149,6 +165,18 @@ class RoomDesign {
       };
 
   factory RoomDesign.fromJson(Map<String, dynamic> json) {
+    // The Supabase row stores furniture + walls together in the furniture
+    // JSONB column ({items, walls}) to avoid a schema migration; the flat
+    // model shape (and legacy rows that are plain arrays) must both load.
+    var furnitureRaw = json['furniture'];
+    var walls = const <Offset>[];
+    if (furnitureRaw is Map) {
+      walls = _parseWalls(furnitureRaw['walls']);
+      furnitureRaw = furnitureRaw['items'];
+    }
+    if (walls.isEmpty && json['walls'] is List) {
+      walls = _parseWalls(json['walls']);
+    }
     return RoomDesign(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Untitled Design',
@@ -159,12 +187,13 @@ class RoomDesign {
       heightCm: (json['heightCm'] is num)
           ? (json['heightCm'] as num).toDouble()
           : 500,
-      furniture: (json['furniture'] is List)
-          ? (json['furniture'] as List<dynamic>)
+      furniture: (furnitureRaw is List)
+          ? furnitureRaw
               .map((e) =>
                   FurniturePlacement.fromJson(e as Map<String, dynamic>))
               .toList()
           : [],
+      walls: walls,
       detectedItems: (json['detectedItems'] is List)
           ? (json['detectedItems'] as List<dynamic>)
               .map((e) => e.toString())

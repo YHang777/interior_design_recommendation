@@ -52,12 +52,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Name cannot be empty'),
-          backgroundColor: AppColors.error,
-        ),
-      );
+      showAppSnackbar(context, 'Name cannot be empty', isError: true);
       return;
     }
 
@@ -72,21 +67,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           );
       if (mounted) {
         setState(() => _editing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profile updated'),
-            backgroundColor: AppColors.success,
-          ),
-        );
+        showAppSnackbar(context, 'Profile updated');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userMessage(e,
-                fallback: 'Could not save your profile. Please try again.')),
-            backgroundColor: AppColors.error,
-          ),
+        showAppSnackbar(
+          context,
+          userMessage(e,
+              fallback: 'Could not save your profile. Please try again.'),
+          isError: true,
         );
       }
     } finally {
@@ -326,12 +315,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   _LinkRow(Icons.lock_outline, 'Change Password', () {
                     final email = user?.email ?? '';
                     if (email.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No email on file'),
-                          backgroundColor: AppColors.error,
-                        ),
-                      );
+                      showAppSnackbar(context, 'No email on file',
+                          isError: true);
                       return;
                     }
                     showDialog(
@@ -358,30 +343,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         .read(authStateProvider.notifier)
                                         .sendPasswordResetEmail(email);
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(
+                                      showAppSnackbar(
                                         context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Password reset email sent to $email',
-                                          ),
-                                          backgroundColor: AppColors.success,
-                                        ),
+                                        'Password reset email sent to $email',
                                       );
                                     }
                                   } catch (e) {
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(
+                                      showAppSnackbar(
                                         context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            userMessage(e,
-                                                fallback:
-                                                    'Could not send the reset email. Please try again.'),
-                                          ),
-                                          backgroundColor: AppColors.error,
-                                        ),
+                                        userMessage(e,
+                                            fallback:
+                                                'Could not send the reset email. Please try again.'),
+                                        isError: true,
                                       );
                                     }
                                   }

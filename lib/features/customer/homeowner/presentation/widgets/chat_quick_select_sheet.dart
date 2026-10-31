@@ -94,20 +94,9 @@ class _ChatQuickSelectSheetState extends ConsumerState<ChatQuickSelectSheet> {
           maxHeight: MediaQuery.sizeOf(context).height * 0.72,
         ),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
           shrinkWrap: true,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
             Row(
               children: [
                 Text('Quick actions',
@@ -124,6 +113,7 @@ class _ChatQuickSelectSheetState extends ConsumerState<ChatQuickSelectSheet> {
                 ),
               ],
             ),
+            _previewCard(),
             _section('Design style'),
             _wrap([
               for (final option in widget.styles)
@@ -158,6 +148,64 @@ class _ChatQuickSelectSheetState extends ConsumerState<ChatQuickSelectSheet> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _previewCard() {
+    final preview = [_style, _room].whereType<String>().join(' ').trim();
+    final hasSelection = preview.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.chat_bubble_outline,
+              size: 16, color: AppColors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'MESSAGE BOX',
+                  style: GoogleFonts.poppins(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                    color: AppColors.textHint,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hasSelection ? preview : 'Nothing picked yet',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: hasSelection
+                        ? AppColors.textPrimary
+                        : AppColors.textHint,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Picks are pasted into the message box right away.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

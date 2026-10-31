@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../core/utils/validators.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/float_button.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
@@ -42,13 +43,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userMessage(e,
-                fallback: 'Could not send the reset link. Please try again.')),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
+        showAppSnackbar(
+          context,
+          userMessage(e,
+              fallback: 'Could not send the reset link. Please try again.'),
+          isError: true,
         );
       }
     }

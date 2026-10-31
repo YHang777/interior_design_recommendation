@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../core/utils/validators.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/float_button.dart';
 import '../../../../shared/widgets/page_heading.dart';
 import '../../data/models/app_user.dart';
@@ -89,12 +90,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
       next.whenOrNull(error: (e, _) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(userMessage(e,
-              fallback: 'Could not create the account. Please try again.')),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ));
+        showAppSnackbar(
+          context,
+          userMessage(e,
+              fallback: 'Could not create the account. Please try again.'),
+          isError: true,
+        );
       });
     });
 

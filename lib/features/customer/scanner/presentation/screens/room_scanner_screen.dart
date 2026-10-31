@@ -11,7 +11,9 @@ import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/room_design.dart';
+import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/catalog_picker_sheet.dart';
+import '../../../../../shared/widgets/float_button.dart';
 import '../../../ar/data/furniture_model_library.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -24,7 +26,7 @@ class RoomScannerScreen extends ConsumerStatefulWidget {
   ConsumerState<RoomScannerScreen> createState() => _RoomScannerScreenState();
 }
 
-enum _Stage { init, scanning, roomSelect, plan }
+enum _Stage { init, scanning, plan }
 
 class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   CameraController? _cam;
@@ -43,6 +45,22 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   double _roomH = 500;
   int _selectedIdx = -1;
   bool _isEditingDimensions = false;
+  final _widthCtrl = TextEditingController();
+  final _heightCtrl = TextEditingController();
+
+  @visibleForTesting
+  List<Offset> get debugWalls => List.of(_walls);
+
+  @visibleForTesting
+  List<FurniturePlacement> get debugFurniture => List.of(_furniture);
+
+  @visibleForTesting
+  int debugAutoPlace(List<String> labels) {
+    _found
+      ..clear()
+      ..addAll([for (final l in labels) _Found(label: l, confidence: 0.9)]);
+    return _autoPlaceFound();
+  }
 
   final List<Offset> _walls = [];
   final ValueNotifier<int> _wallsRev = ValueNotifier(0);
@@ -57,13 +75,50 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   final int _scanDurationSec = 15;
 
   static const _labels = {
-    'sofa', 'couch', 'chair', 'armchair', 'table', 'coffee table',
-    'dining table', 'desk', 'bed', 'bed frame', 'mattress', 'cabinet',
-    'wardrobe', 'bookshelf', 'shelf', 'lamp', 'light', 'chandelier',
+    'sofa', 'couch', 'loveseat', 'sectional', 'settee',
+    'chair', 'armchair', 'recliner', 'ottoman', 'stool', 'bench',
+    'table', 'coffee table', 'dining table', 'desk',
+    'bed', 'bed frame', 'mattress', 'bunk bed',
+    'cabinet', 'wardrobe', 'closet', 'dresser', 'nightstand',
+    'sideboard', 'cupboard', 'bookshelf', 'shelf', 'bookcase',
+    'lamp', 'floor lamp', 'table lamp', 'light', 'chandelier',
     'rug', 'carpet', 'curtain', 'plant', 'flower', 'vase', 'painting',
     'picture frame', 'wall art', 'mirror', 'television', 'tv', 'monitor',
     'refrigerator', 'oven', 'microwave', 'pillow', 'cushion',
     'floor', 'wood', 'hardwood', 'tile',
+  };
+
+  // ML Kit names that have no exact catalog entry — mapped to the
+  // closest catalog item before matching.
+  static const _labelAliases = <String, String>{
+    'couch': 'Sofa',
+    'loveseat': 'Sofa',
+    'sectional': 'Sofa',
+    'settee': 'Sofa',
+    'recliner': 'Armchair',
+    'ottoman': 'Armchair',
+    'stool': 'Armchair',
+    'bench': 'Armchair',
+    'carpet': 'Rug',
+    'area rug': 'Rug',
+    'bookcase': 'Bookshelf',
+    'dresser': 'Cabinet',
+    'chest of drawers': 'Cabinet',
+    'nightstand': 'Cabinet',
+    'night stand': 'Cabinet',
+    'sideboard': 'Cabinet',
+    'cupboard': 'Cabinet',
+    'wardrobe': 'Cabinet',
+    'closet': 'Cabinet',
+    'mattress': 'Bed',
+    'television': 'TV Stand',
+    'tv': 'TV Stand',
+    'monitor': 'TV Stand',
+    'chandelier': 'Floor Lamp',
+    'light': 'Floor Lamp',
+    'table lamp': 'Floor Lamp',
+    'floor lamp': 'Floor Lamp',
+    'ceiling light': 'Floor Lamp',
   };
 
   // ─── Furniture catalog with image assets ───
@@ -106,6 +161,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   void initState() {
     super.initState();
     _furniture = widget.existingDesign?.furniture.toList() ?? [];
+    _walls.addAll(widget.existingDesign?.walls ?? const []);
     if (widget.existingDesign != null) {
       _roomW = widget.existingDesign!.widthCm;
       _roomH = widget.existingDesign!.heightCm;
@@ -262,11 +318,48 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   InputImage? _cameraImageToInputImage(CameraImage image) {
     try {
+      final planes = image.planes;
+      if (planes.length < 3) return null;
+      final width = image.width;
+      final height = image.height;
       final builder = BytesBuilder();
-      for (final plane in image.planes) {
-        builder.add(plane.bytes);
+
+      // Pack Y tightly (drop per-row padding).
+      final y = planes[0];
+      if (y.bytesPerRow == width) {
+        builder.add(y.bytes.sublist(0, width * height));
+      } else {
+        for (var row = 0; row < height; row++) {
+          final start = row * y.bytesPerRow;
+          builder.add(y.bytes.sublist(start, start + width));
+        }
       }
-      final bytes = builder.takeBytes();
+
+      // nv21 needs chroma as interleaved [V,U,V,U,...] — the raw
+      // YUV_420_888 planes are separate U and V blocks (or a shared
+      // interleaved buffer starting at V when pixelStride is 2).
+      final u = planes[1];
+      final v = planes[2];
+      final cw = width ~/ 2;
+      final ch = height ~/ 2;
+      if (v.bytesPerPixel == 2) {
+        for (var row = 0; row < ch; row++) {
+          final start = row * v.bytesPerRow;
+          builder.add(v.bytes.sublist(start, start + cw * 2));
+        }
+      } else {
+        for (var row = 0; row < ch; row++) {
+          final vs = row * v.bytesPerRow;
+          final us = row * u.bytesPerRow;
+          final vRow = v.bytes.sublist(vs, vs + cw);
+          final uRow = u.bytes.sublist(us, us + cw);
+          for (var i = 0; i < cw; i++) {
+            builder.addByte(vRow[i]);
+            builder.addByte(uRow[i]);
+          }
+        }
+      }
+
       final sensorOrientation =
           _cam?.description.sensorOrientation ?? 0;
       final rotation = switch (sensorOrientation) {
@@ -276,12 +369,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         _ => InputImageRotation.rotation0deg,
       };
       return InputImage.fromBytes(
-        bytes: bytes,
+        bytes: builder.takeBytes(),
         metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
+          size: Size(width.toDouble(), height.toDouble()),
           rotation: rotation,
           format: InputImageFormat.nv21,
-          bytesPerRow: image.planes[0].bytesPerRow,
+          bytesPerRow: width,
         ),
       );
     } catch (_) {
@@ -299,45 +392,118 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   void _stopScan() {
     if (_stage != _Stage.scanning) return;
     _timer?.cancel();
-    _autoPlaceFound();
+    final frames = _frames;
+    final added = _autoPlaceFound();
+    final guessed =
+        widget.existingDesign == null ? _guessRoomType() : null;
+    if (guessed != null) _roomType = guessed;
     if (mounted) setState(() => _stage = _Stage.plan);
+    if (mounted) {
+      if (frames == 0) {
+        showAppSnackbar(
+          context,
+          'The scan did not read the camera. Keep scanning a little longer.',
+          isError: true,
+          duration: const Duration(seconds: 4),
+        );
+      } else if (added > 0) {
+        showAppSnackbar(
+          context,
+          'Added $added item${added == 1 ? '' : 's'} from the scan — drag to adjust.',
+          duration: const Duration(seconds: 4),
+        );
+      } else {
+        showAppSnackbar(
+          context,
+          _found.isEmpty
+              ? 'No furniture recognized — add items from the catalog.'
+              : 'Detected items could not be placed — add from the catalog.',
+          duration: const Duration(seconds: 4),
+        );
+      }
+    }
     WidgetsBinding.instance.endOfFrame.whenComplete(_releaseCam);
   }
 
-  void _autoPlaceFound() {
-    final rng = Random();
-    final items = <FurniturePlacement>[];
-    final base = _furniture.length;
+  String? _guessRoomType() {
+    final labels = _found.map((f) => f.label.toLowerCase()).toSet();
+    bool any(Set<String> keys) => labels.any(keys.contains);
+    if (any({'bed', 'bed frame', 'mattress'})) return 'bedroom';
+    if (any({'refrigerator', 'oven', 'microwave'})) return 'kitchen';
+    if (any({'dining table'})) return 'dining_room';
+    if (any({'desk'})) return 'home_office';
+    return null;
+  }
+
+  @visibleForTesting
+  String? debugGuessRoomType(List<String> labels) {
+    _found
+      ..clear()
+      ..addAll([for (final l in labels) _Found(label: l, confidence: 0.9)]);
+    return _guessRoomType();
+  }
+
+  // Scan labels ML Kit emits for surfaces/materials — never furniture.
+  static const _scanJunk = {
+    'floor', 'wood', 'hardwood', 'tile', 'wall', 'ceiling',
+    'curtain', 'pillow', 'cushion', 'painting', 'picture frame',
+    'wall art', 'mirror', 'vase', 'flower', 'light',
+  };
+
+  int _autoPlaceFound() {
+    final cats = <_Cat>[];
     for (final f in _found) {
+      final lower = f.label.toLowerCase();
+      if (_scanJunk.contains(lower)) continue;
       final cat = _matchCatalog(f.label);
-      final maxW = max(1.0, _roomW - cat.defaultWidth);
-      final maxH = max(1.0, _roomH - cat.defaultHeight);
-      final x = (rng.nextDouble() * maxW)
-          .clamp(10.0, max(10.0, maxW - 10))
-          .toDouble();
-      final y = (rng.nextDouble() * maxH)
-          .clamp(10.0, max(10.0, maxH - 10))
-          .toDouble();
+      if (cat.category == 'misc') continue; // no catalog match
+      if (cats.any((c) => c.iconName == cat.iconName)) continue;
+      cats.add(cat);
+    }
+    if (cats.isEmpty) return 0;
+
+    // Flow left-to-right from the top-left, wrapping into a new row —
+    // a tidy row-packed layout the user can then drag around.
+    var cursorX = 25.0;
+    var cursorY = 25.0;
+    var rowH = 0.0;
+    final base = DateTime.now().microsecondsSinceEpoch;
+    final items = <FurniturePlacement>[];
+    for (var i = 0; i < cats.length; i++) {
+      final cat = cats[i];
+      if (cursorX + cat.defaultWidth > _roomW - 25 && cursorX > 25) {
+        cursorX = 25;
+        cursorY += rowH + 25;
+        rowH = 0;
+      }
       var item = FurniturePlacement(
-        id: DateTime.now().microsecondsSinceEpoch.toString() +
-            (base + items.length).toString(),
+        id: '$base-$i',
         name: cat.name,
         iconName: cat.iconName,
-        x: x,
-        y: y,
+        x: cursorX,
+        y: cursorY,
         width: cat.defaultWidth,
         height: cat.defaultHeight,
         imageAsset: cat.imageAsset,
       );
-      item = _clampToWalls(item);
+      item = _resolveDrop(item);
       items.add(item);
+      cursorX += cat.defaultWidth + 25;
+      rowH = max(rowH, cat.defaultHeight);
     }
-    if (!mounted || items.isEmpty) return;
+    if (!mounted) return items.length;
     setState(() => _furniture = [..._furniture, ...items]);
+    return items.length;
   }
 
   _Cat _matchCatalog(String label) {
-    final lower = label.toLowerCase();
+    final lower = label.toLowerCase().trim();
+    final alias = _labelAliases[lower];
+    if (alias != null) {
+      for (final c in _catalog) {
+        if (c.name == alias) return c;
+      }
+    }
     for (final c in _catalog) {
       if (c.name.toLowerCase().contains(lower) ||
           lower.contains(c.name.toLowerCase())) {
@@ -349,8 +515,18 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   // ─── Wall (room shape) geometry helpers ───
 
+  double _footprintW(FurniturePlacement f) =>
+      f.rotation % 180 == 90 ? f.height : f.width;
+  double _footprintH(FurniturePlacement f) =>
+      f.rotation % 180 == 90 ? f.width : f.height;
+
   bool _pointInPolygon(Offset p) {
     if (_walls.length < 3) return true;
+    // Boundary counts as inside — pure ray-casting reports points
+    // exactly on a wall as outside, which would ban flush placement.
+    for (int i = 0, j = _walls.length - 1; i < _walls.length; j = i++) {
+      if (_distToSegment(p, _walls[i], _walls[j]) < 0.5) return true;
+    }
     var inside = false;
     for (int i = 0, j = _walls.length - 1; i < _walls.length; j = i++) {
       final a = _walls[i];
@@ -363,40 +539,82 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     return inside;
   }
 
-  FurniturePlacement _clampToWalls(FurniturePlacement f) {
-    if (_walls.length < 3) return f;
+  double _distToSegment(Offset p, Offset a, Offset b) {
+    final ab = b - a;
+    final len2 = ab.dx * ab.dx + ab.dy * ab.dy;
+    if (len2 == 0) return (p - a).distance;
+    final t = (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2)
+        .clamp(0.0, 1.0);
+    final proj = Offset(a.dx + t * ab.dx, a.dy + t * ab.dy);
+    return (p - proj).distance;
+  }
 
-    bool fits(Offset tl) {
-      if (tl.dx < 0 || tl.dy < 0) return false;
-      if (tl.dx + f.width > _roomW || tl.dy + f.height > _roomH) return false;
-      for (final c in [
-        tl,
-        tl + Offset(f.width, 0),
-        tl + Offset(0, f.height),
-        tl + Offset(f.width, f.height),
-      ]) {
-        if (!_pointInPolygon(c)) return false;
-      }
-      return true;
+  // ─── Drop resolution ───
+  // A drop is valid when the footprint sits inside the room rectangle and,
+  // if walls outline a polygon, fully inside it (all four corners in the
+  // polygon AND no wall edge slicing through the footprint — the corner
+  // test alone fails for concave outlines).
+
+  bool _fitsAt(FurniturePlacement f, Offset tl) {
+    final fw = _footprintW(f);
+    final fh = _footprintH(f);
+    if (tl.dx < 0 || tl.dy < 0) return false;
+    if (tl.dx + fw > _roomW || tl.dy + fh > _roomH) return false;
+    if (_walls.length < 3) return true;
+
+    final corners = [
+      tl,
+      tl + Offset(fw, 0),
+      tl + Offset(0, fh),
+      tl + Offset(fw, fh),
+    ];
+    for (final c in corners) {
+      if (!_pointInPolygon(c)) return false;
     }
+    for (var i = 0; i < _walls.length; i++) {
+      final a1 = _walls[i];
+      final a2 = _walls[(i + 1) % _walls.length];
+      if (_segmentsCross(a1, a2, corners[0], corners[1]) ||
+          _segmentsCross(a1, a2, corners[1], corners[3]) ||
+          _segmentsCross(a1, a2, corners[3], corners[2]) ||
+          _segmentsCross(a1, a2, corners[2], corners[0])) {
+        return false;
+      }
+    }
+    return true;
+  }
 
-    if (fits(Offset(f.x, f.y))) return f;
+  bool _segmentsCross(Offset p1, Offset p2, Offset q1, Offset q2) {
+    double cross(Offset a, Offset b, Offset c) =>
+        (b.dx - a.dx) * (c.dy - a.dy) - (b.dy - a.dy) * (c.dx - a.dx);
+    final d1 = cross(q1, q2, p1);
+    final d2 = cross(q1, q2, p2);
+    final d3 = cross(p1, p2, q1);
+    final d4 = cross(p1, p2, q2);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
 
-    final centroid = Offset(
-      _walls.map((w) => w.dx).reduce((a, b) => a + b) / _walls.length,
-      _walls.map((w) => w.dy).reduce((a, b) => a + b) / _walls.length,
-    );
-    var center = Offset(f.x + f.width / 2, f.y + f.height / 2);
-    final delta = centroid - center;
-    if (delta.distance < 0.5) return f;
-    final step = delta / delta.distance * 5.0;
-    for (var i = 0; i < 200; i++) {
-      center += step;
-      final tl = Offset(
-          (center.dx - f.width / 2).clamp(0.0, _roomW - f.width).toDouble(),
-          (center.dy - f.height / 2).clamp(0.0, _roomH - f.height).toDouble());
-      if (fits(tl)) {
-        return f.copyWith(x: tl.dx, y: tl.dy);
+  FurniturePlacement _resolveDrop(FurniturePlacement f) {
+    if (_fitsAt(f, Offset(f.x, f.y))) return f;
+    final fw = _footprintW(f);
+    final fh = _footprintH(f);
+    final maxX = max(0.0, _roomW - fw);
+    final maxY = max(0.0, _roomH - fh);
+
+    // Walk rings outward from the drop point (5 cm steps, 16 angles)
+    // and take the first spot that fits — the piece settles next to
+    // where the finger left it, never teleports to the room center.
+    final maxR = sqrt(_roomW * _roomW + _roomH * _roomH);
+    for (var r = 5.0; r <= maxR; r += 5.0) {
+      final steps = 16;
+      for (var i = 0; i < steps; i++) {
+        final a = 2 * pi * i / steps;
+        final cand = Offset(
+          (f.x + cos(a) * r).clamp(0.0, maxX).toDouble(),
+          (f.y + sin(a) * r).clamp(0.0, maxY).toDouble(),
+        );
+        if (_fitsAt(f, cand)) return f.copyWith(x: cand.dx, y: cand.dy);
       }
     }
     return f;
@@ -407,6 +625,29 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   bool _pointerMoved = false;
   bool _pointerOnTile = false;
 
+  Timer? _wallHoldTimer;
+  Offset? _wallHoldOrigin;
+
+  void _startWallHold(Offset globalPos) {
+    _wallHoldTimer?.cancel();
+    _wallHoldOrigin = globalPos;
+    _wallHoldTimer = Timer(const Duration(milliseconds: 550), () {
+      _wallHoldTimer = null;
+      _wallHoldOrigin = null;
+      if (!mounted || _walls.isEmpty) return;
+      // Block the tap-up that follows — otherwise a wall-mode tap
+      // would drop a corner right where the outline was cleared.
+      _pointerMoved = true;
+      _clearWalls();
+    });
+  }
+
+  void _cancelWallHold() {
+    _wallHoldTimer?.cancel();
+    _wallHoldTimer = null;
+    _wallHoldOrigin = null;
+  }
+
   void _onPointerDown(PointerDownEvent e, double s) {
     _pointerMoved = false;
     _pointerOnTile = false;
@@ -414,17 +655,22 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     final p = Offset(e.localPosition.dx / s, e.localPosition.dy / s);
 
     for (final f in _furniture) {
+      final fw = _footprintW(f);
+      final fh = _footprintH(f);
       if (p.dx >= f.x &&
-          p.dx <= f.x + f.width &&
+          p.dx <= f.x + fw &&
           p.dy >= f.y &&
-          p.dy <= f.y + f.height) {
+          p.dy <= f.y + fh) {
         _pointerOnTile = true;
         break;
       }
     }
 
     _draggingWallIdx = -1;
-    if (_walls.isNotEmpty) {
+    // Never grab a wall corner when the press started on furniture —
+    // otherwise the corner chases the tile and the piece looks glued
+    // to the wall no matter how far it is dragged.
+    if (!_pointerOnTile && _walls.isNotEmpty) {
       int? best;
       var bestDist = double.infinity;
       for (var i = 0; i < _walls.length; i++) {
@@ -434,15 +680,31 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           best = i;
         }
       }
-      if (best != null && bestDist <= 25) {
+      final grabRadius = 28 / s;
+      if (best != null && bestDist <= grabRadius) {
         _draggingWallIdx = best;
+        _startWallHold(e.position);
         return;
+      }
+      // Long-press anywhere on the outline itself clears it.
+      for (var i = 0; i < _walls.length; i++) {
+        final a = _walls[i];
+        final b = _walls[(i + 1) % _walls.length];
+        if (_distToSegment(p, a, b) < 8 / s) {
+          _startWallHold(e.position);
+          break;
+        }
       }
     }
   }
 
   void _onPointerMove(PointerMoveEvent e, double s) {
     _pointerMoved = true;
+
+    final holdOrigin = _wallHoldOrigin;
+    if (holdOrigin != null && (e.position - holdOrigin).distance > 8) {
+      _cancelWallHold();
+    }
 
     if (_draggingWallIdx >= 0 && _draggingWallIdx < _walls.length) {
       final p = Offset(
@@ -455,6 +717,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   void _onPointerUp(PointerUpEvent e, double s) {
+    _cancelWallHold();
     if (!_pointerMoved && _draggingWallIdx < 0 && !_pointerOnTile) {
       final p = Offset(
         (e.localPosition.dx / s).clamp(0.0, _roomW).toDouble(),
@@ -475,11 +738,125 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   void _clearWalls() {
+    if (_walls.isEmpty) return;
+    final snapshot = List<Offset>.of(_walls);
     setState(() {
       _walls.clear();
       _draggingWallIdx = -1;
     });
     _touchWalls();
+    if (!mounted) return;
+    showAppSnackbar(
+      context,
+      'Walls cleared',
+      duration: const Duration(seconds: 4),
+      actionLabel: 'Undo',
+      onAction: () {
+        if (!mounted || _walls.isNotEmpty) return;
+        setState(() => _walls.addAll(snapshot));
+        _touchWalls();
+      },
+    );
+  }
+
+  // ─── Furniture actions ───
+
+  void _removeFurniture(int idx) {
+    if (idx < 0 || idx >= _furniture.length) return;
+    final removed = _furniture[idx];
+    final wasSelected = _selectedIdx == idx;
+    setState(() {
+      _furniture.removeAt(idx);
+      if (wasSelected) {
+        _selectedIdx = -1;
+      } else if (_selectedIdx > idx) {
+        _selectedIdx--;
+      }
+    });
+    showAppSnackbar(
+      context,
+      '${removed.name} removed',
+      duration: const Duration(seconds: 4),
+      actionLabel: 'Undo',
+      onAction: () {
+        if (!mounted || idx > _furniture.length) return;
+        setState(() => _furniture.insert(idx, removed));
+      },
+    );
+  }
+
+  Future<void> _confirmClearAll() async {
+    if (_furniture.isEmpty && _walls.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear the plan?'),
+        content: Text(_furniture.isEmpty
+            ? 'This removes the wall outline from the plan.'
+            : 'This removes all ${_furniture.length} placed items'
+                '${_walls.isEmpty ? '' : ' and the wall outline'} from the plan.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final furniture = _furniture.toList();
+    final walls = List<Offset>.of(_walls);
+    setState(() {
+      _furniture.clear();
+      _walls.clear();
+      _selectedIdx = -1;
+      _draggingWallIdx = -1;
+    });
+    if (walls.isNotEmpty) _touchWalls();
+    showAppSnackbar(
+      context,
+      'Plan cleared',
+      duration: const Duration(seconds: 4),
+      actionLabel: 'Undo',
+      onAction: () {
+        if (!mounted) return;
+        setState(() {
+          _furniture = furniture;
+          _walls.addAll(walls);
+        });
+        if (walls.isNotEmpty) _touchWalls();
+      },
+    );
+  }
+
+  void _rotateSelected() {
+    if (_selectedIdx < 0 || _selectedIdx >= _furniture.length) return;
+    setState(() {
+      final f = _furniture[_selectedIdx];
+      _furniture[_selectedIdx] =
+          f.copyWith(rotation: (f.rotation + 90) % 360);
+    });
+  }
+
+  void _openDimensionEdit() {
+    _widthCtrl.text = _roomW.toInt().toString();
+    _heightCtrl.text = _roomH.toInt().toString();
+    setState(() => _isEditingDimensions = true);
+  }
+
+  void _finishDimensionEdit() {
+    final w = double.tryParse(_widthCtrl.text.trim());
+    final h = double.tryParse(_heightCtrl.text.trim());
+    setState(() {
+      if (w != null && w > 50) _roomW = w;
+      if (h != null && h > 50) _roomH = h;
+      _isEditingDimensions = false;
+    });
   }
 
   // ─── Room size presets ────────────────────────────────────────────────
@@ -514,7 +891,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       height: cat.defaultHeight,
       imageAsset: cat.imageAsset,
     );
-    item = _clampToWalls(item);
+    item = _resolveDrop(item);
     setState(() => _furniture.add(item));
   }
 
@@ -536,11 +913,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     final user = ref.read(currentUserProvider);
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Please sign in to save designs'),
-              backgroundColor: AppColors.error),
-        );
+        showAppSnackbar(context, 'Please sign in to save designs',
+            isError: true);
       }
       return;
     }
@@ -587,6 +961,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       widthCm: _roomW,
       heightCm: _roomH,
       furniture: _furniture,
+      walls: List.of(_walls),
       detectedItems: _found.map((f) => f.label).toList(),
       userId: user.uid,
       createdAt: widget.existingDesign?.createdAt ?? now,
@@ -601,22 +976,21 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             designId: designId, data: design.toJson());
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Design "$name" saved!'),
-            backgroundColor: AppColors.success,
-          ),
+        showAppSnackbar(
+          context,
+          'Design "$name" saved!',
+          duration: const Duration(seconds: 3),
         );
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userMessage(e,
-                fallback: 'Could not save your design. Please try again.')),
-            backgroundColor: AppColors.error,
-          ),
+        showAppSnackbar(
+          context,
+          userMessage(e,
+              fallback: 'Could not save your design. Please try again.'),
+          isError: true,
+          duration: const Duration(seconds: 4),
         );
       }
     }
@@ -629,9 +1003,34 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     return _roomType;
   }
 
+  Future<void> _pickRoomType() async {
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Room type'),
+        children: [
+          for (final rt in _roomTypes)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, rt.$1),
+              child: Row(
+                children: [
+                  Icon(rt.$3, size: 20),
+                  const SizedBox(width: 10),
+                  Text(rt.$2),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _roomType = picked);
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
+    _wallHoldTimer?.cancel();
     try {
       _cam?.stopImageStream();
     } catch (_) {}
@@ -640,6 +1039,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _cam?.dispose();
     } catch (_) {}
     _wallsRev.dispose();
+    _widthCtrl.dispose();
+    _heightCtrl.dispose();
     super.dispose();
   }
 
@@ -651,9 +1052,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      child: Material(
-        color: bgColor,
-        child: Column(
+      child: Scaffold(
+        backgroundColor: bgColor,
+        body: Column(
           children: [
             // ── Page controls (no AppBar band) ──
             SafeArea(
@@ -662,12 +1063,17 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                 padding: const EdgeInsets.fromLTRB(12, 12, 4, 4),
                 child: Row(
                   children: [
-                    const SizedBox(width: 8),
+                    if (Navigator.of(context).canPop()) ...[
+                      FloatingBackButton(
+                        onTap: () => Navigator.of(context).pop(),
+                      ),
+                      const SizedBox(width: 8),
+                    ] else
+                      const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         switch (_stage) {
                           _Stage.init || _Stage.scanning => 'Room Scanner',
-                          _Stage.roomSelect => 'Room Scanner',
                           _Stage.plan => widget.existingDesign != null
                               ? 'Edit: ${widget.existingDesign!.name}'
                               : 'Room Planner',
@@ -692,16 +1098,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                         icon: Icon(Icons.camera_alt, color: fgColor),
                         tooltip: 'Scan Room',
                         onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
                           await _ensureCam();
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           if (_cam != null && _cam!.value.isInitialized) {
                             _startScan();
                           } else {
-                            messenger.showSnackBar(
-                              const SnackBar(
-                                  content: Text('Camera not available')),
-                            );
+                            showAppSnackbar(context, 'Camera not available',
+                                isError: true);
                           }
                         },
                       ),
@@ -729,7 +1132,6 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             child: switch (_stage) {
               _Stage.init => _initView(),
               _Stage.scanning => _scanView(),
-              _Stage.roomSelect => _roomSelectView(),
               _Stage.plan => _planEditor(),
             },
           ),
@@ -923,157 +1325,11 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     );
   }
 
-  // ─── Room type selector ───
-  Widget _roomSelectView() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.check_circle, size: 64, color: AppColors.accent),
-          const SizedBox(height: 16),
-          Text('${_found.length} items detected!',
-              style: GoogleFonts.poppins(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
-          const SizedBox(height: 8),
-          Text('Select your room type to begin designing:',
-              style: GoogleFonts.poppins(
-                  color: Colors.white54, fontSize: 16)),
-          const SizedBox(height: 32),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: _roomTypes.map((rt) {
-              final selected = _roomType == rt.$1;
-              return GestureDetector(
-                onTap: () => setState(() => _roomType = rt.$1),
-                child: Container(
-                  width: 140,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 20),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? AppColors.accent
-                        : Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border: selected
-                        ? Border.all(
-                            color: AppColors.accentLight, width: 2)
-                        : null,
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(rt.$3,
-                          color: Colors.white, size: 32),
-                      const SizedBox(height: 8),
-                      Text(rt.$2,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontWeight: selected
-                                  ? FontWeight.w600
-                                  : FontWeight.w400)),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 40),
-          ElevatedButton.icon(
-            onPressed: () {
-              _autoPlaceFound();
-              setState(() => _stage = _Stage.plan);
-            },
-            icon: const Icon(Icons.design_services),
-            label: const Text('Start Designing'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 40, vertical: 16),
-              minimumSize: const Size(double.infinity, 56),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ─── Floor plan editor ───
   Widget _planEditor() {
     final bottomClearance = MediaQuery.paddingOf(context).bottom + 8;
     return Column(
       children: [
-        if (_found.isNotEmpty)
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: AppColors.surface,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.document_scanner, size: 14,
-                        color: AppColors.accent),
-                    const SizedBox(width: 6),
-                    Text('Detected — tap to add to plan',
-                        style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.accent)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                SizedBox(
-                  height: 34,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _found.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(width: 6),
-                    itemBuilder: (_, i) => GestureDetector(
-                      onTap: () {
-                        final cat = _matchCatalog(_found[i].label);
-                        _addFromCatalog(cat);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: AppColors.accent
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: AppColors.accent
-                                .withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.add_circle_outline,
-                                size: 14, color: AppColors.accent),
-                            const SizedBox(width: 5),
-                            Text(_found[i].label,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: AppColors.accent)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
         if (_furniture.isEmpty && widget.existingDesign == null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1211,10 +1467,10 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               ),
                             ),
                           _dimLabel('${_roomW.toInt()} cm',
-                              top: -20,
+                              top: 4,
                               left: canvasW / 2 - 30),
                           _dimLabel('${_roomH.toInt()} cm',
-                              left: -22,
+                              left: 4,
                               top: canvasH / 2 - 10,
                               vertical: true),
                           Positioned(
@@ -1222,28 +1478,34 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             left: 0,
                             right: 0,
                             child: Center(
-                              child: Container(
-                                padding:
-                                    const EdgeInsets
-                                        .symmetric(
-                                        horizontal: 10,
-                                        vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary
-                                      .withValues(
-                                          alpha: 0.75),
-                                  borderRadius:
-                                      BorderRadius
-                                          .circular(10),
-                                ),
-                                child: Text(
-                                  _roomTypeLabel,
-                                  style: GoogleFonts
-                                      .poppins(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight:
-                                        FontWeight.w600,
+                              child: GestureDetector(
+                                onTap: _pickRoomType,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.75),
+                                    borderRadius:
+                                        BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _roomTypeLabel,
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(
+                                          Icons.arrow_drop_down,
+                                          size: 14,
+                                          color: Colors.white),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -1259,22 +1521,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               roomH: _roomH,
                               onTap: () =>
                                   setState(() => _selectedIdx = i),
-                              onLongPress: () {
-                                setState(() {
-                                  _furniture.removeAt(i);
-                                  if (_selectedIdx == i) {
-                                    _selectedIdx = -1;
-                                  } else if (_selectedIdx > i) {
-                                    _selectedIdx--;
-                                  }
-                                });
-                              },
+                              onLongPress: () => _removeFurniture(i),
                               onCommit: (moved) {
                                 setState(() {
                                   final idx = _furniture
                                       .indexWhere((e) => e.id == moved.id);
                                   if (idx < 0) return;
-                                  _furniture[idx] = _clampToWalls(moved);
+                                  _furniture[idx] = _resolveDrop(moved);
                                 });
                               },
                             ),
@@ -1292,67 +1545,52 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         if (_selectedIdx >= 0 &&
             _selectedIdx < _furniture.length)
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 8),
+            key: const ValueKey('planner-selection-bar'),
+            padding: const EdgeInsets.fromLTRB(
+                16, 6, 8, 2),
             color: AppColors.surface,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.touch_app,
-                        size: 16, color: AppColors.accent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _furniture[_selectedIdx].name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        setState(() {
-                          _furniture.removeAt(_selectedIdx);
-                          _selectedIdx = -1;
-                        });
-                      },
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-                Text('Tap to select · Drag to move · Long-press to remove',
-                    style: GoogleFonts.poppins(
-                        fontSize: 10,
-                        color: AppColors.textHint)),
-              ],
-            ),
-          ),
-
-        if (_wallMode)
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 6),
-            color: AppColors.accent.withValues(alpha: 0.08),
             child: Row(
               children: [
-                const Icon(Icons.polyline,
-                    size: 14, color: AppColors.accent),
-                const SizedBox(width: 6),
+                Icon(Icons.touch_app,
+                    size: 16, color: AppColors.accent),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _walls.length < 3
-                        ? 'Tap the plan to add wall corners — at least 3 outline your room.'
-                        : 'Tap to add more corners • drag a corner to adjust • long-press "Draw Walls" to clear.',
+                    '${_furniture[_selectedIdx].name} · '
+                    '${_furniture[_selectedIdx].width.toInt()}×'
+                    '${_furniture[_selectedIdx].height.toInt()} cm',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
-                        fontSize: 11, color: AppColors.accent),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13),
                   ),
+                ),
+                TextButton.icon(
+                  onPressed: _rotateSelected,
+                  icon: const Icon(
+                      Icons.rotate_90_degrees_cw,
+                      size: 15),
+                  label: const Text('Rotate'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8),
+                    minimumSize: Size.zero,
+                    visualDensity:
+                        VisualDensity.compact,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove',
+                  icon: const Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: AppColors.error),
+                  onPressed: () =>
+                      _removeFurniture(_selectedIdx),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
               ],
             ),
@@ -1360,43 +1598,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
         Container(
           padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            border:
-                Border(top: BorderSide(color: AppColors.border)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _openFurniturePicker,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: Text(
-                    _furniture.isEmpty
-                        ? 'Add furniture'
-                        : 'Add furniture · ${_furniture.length} placed',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.accent,
-                    side: BorderSide(
-                        color:
-                            AppColors.accent.withValues(alpha: 0.4)),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    alignment: Alignment.centerLeft,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              const EdgeInsets.fromLTRB(16, 8, 16, 8),
           decoration: BoxDecoration(
             color: AppColors.surface,
             border:
@@ -1410,6 +1612,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                   children: [
                     Expanded(
                       child: TextField(
+                        controller: _widthCtrl,
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
                           labelText: 'Width (cm)',
@@ -1424,13 +1627,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             setState(() => _roomW = parsed);
                           }
                         },
-                        controller: TextEditingController(
-                            text: _roomW.toInt().toString()),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
+                        controller: _heightCtrl,
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
                           labelText: 'Height (cm)',
@@ -1445,24 +1647,19 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             setState(() => _roomH = parsed);
                           }
                         },
-                        controller: TextEditingController(
-                            text: _roomH.toInt().toString()),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.check, size: 20),
-                      onPressed: () => setState(
-                          () => _isEditingDimensions = false),
+                      onPressed: _finishDimensionEdit,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
               ] else ...[
                 GestureDetector(
-                  onTap: () => setState(
-                      () => _isEditingDimensions = true),
+                  onTap: _openDimensionEdit,
                   child: Row(
                     children: [
                       const Icon(Icons.crop_free,
@@ -1487,85 +1684,79 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
               ],
-
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onLongPress: _walls.isEmpty ? null : _clearWalls,
-                      child: OutlinedButton.icon(
-                        onPressed: () => setState(
-                            () => _wallMode = !_wallMode),
-                        icon: Icon(
-                          _wallMode ? Icons.polyline : Icons.polyline_outlined,
-                          size: 18,
-                        ),
-                        label: Text(_wallMode ? 'Add Corners' : 'Draw Walls'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          minimumSize: Size.zero,
-                          foregroundColor: _wallMode
-                              ? AppColors.accent
-                              : AppColors.textPrimary,
-                          side: BorderSide(
-                              color: _wallMode
-                                  ? AppColors.accent
-                                  : AppColors.border),
-                        ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _openFurniturePicker,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text(
+                        _furniture.isEmpty
+                            ? 'Add furniture'
+                            : 'Add furniture · ${_furniture.length} placed',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          _furniture.clear();
-                          _selectedIdx = -1;
-                        });
-                      },
-                      icon: const Icon(Icons.clear_all, size: 18),
-                      label: const Text('Clear'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        minimumSize: Size.zero,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () => context.push(
-                        '/ar-viewer',
-                        extra: ArFurnitureLibrary.fromIconNames(
-                            _furniture.map((f) => f.iconName).toList()),
-                      ),
-                      icon: const Icon(Icons.view_in_ar, size: 18),
-                      label: const Text('AR View'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        minimumSize: Size.zero,
-                        foregroundColor: AppColors.accent,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: _saveDesign,
-                      icon: const Icon(Icons.save, size: 18),
-                      label: const Text('Save'),
-                      style: ElevatedButton.styleFrom(
+                      style: FilledButton.styleFrom(
                         backgroundColor: AppColors.accent,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        minimumSize: Size.zero,
+                            horizontal: 14, vertical: 12),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onLongPress: _walls.isEmpty ? null : _clearWalls,
+                    child: OutlinedButton.icon(
+                      onPressed: () => setState(
+                          () => _wallMode = !_wallMode),
+                      icon: Icon(
+                        _wallMode ? Icons.polyline : Icons.polyline_outlined,
+                        size: 18,
+                      ),
+                      label: Text(_wallMode ? 'Add Corners' : 'Walls'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 12),
+                        minimumSize: Size.zero,
+                        foregroundColor: _wallMode
+                            ? AppColors.accent
+                            : AppColors.textPrimary,
+                        side: BorderSide(
+                            color: _wallMode
+                                ? AppColors.accent
+                                : AppColors.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: (_furniture.isEmpty && _walls.isEmpty)
+                        ? null
+                        : _confirmClearAll,
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    label: const Text('Clear'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 12),
+                      minimumSize: Size.zero,
+                    ),
+                  ),
+                ],
               ),
+              if (_wallMode) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _walls.length < 3
+                      ? 'Tap the plan to add wall corners — at least 3 outline your room.'
+                      : 'Tap to add corners · drag a corner to adjust · long-press the outline to clear',
+                  style: GoogleFonts.poppins(
+                      fontSize: 11, color: AppColors.accent),
+                ),
+              ],
             ],
           ),
         ),
@@ -1641,8 +1832,12 @@ class _FurnitureTileState extends State<_FurnitureTile> {
 
   Offset get _pos => _live ?? Offset(widget.item.x, widget.item.y);
 
-  double get _maxX => widget.roomW - widget.item.width;
-  double get _maxY => widget.roomH - widget.item.height;
+  bool get _swapped => widget.item.rotation % 180 == 90;
+  double get _boxW => _swapped ? widget.item.height : widget.item.width;
+  double get _boxH => _swapped ? widget.item.width : widget.item.height;
+
+  double get _maxX => widget.roomW - _boxW;
+  double get _maxY => widget.roomH - _boxH;
 
   void _onPanStart(DragStartDetails _) {
     setState(() => _live = Offset(widget.item.x, widget.item.y));
@@ -1676,6 +1871,8 @@ class _FurnitureTileState extends State<_FurnitureTile> {
     final item = widget.item;
     final s = widget.scale;
     final p = _pos;
+    final boxW = _boxW * s;
+    final boxH = _boxH * s;
     final itemW = item.width * s;
     final itemH = item.height * s;
     final isSelected = widget.selected;
@@ -1685,72 +1882,82 @@ class _FurnitureTileState extends State<_FurnitureTile> {
       left: p.dx * s,
       top: p.dy * s,
       child: RepaintBoundary(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          onLongPress: widget.onLongPress,
-          onPanStart: _onPanStart,
-          onPanUpdate: _onPanUpdate,
-          onPanEnd: _onPanEnd,
-          onPanCancel: _onPanCancel,
-          child: Container(
-            width: itemW,
-            height: itemH,
-            clipBehavior: Clip.hardEdge,
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? AppColors.accent.withValues(alpha: 0.3)
-                  : AppColors.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(3),
-              border: Border.all(
-                color: isSelected
-                    ? AppColors.accent
-                    : AppColors.primary.withValues(alpha: 0.4),
-                width: isSelected ? 2.5 : 1.2,
-              ),
-            ),
-            child: itemW > 40 && itemH > 30
-                ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        icon,
-                        size: min(itemW * 0.35, 20),
-                        color: isSelected
-                            ? AppColors.accent
-                            : AppColors.textSecondary,
-                      ),
-                      if (itemW > 55)
-                        SizedBox(
-                          width: itemW - 4,
-                          child: Text(
-                            item.name,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize:
-                                  min(itemW * 0.1, 10).clamp(6, 10).toDouble(),
-                              fontWeight: FontWeight.w600,
-                              color: isSelected
-                                  ? AppColors.accent
-                                  : AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                    ],
-                  )
-                : Center(
-                    child: Icon(
-                      icon,
-                      size: min(itemW * 0.5, 14),
+        child: SizedBox(
+          width: boxW,
+          height: boxH,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            onPanStart: _onPanStart,
+            onPanUpdate: _onPanUpdate,
+            onPanEnd: _onPanEnd,
+            onPanCancel: _onPanCancel,
+            child: Center(
+              child: Transform.rotate(
+                angle: item.rotation * pi / 180,
+                child: Container(
+                  width: itemW,
+                  height: itemH,
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.accent.withValues(alpha: 0.3)
+                        : AppColors.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(
                       color: isSelected
                           ? AppColors.accent
-                          : AppColors.textSecondary,
+                          : AppColors.primary.withValues(alpha: 0.4),
+                      width: isSelected ? 2.5 : 1.2,
                     ),
                   ),
+                  child: itemW > 40 && itemH > 30
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              icon,
+                              size: min(itemW * 0.35, 20),
+                              color: isSelected
+                                  ? AppColors.accent
+                                  : AppColors.textSecondary,
+                            ),
+                            if (itemW > 55)
+                              SizedBox(
+                                width: itemW - 4,
+                                child: Text(
+                                  item.name,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: min(itemW * 0.1, 10)
+                                        .clamp(6, 10)
+                                        .toDouble(),
+                                    fontWeight: FontWeight.w600,
+                                    color: isSelected
+                                        ? AppColors.accent
+                                        : AppColors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        )
+                      : Center(
+                          child: Icon(
+                            icon,
+                            size: min(itemW * 0.5, 14),
+                            color: isSelected
+                                ? AppColors.accent
+                                : AppColors.textSecondary,
+                          ),
+                        ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1830,6 +2037,16 @@ class _RoomShapePainter extends CustomPainter {
       final shape = path();
       canvas.drawPath(
           shape, Paint()..color = const Color(0xFFF5EDDE));
+      // Dim everything outside the outline — the drop zone reads at a glance.
+      final outside = Path.combine(
+        PathOperation.difference,
+        Path()..addRect(Offset.zero & size),
+        shape,
+      );
+      canvas.drawPath(
+          outside,
+          Paint()
+            ..color = Colors.black.withValues(alpha: 0.07));
       canvas.drawPath(
           shape,
           Paint()

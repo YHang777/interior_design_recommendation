@@ -200,17 +200,8 @@ class _RobotChatPanelState extends ConsumerState<RobotChatPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
+            padding: const EdgeInsets.fromLTRB(20, 6, 8, 4),
             child: Row(
               children: [
                 Expanded(

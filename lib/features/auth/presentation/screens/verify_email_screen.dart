@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/user_errors.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/float_button.dart';
 import '../providers/auth_providers.dart';
 import '../widgets/auth_button.dart';
@@ -51,19 +52,15 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
           .read(authStateProvider.notifier)
           .resendVerificationEmail(email: email, uid: uid);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Verification email sent! Check your inbox.'),
-        backgroundColor: AppColors.accent,
-        behavior: SnackBarBehavior.floating,
-      ));
+      showAppSnackbar(context, 'Verification email sent! Check your inbox.');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(userMessage(e,
-            fallback: 'Could not resend the email. Please try again.')),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-      ));
+      showAppSnackbar(
+        context,
+        userMessage(e,
+            fallback: 'Could not resend the email. Please try again.'),
+        isError: true,
+      );
     } finally {
       if (mounted) setState(() => _resending = false);
     }
@@ -171,14 +168,8 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen>
                   label: AppStrings.iveVerified,
                   onPressed: () {
                     context.go('/login');
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text(
-                            'Email verified! You can now log in.'),
-                        backgroundColor: AppColors.success,
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                    showAppSnackbar(
+                        context, 'Email verified! You can now log in.');
                   },
                 ),
                 const SizedBox(height: 12),

@@ -6,7 +6,6 @@ import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/chat_session.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/empty_state.dart';
-import '../../../../../shared/widgets/floating_nav_bar.dart';
 import '../../../../../shared/widgets/gradient_scaffold.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../marketplace/presentation/providers/marketplace_providers.dart';
@@ -390,14 +389,12 @@ class _AiRecommendationScreenState
   }
 
   Widget _buildComposer(BuildContext context) {
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    // With extendBody the shell's _BodyBuilder anchors the content bottom to
+    // max(keyboard, nav bar height), so a constant bottom padding IS the gap:
+    // 12px above the keyboard while it is open, 12px above the nav pill at
+    // rest — no metrics reads, no stale jumps.
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        12,
-        8,
-        12,
-        keyboardOpen ? 12 : 12 + kFloatingNavBarClearance,
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Row(
         children: [
           Container(
@@ -445,6 +442,7 @@ class _AiRecommendationScreenState
                       onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
+                  const SizedBox(width: 10),
                   Container(
                     width: 40,
                     height: 40,
@@ -555,17 +553,8 @@ class _ChatHistorySheet extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
+              padding: const EdgeInsets.fromLTRB(20, 6, 8, 6),
               child: Row(
                 children: [
                   Text('Chat history',

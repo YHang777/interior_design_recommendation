@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../core/utils/validators.dart';
+import '../../../../shared/widgets/app_feedback.dart';
 import '../../data/models/app_user.dart';
 import '../providers/auth_providers.dart';
 
@@ -76,13 +77,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-      ));
+    showAppSnackbar(context, message, isError: true);
   }
 
   @override
@@ -92,12 +87,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     ref.listen<AsyncValue<AppUser?>>(authStateProvider, (_, next) {
       next.whenOrNull(error: (e, _) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(userMessage(e,
-              fallback: 'Could not sign in. Please try again.')),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ));
+        showAppSnackbar(
+          context,
+          userMessage(e, fallback: 'Could not sign in. Please try again.'),
+          isError: true,
+        );
       });
     });
 

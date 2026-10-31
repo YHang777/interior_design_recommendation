@@ -20,8 +20,10 @@ import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
+import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/catalog_picker_sheet.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../../shared/widgets/float_button.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
 import '../../data/furniture_model_library.dart';
@@ -1349,14 +1351,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     Duration duration = const Duration(seconds: 4),
   }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: duration,
-      ));
+    showAppSnackbar(
+      context,
+      message,
+      color: color,
+      duration: duration,
+      isError: color == AppColors.error,
+    );
   }
 
   // ─── UI ───
@@ -1543,10 +1544,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    tooltip: 'Back',
-                    onPressed: () => Navigator.of(context).pop(),
+                  FloatingBackButton(
+                    onTap: () => Navigator.of(context).pop(),
                   ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -2329,12 +2328,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               if (value != null && value > 0 && value <= 20) {
                 Navigator.pop(ctx, value);
               } else {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text('Enter a size between 0.1 and 20 meters'),
-                    backgroundColor: AppColors.error,
-                  ),
-                );
+                showAppSnackbar(ctx,
+                    'Enter a size between 0.1 and 20 meters', isError: true);
               }
             },
           ),

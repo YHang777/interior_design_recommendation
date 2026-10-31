@@ -18,12 +18,13 @@ class FloatingNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-
+    // SafeArea already pads the system inset; the margin must not add it again
+    // or the pill sits at 2x the inset on gesture-nav phones and hugs the
+    // screen edge on inset-0 phones.
     return SafeArea(
       top: false,
       child: Container(
-        margin: EdgeInsets.fromLTRB(16, 0, 16, 10 + bottomInset),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(28),

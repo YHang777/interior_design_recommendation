@@ -20,6 +20,7 @@ import 'package:interior_design_recommendation/features/customer/homeowner/prese
 import 'package:interior_design_recommendation/models/cart_item.dart';
 import 'package:interior_design_recommendation/models/product.dart';
 import 'package:interior_design_recommendation/services/chat_history_store.dart';
+import 'package:interior_design_recommendation/shared/widgets/floating_nav_bar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _aiReply = 'Try a sage green sofa with oak accents.';
@@ -65,6 +66,29 @@ AppUser _user() => AppUser(
       updatedAt: DateTime(2026, 1, 1),
     );
 
+Widget _aiInShell() => Scaffold(
+      extendBody: true,
+      body: const AiRecommendationScreen(),
+      bottomNavigationBar: FloatingNavBar(
+        selectedIndex: 2,
+        onDestinationSelected: (_) {},
+        destinations: const [
+          NavigationDestination(
+              icon: Icon(Icons.home_outlined), label: 'Home'),
+          NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined), label: 'Design'),
+          NavigationDestination(
+              icon: Icon(Icons.psychology_outlined), label: 'AI'),
+          NavigationDestination(
+              icon: Icon(Icons.store_outlined), label: 'Shop'),
+          NavigationDestination(
+              icon: Icon(Icons.bookmark_outline), label: 'Saved'),
+          NavigationDestination(
+              icon: Icon(Icons.person_outline), label: 'Profile'),
+        ],
+      ),
+    );
+
 Future<void> _pumpScreen(
   WidgetTester tester,
   _ChatCapture capture, {
@@ -75,6 +99,7 @@ Future<void> _pumpScreen(
   BudgetPlan? budget,
   bool fail = false,
   bool signedIn = false,
+  bool inShell = false,
 }) async {
   await tester.binding.setSurfaceSize(const Size(393, 852));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -102,7 +127,9 @@ Future<void> _pumpScreen(
         savedDesignsProvider.overrideWith((ref) => Stream.value(const [])),
         customerOrdersProvider.overrideWith((ref) => Stream.value(const [])),
       ],
-      child: const MaterialApp(home: AiRecommendationScreen()),
+      child: MaterialApp(
+        home: inShell ? _aiInShell() : const AiRecommendationScreen(),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -222,6 +249,8 @@ void main() {
         matching: find.byType(Scrollable),
       ),
     );
+    await tester.ensureVisible(prompt);
+    await tester.pumpAndSettle();
     await tester.tap(prompt);
     await tester.pumpAndSettle();
 
@@ -625,5 +654,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(container.read(cartProvider), isEmpty);
     expect(find.text('Nordic Sofa removed from cart'), findsOneWidget);
+  });
+
+  testWidgets(
+      'composer sits 12px above the keyboard and 12px above the nav pill '
+      'with no rebuild in between', (tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+
+    await _pumpScreen(tester, _ChatCapture(), inShell: true);
+    const h = 852.0;
+
+    // Inset-0 phone: bar = margin 10 + 64, content bottom anchored to it.
+    final restBottom = tester.getRect(find.byType(TextField)).bottom;
+    final restNavTop = tester.getRect(find.byType(NavigationBar)).top;
+    expect(restNavTop, closeTo(h - 74, 2));
+    expect(restBottom, closeTo(h - 74 - 12, 2));
+    expect(restNavTop - restBottom, closeTo(12, 3));
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump();
+    await tester.pump();
+    // Content bottom rides the keyboard; padding stays 12 (y from top).
+    expect(tester.getRect(find.byType(TextField)).bottom,
+        closeTo(h - 300 - 12, 3));
+
+    tester.view.viewInsets = const FakeViewPadding();
+    await tester.pump();
+    await tester.pump();
+    final closedBottom = tester.getRect(find.byType(TextField)).bottom;
+    expect(closedBottom, closeTo(h - 74 - 12, 2));
+    expect(tester.getRect(find.byType(NavigationBar)).top - closedBottom,
+        closeTo(12, 3));
+  });
+
+  testWidgets('composer keeps the same 12px nav gap above a system inset',
+      (tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48);
+    tester.view.padding = const FakeViewPadding(bottom: 48);
+
+    await _pumpScreen(tester, _ChatCapture(), inShell: true);
+    const h = 852.0;
+
+    final navTop = tester.getRect(find.byType(NavigationBar)).top;
+    final bottom = tester.getRect(find.byType(TextField)).bottom;
+    expect(navTop, closeTo(h - 48 - 74, 2));
+    expect(bottom, closeTo(navTop - 12, 3));
+    expect(navTop - bottom, closeTo(12, 3));
   });
 }

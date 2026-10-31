@@ -63,12 +63,8 @@ class _SupplierProfileScreenState
   Future<void> _save(AppUser user) async {
     final name = _businessNameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Business name cannot be empty'),
-          backgroundColor: AppColors.error,
-        ),
-      );
+      showAppSnackbar(context, 'Business name cannot be empty',
+          isError: true);
       return;
     }
 
