@@ -180,6 +180,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // when new frames confirm a surface is furniture or a wall.
   final PlaneMemory _planeMemory = PlaneMemory();
 
+  // Flipped once, ArPlacementPolicy.relaxGatesAfter into the session: the
+  // placement / reticle gates drop to their relaxed sizes and the plane
+  // memory lowers its floor-establishment threshold (see _maybeRelaxGates).
+  bool _gatesRelaxed = false;
+
+  // Last successful camera height, used by the scan coach to reject
+  // furniture as floor coverage while floorY is still unknown.
+  double? _lastCameraY;
+  DateTime? _lastCameraYAt;
+
   double? get _currentLiveFloorY => _planeMemory.isFresh ? _planeMemory.floorY : null;
 
   // ─── Scan coach ───
@@ -485,16 +495,37 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   void _startScanCoachTicker() {
     _scanCoachTicker?.cancel();
     _scanCoachTicker = Timer.periodic(const Duration(seconds: 1), (_) async {
+      // Relaxation first — a slow/failed pose fetch must not delay it.
+      _maybeRelaxGates();
       // Feed the camera height to the plane memory — the floor sits ~1–2 m
       // below a handheld phone, which is what keeps table tops from ever
       // being mistaken for it.
-      final pose = await _session?.getCameraPose();
-      if (pose != null) {
-        _planeMemory.noteCameraY(pose.getTranslation().y);
+      try {
+        final pose = await _session?.getCameraPose();
+        final y = pose?.getTranslation().y;
+        if (y != null && y.isFinite && mounted) {
+          _lastCameraY = y;
+          _lastCameraYAt = DateTime.now();
+          _planeMemory.noteCameraY(y);
+        }
+      } catch (_) {
+        // Pose can be unavailable early in tracking; the next tick retries.
       }
       if (!mounted || !_scanCoachVisible) return;
       _maybeUpdateScanCoach();
     });
+  }
+
+  // A small or heavily fragmented floor may never reach the strict extent
+  // gates — after a long scan the relaxed sizes take over so placement is
+  // not locked out forever. Runs even when the coach card is dismissed.
+  void _maybeRelaxGates() {
+    if (_gatesRelaxed || _sessionStartedAt == null) return;
+    final elapsed = DateTime.now().difference(_sessionStartedAt!);
+    if (elapsed < ArPlacementPolicy.relaxGatesAfter) return;
+    _gatesRelaxed = true;
+    _planeMemory.relaxGates();
+    _scanCoachKey = null; // recompute the coach against the relaxed gate
   }
 
   void _startPlaneOverlayTick() {
@@ -539,6 +570,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         issueAt != null && now.difference(issueAt) < const Duration(seconds: 3)
             ? _trackingIssue
             : null;
+    final cameraAt = _lastCameraYAt;
+    final cameraY = cameraAt != null &&
+            now.difference(cameraAt) <= _liveFloorFreshFor
+        ? _lastCameraY
+        : null;
     return ScanCoach.evaluate(
       planes: fresh ? _livePlanes : const <ARPlaneInfo>[],
       elapsed: _sessionStartedAt == null
@@ -547,6 +583,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       trackingIssue: issue,
       floorY: _planeMemory.floorY,
       floorCoverageM: fresh ? _planeMemory.floorCoverageExtentM() : null,
+      cameraY: cameraY,
     );
   }
 
@@ -599,6 +636,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         liveFloorY: _currentLiveFloorY,
         vouchedFloor: _vouchedFloor,
         vouchedWall: _vouchedWall,
+        relaxed: _gatesRelaxed,
       );
     });
   }
@@ -776,7 +814,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           return null;
         }
         hit = ArPlacementPolicy.chooseFloorHit(candidates,
-            liveFloorY: liveFloorY, vouchedFloor: _vouchedFloor);
+            liveFloorY: liveFloorY,
+            vouchedFloor: _vouchedFloor,
+            relaxed: _gatesRelaxed);
         break;
       case PlacementType.wall:
         hit = ArPlacementPolicy.chooseWallHit(candidates,
@@ -786,7 +826,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         hit = ArPlacementPolicy.chooseAnyHit(candidates,
             liveFloorY: liveFloorY,
             vouchedFloor: _vouchedFloor,
-            vouchedWall: _vouchedWall);
+            vouchedWall: _vouchedWall,
+            relaxed: _gatesRelaxed);
         break;
     }
 

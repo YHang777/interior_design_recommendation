@@ -512,6 +512,51 @@ void main() {
     });
   });
 
+  group('ArPlacementPolicy gate relaxation (long unproductive scans)', () {
+    test('chooseFloorHit accepts a 0.8 m floor only when relaxed', () {
+      final floor = horizontalPlane(
+          x: 0, y: 0, z: 2, extentX: 0.8, extentZ: 0.75, distance: 2.0);
+      expect(ArPlacementPolicy.chooseFloorHit([floor], liveFloorY: 0.0),
+          isNull);
+      expect(
+        ArPlacementPolicy.chooseFloorHit([floor],
+            liveFloorY: 0.0, relaxed: true),
+        same(floor),
+      );
+    });
+
+    test('the relaxed gate never bypasses the live-floor height gate', () {
+      final top = horizontalPlane(
+          x: 0, y: 0.75, z: 2, extentX: 0.9, extentZ: 0.9, distance: 2.0);
+      expect(
+        ArPlacementPolicy.chooseFloorHit([top],
+            liveFloorY: 0.0, relaxed: true),
+        isNull,
+      );
+    });
+
+    test('liveFloorYFromPlanes relaxes the establishment gate', () {
+      final planes = [planeInfo(type: 1, cy: -0.02, ex: 1.0, ez: 0.95)];
+      expect(ArPlacementPolicy.liveFloorYFromPlanes(planes), isNull);
+      expect(
+        ArPlacementPolicy.liveFloorYFromPlanes(planes, relaxed: true),
+        closeTo(-0.02, 1e-9),
+      );
+    });
+
+    test('chooseAnyHit honors the relaxed floor gate too', () {
+      final floor = horizontalPlane(
+          x: 0, y: 0, z: 2, extentX: 0.8, extentZ: 0.75, distance: 2.0);
+      expect(
+          ArPlacementPolicy.chooseAnyHit([floor], liveFloorY: 0.0), isNull);
+      expect(
+        ArPlacementPolicy.chooseAnyHit([floor],
+            liveFloorY: 0.0, relaxed: true),
+        same(floor),
+      );
+    });
+  });
+
   group('ArPlacementPolicy.refinedAnchorTransform (tap projection)', () {
     ArPlaneFit fit({Vector3? center, Vector3? normal}) => ArPlaneFit(
           center: center ?? Vector3(0, 0, 0),

@@ -25,18 +25,18 @@ object PlaneRefiner {
         val confidence: Float,
     )
 
-    // Points closer than this to the fitted plane count as inliers. ~1.5 cm is
-    // tight enough to reject furniture legs / clutter but loose enough for the
-    // sub-centimetre noise ARCore's sparse point cloud carries.
-    private const val INLIER_THRESHOLD_M = 0.015f
+    // Points closer than this to the fitted plane count as inliers. 2.5 cm
+    // admits ARCore's noisier depth points and the accumulated buffer's
+    // mixed-age samples while still rejecting furniture legs / clutter.
+    private const val INLIER_THRESHOLD_M = 0.025f
     private const val MIN_POINTS = 24
-    private const val RANSAC_ITERATIONS = 90
+    private const val RANSAC_ITERATIONS = 120
     // How far a sampled normal may tilt from the expected axis and still be
     // accepted. Floors should be near-upright; walls near-vertical.
     private const val HORIZONTAL_MIN_NORMAL_Y = 0.85f
     private const val WALL_MAX_NORMAL_Y = 0.35f
     // RMS above this caps confidence — a loose fit is not trustworthy.
-    private const val MAX_RMS_FOR_CONFIDENCE_M = 0.04f
+    private const val MAX_RMS_FOR_CONFIDENCE_M = 0.05f
 
     /**
      * @param points interleaved x,y,z world-coord FloatBuffer from PointCloud.getPoints()
@@ -70,7 +70,21 @@ object PlaneRefiner {
             }
             i += 4
         }
+        return fit(gathered, seedX, seedY, seedZ, wantHorizontal)
+    }
 
+    /**
+     * Fits a plane to already-gathered world-space xyz samples (e.g. from
+     * [PointCloudAccumulator]) — the core shared by [refine] and the
+     * accumulated-buffer path.
+     */
+    fun fit(
+        gathered: ArrayList<FloatArray>,
+        seedX: Float,
+        seedY: Float,
+        seedZ: Float,
+        wantHorizontal: Boolean,
+    ): Fit? {
         if (gathered.size < MIN_POINTS) return null
         val pts = gathered.toTypedArray()
         val rng = Random(seedX.toBits() xor seedZ.toBits() xor seedY.toBits())

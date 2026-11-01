@@ -122,6 +122,13 @@ class ArView(
     private val planeIds = java.util.IdentityHashMap<Plane, Int>()
     private var nextPlaneId = 1
 
+    // Sliding point-cloud buffer feeding refinePlane — a single frame's cloud
+    // is too sparse for a confident RANSAC fit on weak sensors. Same
+    // UI-thread-only contract as latestFrame / livePlanes.
+    private val pointAccumulator = PointCloudAccumulator()
+    private var lastAccumCloudTimestamp = -1L
+    private var accumFrameCounter = 0
+
     private fun planeIdFor(plane: Plane): Int =
         planeIds.getOrPut(plane) { nextPlaneId++ }
 
@@ -156,6 +163,10 @@ class ArView(
     private fun handleDisableCamera(result: MethodChannel.Result) {
         try {
             isSessionPaused = true
+            // Points gathered before a pause may sit in a shifted world once
+            // tracking resumes — start the buffer fresh.
+            pointAccumulator.clear()
+            lastAccumCloudTimestamp = -1L
             sceneView.session?.pause()
             result.success(null)
         } catch (e: Exception) {
@@ -563,6 +574,25 @@ class ArView(
                         if (!isSessionPaused) {
                             run {
                                 latestFrame = frame
+                                // Feed the refinePlane point buffer — roughly
+                                // every 2nd frame keeps the cost low while
+                                // still tracking the cloud as the phone moves.
+                                accumFrameCounter++
+                                if (accumFrameCounter % 2 == 0) {
+                                    frame.acquirePointCloud()?.let { cloud ->
+                                        try {
+                                            if (cloud.timestamp != lastAccumCloudTimestamp) {
+                                                lastAccumCloudTimestamp = cloud.timestamp
+                                                pointAccumulator.ingest(
+                                                    cloud.points,
+                                                    frame.timestamp / 1_000_000L,
+                                                )
+                                            }
+                                        } finally {
+                                            cloud.release()
+                                        }
+                                    }
+                                }
                                 if (showAnimatedGuide) {
                                     frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
                                         if (plane.trackingState == TrackingState.TRACKING) {
@@ -1170,7 +1200,19 @@ class ArView(
             val cloud = frame.acquirePointCloud()
             try {
                 val points = cloud.points
-                val fit = PlaneRefiner.refine(
+                // Fold this frame into the sliding buffer, then fit against
+                // the accumulated surface — far more inliers than any single
+                // frame, especially on weak sensors. Single-frame path is
+                // only the fallback for the first moments of a session.
+                pointAccumulator.ingest(points, frame.timestamp / 1_000_000L)
+                val gathered = pointAccumulator.gather(seedX, seedY, seedZ, radiusM)
+                val fit = PlaneRefiner.fit(
+                    gathered = gathered,
+                    seedX = seedX,
+                    seedY = seedY,
+                    seedZ = seedZ,
+                    wantHorizontal = wantHorizontal,
+                ) ?: PlaneRefiner.refine(
                     points = points,
                     seedX = seedX,
                     seedY = seedY,
@@ -1519,6 +1561,7 @@ class ArView(
         anchorChannel.setMethodCallHandler(null)
         nodesMap.clear()
         livePlanes.clear()
+        pointAccumulator.clear()
         planesFrameCounter = 0
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }

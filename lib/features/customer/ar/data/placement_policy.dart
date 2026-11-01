@@ -17,6 +17,14 @@ class ArPlacementPolicy {
   // scanned before the floor can't become "the floor".
   static const double minFloorEstablishExtentM = 1.2;
 
+  // After relaxGatesAfter of scanning without a placeable floor, the relaxed
+  // gates take over — small rooms and heavily fragmented floors must not lock
+  // placement out forever. Furniture stays excluded by the live-floor height
+  // gate (maxAboveLiveFloorM), which never relaxes.
+  static const Duration relaxGatesAfter = Duration(seconds: 18);
+  static const double minFloorExtentRelaxedM = 0.7;
+  static const double minFloorEstablishExtentRelaxedM = 0.9;
+
   static const double minWallExtentM = 0.8;
 
   // The long side must reach this far, so chair backs and cabinet sides
@@ -63,11 +71,12 @@ class ArPlacementPolicy {
     return math.max(ex, ez);
   }
 
-  static bool planeIsLargeEnough(ARHitTestResult hit) {
+  static bool planeIsLargeEnough(ARHitTestResult hit, {bool relaxed = false}) {
     final ex = hit.planeExtentX;
     final ez = hit.planeExtentZ;
     if (ex == null || ez == null) return true;
-    return ex >= minFloorExtentM && ez >= minFloorExtentM;
+    final gate = relaxed ? minFloorExtentRelaxedM : minFloorExtentM;
+    return ex >= gate && ez >= gate;
   }
 
   static bool _floorHitQualifies(
@@ -75,11 +84,13 @@ class ArPlacementPolicy {
     double? liveFloorY,
     double maxAbove = maxAboveLiveFloorM,
     bool Function(ARHitTestResult hit)? vouchedFloor,
+    bool relaxed = false,
   }) {
     final ex = hit.planeExtentX;
     final ez = hit.planeExtentZ;
     if (ex == null || ez == null) return false;
-    final bigEnough = ex >= minFloorExtentM && ez >= minFloorExtentM;
+    final gate = relaxed ? minFloorExtentRelaxedM : minFloorExtentM;
+    final bigEnough = ex >= gate && ez >= gate;
     // A small ARCore fragment is still fine when the plane memory vouches
     // the spot as part of the accumulated real floor.
     if (!bigEnough && !(vouchedFloor?.call(hit) ?? false)) return false;
@@ -109,12 +120,14 @@ class ArPlacementPolicy {
     return true;
   }
 
-  static double? liveFloorYFromPlanes(List<ARPlaneInfo> planes) {
+  static double? liveFloorYFromPlanes(List<ARPlaneInfo> planes,
+      {bool relaxed = false}) {
+    final gate =
+        relaxed ? minFloorEstablishExtentRelaxedM : minFloorEstablishExtentM;
     double? min;
     for (final p in planes) {
       if (!p.isHorizontal) continue;
-      if (p.extentX < minFloorEstablishExtentM ||
-          p.extentZ < minFloorEstablishExtentM) {
+      if (p.extentX < gate || p.extentZ < gate) {
         continue;
       }
       if (!p.centerY.isFinite) continue;
@@ -128,6 +141,7 @@ class ArPlacementPolicy {
     required double liveFloorY,
     double maxAboveLiveFloorM = ArPlacementPolicy.maxAboveLiveFloorM,
     bool Function(ARHitTestResult hit)? vouchedFloor,
+    bool relaxed = false,
   }) {
     ARHitTestResult? best;
     double bestExtent = -1;
@@ -137,7 +151,8 @@ class ArPlacementPolicy {
       if (!_floorHitQualifies(h,
           liveFloorY: liveFloorY,
           maxAbove: maxAboveLiveFloorM,
-          vouchedFloor: vouchedFloor)) {
+          vouchedFloor: vouchedFloor,
+          relaxed: relaxed)) {
         continue;
       }
       final ex = h.planeExtentX!;
@@ -188,6 +203,7 @@ class ArPlacementPolicy {
     double? liveFloorY,
     bool Function(ARHitTestResult hit)? vouchedFloor,
     bool Function(ARHitTestResult hit)? vouchedWall,
+    bool relaxed = false,
   }) {
     ARHitTestResult? best;
     double bestDistance = double.infinity;
@@ -197,7 +213,9 @@ class ArPlacementPolicy {
       final horizontal = isHorizontalPlane(h);
       final ok = horizontal
           ? _floorHitQualifies(h,
-              liveFloorY: liveFloorY, vouchedFloor: vouchedFloor)
+              liveFloorY: liveFloorY,
+              vouchedFloor: vouchedFloor,
+              relaxed: relaxed)
           : _wallHitQualifies(h, vouchedWall: vouchedWall);
       if (!ok) continue;
       if (h.distance < bestDistance) {

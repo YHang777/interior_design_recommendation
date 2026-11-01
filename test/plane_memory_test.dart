@@ -42,6 +42,50 @@ void main() {
       expect(m.floorEstablished, isFalse);
     });
 
+    test('relaxGates lets a small real floor establish and classify', () {
+      final m = PlaneMemory();
+      final patch = plane(id: 1, type: 1, cy: -0.02, ex: 1.0, ez: 0.9);
+      m.ingest([patch]);
+      expect(m.floorEstablished, isFalse);
+      m.relaxGates();
+      m.ingest([patch]);
+      expect(m.floorEstablished, isTrue);
+      expect(m.floorY, closeTo(-0.02, 1e-9));
+      // The unknown→floor flip still needs the usual two agreeing frames.
+      m.ingest([patch]);
+      expect(m.classOf(1), PlaneClass.floor);
+    });
+
+    test('relaxGates is idempotent', () {
+      final m = PlaneMemory();
+      m.relaxGates();
+      m.minFloorEstablishExtentM = 0.5;
+      m.relaxGates();
+      expect(m.minFloorEstablishExtentM, 0.5,
+          reason: 'a second call must not clobber custom state');
+    });
+
+    test('once relaxed, the loose camera window cannot lock the floor', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.relaxGates();
+      // A bed top 1.0 m × 2.0 m clears the relaxed 0.9 m establish gate but
+      // sits only 0.55 m below the phone — outside the strict prior.
+      m.ingest([plane(id: 1, type: 1, cy: 0.95, ex: 1.0, ez: 2.0)]);
+      expect(m.floorEstablished, isFalse,
+          reason: 'a bed must not become floorY and then refuse the real '
+              'floor via the height gate');
+    });
+
+    test('once relaxed, a strict-band surface still establishes', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.relaxGates();
+      m.ingest([plane(id: 1, type: 1, cy: 0.0, ex: 0.95, ez: 1.4)]);
+      expect(m.floorEstablished, isTrue);
+      expect(m.floorY, closeTo(0.0, 1e-9));
+    });
+
     test('camera prior rejects a surface just below the phone', () {
       final m = PlaneMemory();
       m.noteCameraY(2.0);

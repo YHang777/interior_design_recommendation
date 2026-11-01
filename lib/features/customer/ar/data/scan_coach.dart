@@ -35,6 +35,13 @@ class ScanCoach {
   // they must not count as floor coverage.
   static const double floorLevelToleranceM = 0.3;
 
+  // While the floor height is still unknown, a surface only counts as
+  // coverage when it sits this far below the phone — the strict band
+  // mirrors PlaneMemory's camera-height prior, so desks / beds are not
+  // mistaken for the floor before floorY exists.
+  static const double plausibleFloorBelowMinM = 0.85;
+  static const double plausibleFloorBelowMaxM = 2.4;
+
   static const Duration stillHintAfter = Duration(seconds: 4);
 
   static ScanCoachState evaluate({
@@ -43,6 +50,7 @@ class ScanCoach {
     String? trackingIssue,
     double? floorY,
     double? floorCoverageM,
+    double? cameraY,
   }) {
     // Coverage = the smaller extent of the best FLOOR-level plane — the same
     // gate placement uses (both axes must fit the item footprint). A table
@@ -58,6 +66,12 @@ class ScanCoach {
         sawElevated = true;
         continue;
       }
+      if (floorY == null && cameraY != null) {
+        final below = cameraY - p.centerY;
+        if (below < plausibleFloorBelowMinM || below > plausibleFloorBelowMaxM) {
+          continue;
+        }
+      }
       sawPlane = true;
       final c = math.min(p.extentX, p.extentZ);
       if (c > coverage) coverage = c;
@@ -66,9 +80,18 @@ class ScanCoach {
       coverage = floorCoverageM;
       sawPlane = true;
     }
-    final ready = coverage >= ArPlacementPolicy.minFloorExtentM;
-    final progress =
-        (coverage / ArPlacementPolicy.minFloorExtentM).clamp(0.0, 1.0);
+    // Long scans on small / fragmented floors drop to the relaxed gate —
+    // never keep "keep sweeping" over a room that will never reach 1.0 m.
+    final relaxed = elapsed >= ArPlacementPolicy.relaxGatesAfter;
+    final gate = relaxed
+        ? ArPlacementPolicy.minFloorExtentRelaxedM
+        : ArPlacementPolicy.minFloorExtentM;
+    // Ready means placement can actually work: enough coverage AND an
+    // established floor height — placement refuses without floorY, so the
+    // coach must not promise "Ready" over a desk or a still-unconfirmed
+    // floor.
+    final ready = coverage >= gate && floorY != null;
+    final progress = (coverage / gate).clamp(0.0, 1.0);
     final ScanCoachStep step;
     if (ready) {
       step = ScanCoachStep.ready;

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 
+import 'placement_policy.dart';
+
 enum PlaneClass { floor, wall, elevatedSurface, smallSurface, unknown }
 
 class _TrackedPlane {
@@ -135,10 +137,13 @@ class PlaneMemory {
   final double extentAlpha;
 
   // A plane must be at least this large BOTH ways before it can establish the
-  // room's floor height — furniture tops saturate below this.
-  final double minFloorEstablishExtentM;
+  // room's floor height — furniture tops saturate below this. Lowered once by
+  // relaxGates() after a long unproductive scan.
+  double minFloorEstablishExtentM;
 
-  final double minFloorExtentM;
+  double minFloorExtentM;
+
+  bool gatesRelaxed = false;
 
   final double floorLevelToleranceM;
 
@@ -172,6 +177,24 @@ class PlaneMemory {
   // Floor fragments this close (gap between their rectangles) merge into one
   // region for coverage and vouching.
   final double clusterGapM;
+
+  // Called once by the AR screen after ArPlacementPolicy.relaxGatesAfter of
+  // scanning without a placeable floor — small-but-real floors can then
+  // establish and classify. Only ever LOWERS the gates (min with the current
+  // value), and once relaxed the loose camera band can no longer lock the
+  // floor (see _updateFloorY), so a bed or low bench cannot become floorY.
+  void relaxGates() {
+    if (gatesRelaxed) return;
+    gatesRelaxed = true;
+    minFloorEstablishExtentM = math.min(
+      minFloorEstablishExtentM,
+      ArPlacementPolicy.minFloorEstablishExtentRelaxedM,
+    );
+    minFloorExtentM = math.min(
+      minFloorExtentM,
+      ArPlacementPolicy.minFloorExtentRelaxedM,
+    );
+  }
 
   // ─── The two detection streams, kept strictly apart ────────────────────────
 
@@ -408,7 +431,10 @@ class PlaneMemory {
         }
       }
     }
-    final target = strictBest ?? looseBest;
+    // Once relaxed (long scan), the loose 0.5 m window can no longer lock
+    // the floor — a bed top sitting 0.55 m below the phone must not become
+    // floorY and then refuse the real floor via the height gate.
+    final target = strictBest ?? (gatesRelaxed ? null : looseBest);
     if (target == null) return;
     final current = _floorY;
     if (current == null) {

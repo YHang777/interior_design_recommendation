@@ -68,6 +68,7 @@ void main() {
       final s = ScanCoach.evaluate(
         planes: [_floor(x: 1.1, z: 1.0)],
         elapsed: Duration.zero,
+        floorY: -0.5,
       );
       expect(s.step, ScanCoachStep.ready);
       expect(s.ready, isTrue);
@@ -82,6 +83,7 @@ void main() {
           _floor(x: 1.2, z: 1.1),
         ],
         elapsed: Duration.zero,
+        floorY: -0.5,
       );
       expect(s.ready, isTrue);
     });
@@ -100,6 +102,7 @@ void main() {
       final s = ScanCoach.evaluate(
         planes: [_floor(x: 1.1, z: 1.0)],
         elapsed: Duration.zero,
+        floorY: -0.5,
         trackingIssue: 'INSUFFICIENT_LIGHT',
       );
       expect(s.ready, isTrue);
@@ -187,6 +190,84 @@ void main() {
       expect(ScanCoach.issueTip('NONE'), isNull);
       expect(ScanCoach.issueTip(null), isNull);
       expect(ScanCoach.issueTip('SOMETHING_ELSE'), isNull);
+    });
+
+    test('partial coverage is not ready before the relaxation window', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 0.8, z: 0.75)],
+        elapsed: const Duration(seconds: 17),
+      );
+      expect(s.ready, isFalse);
+      expect(s.step, ScanCoachStep.expandCoverage);
+    });
+
+    test('after the relaxation window a partial floor is ready', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 0.8, z: 0.75)],
+        elapsed: const Duration(seconds: 20),
+        floorY: -0.5,
+      );
+      expect(s.ready, isTrue);
+      expect(s.step, ScanCoachStep.ready);
+      expect(s.progress, 1.0);
+    });
+
+    test('relaxation still ignores furniture as coverage', () {
+      final s = ScanCoach.evaluate(
+        planes: [
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: 0.75,
+            centerZ: 0,
+            extentX: 1.4,
+            extentZ: 1.1,
+          ),
+        ],
+        elapsed: const Duration(seconds: 20),
+        floorY: 0,
+      );
+      expect(s.ready, isFalse);
+    });
+
+    test('never ready without an established floor height', () {
+      // Coverage alone must not promise placement — placement refuses
+      // while liveFloorY is null, so neither may the coach.
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 1.2, z: 1.1)],
+        elapsed: const Duration(seconds: 20),
+      );
+      expect(s.ready, isFalse);
+      expect(s.tip, isNot('Ready — tap the floor to place'));
+    });
+
+    test('while floorY is unknown, a desk is not floor coverage', () {
+      final s = ScanCoach.evaluate(
+        planes: [
+          ARPlaneInfo(
+            planeType: 1,
+            centerX: 0,
+            centerY: 0.75,
+            centerZ: 0,
+            extentX: 1.4,
+            extentZ: 1.1,
+          ),
+        ],
+        elapsed: Duration.zero,
+        cameraY: 1.5,
+      );
+      expect(s.ready, isFalse);
+      expect(s.step, ScanCoachStep.findFloor);
+      expect(s.tip, 'Tilt down until the floor fills the view');
+    });
+
+    test('while floorY is unknown, a camera-plausible floor still counts', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 0.35, z: 0.4)],
+        elapsed: Duration.zero,
+        cameraY: 1.5,
+      );
+      expect(s.step, ScanCoachStep.sweepFloor);
     });
   });
 }
