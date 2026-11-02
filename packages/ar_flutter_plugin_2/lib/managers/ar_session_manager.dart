@@ -13,7 +13,12 @@ import 'package:vector_math/vector_math_64.dart';
 
 typedef ARHitResultHandler = void Function(List<ARHitTestResult> hits);
 typedef ARPlaneResultHandler = void Function(int planeCount);
-typedef ARPlanesUpdateHandler = void Function(List<ARPlaneInfo> planes);
+// viewProjection ships with the planes from the SAME frame (null only for a
+// stale native side that still sends the bare list).
+typedef ARPlanesUpdateHandler = void Function(
+  List<ARPlaneInfo> planes,
+  Matrix4? viewProjection,
+);
 typedef ErrorHandler = void Function(String error);
 typedef TrackingFailureHandler = void Function(String? reason);
 
@@ -224,11 +229,29 @@ class ARSessionManager {
         case 'onPlanesUpdate':
           final handler = onPlanesUpdate;
           if (handler != null) {
-            final rawPlanes = (call.arguments as List<dynamic>? ?? const []);
+            final args = call.arguments;
+            List<dynamic> rawPlanes;
+            Matrix4? vp;
+            if (args is Map) {
+              rawPlanes = (args['planes'] as List?) ?? const [];
+              final proj = args['projection'] as List?;
+              final view = args['view'] as List?;
+              if (proj != null &&
+                  view != null &&
+                  proj.length == 16 &&
+                  view.length == 16) {
+                vp = Matrix4.fromList(
+                        [for (final e in proj) (e as num).toDouble()]) *
+                    Matrix4.fromList(
+                        [for (final e in view) (e as num).toDouble()]);
+              }
+            } else {
+              rawPlanes = (args as List?) ?? const [];
+            }
             final planes = rawPlanes
                 .map((p) => ARPlaneInfo.fromJson(Map<String, dynamic>.from(p)))
                 .toList();
-            handler(planes);
+            handler(planes, vp);
           }
           break;
         case 'onTrackingFailure':

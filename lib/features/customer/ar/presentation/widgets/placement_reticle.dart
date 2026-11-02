@@ -2,20 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../../core/constants/app_colors.dart';
+import '../../data/furniture_model_library.dart';
 import '../../data/placement_reticle.dart';
 
 class PlacementReticle extends StatelessWidget {
-  const PlacementReticle({super.key, required this.state, required this.label});
+  const PlacementReticle({
+    super.key,
+    required this.state,
+    required this.label,
+    required this.intent,
+  });
 
   final ReticleState state;
 
   final String label;
 
+  // Locked ring adopts the zone's color — green on the floor, blue on a
+  // wall — so the tap's result matches the overlay zones visually.
+  final PlacementType intent;
+
   @override
   Widget build(BuildContext context) {
     final locked = state.status == ReticleStatus.locked;
-    final warn = state.status == ReticleStatus.tooFar ||
+    final distWarn = state.status == ReticleStatus.tooFar ||
         state.status == ReticleStatus.tooClose;
+    // tooSmall keeps the focus icon but wears the warning color — the wall
+    // is there, it just can't host placement yet.
+    final warn = distWarn || state.status == ReticleStatus.tooSmall;
     // Apple FocusSquare idea: grow gently with distance so the reticle stays
     // legible on the floor (~1.5 m) without ballooning up close. Their exact
     // curve: 1.0 at 0.7 m, then +0.25 per extra meter.
@@ -26,7 +39,9 @@ class PlacementReticle extends StatelessWidget {
       size = (40 * factor).clamp(28.0, 56.0);
     }
     final ringColor = locked
-        ? AppColors.accentLight
+        ? (intent == PlacementType.wall
+            ? const Color(0xFF2196F3)
+            : AppColors.accentLight)
         : warn
             ? AppColors.warning
             : Colors.white70;
@@ -50,7 +65,7 @@ class PlacementReticle extends StatelessWidget {
             child: Icon(
               locked
                   ? Icons.check
-                  : warn
+                  : distWarn
                       ? Icons.north_east
                       : Icons.center_focus_strong,
               size: locked ? 16 : 18,

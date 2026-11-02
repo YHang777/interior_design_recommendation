@@ -4,7 +4,16 @@ import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
 import 'furniture_model_library.dart';
 import 'placement_policy.dart';
 
-enum ReticleStatus { searching, locked, tooFar, tooClose, noFloorYet }
+enum ReticleStatus {
+  searching,
+  locked,
+  tooFar,
+  tooClose,
+  noFloorYet,
+  // A wall is under the reticle at a workable distance but fails the
+  // size gates — blue zone visible, placement not yet allowed.
+  tooSmall,
+}
 
 class ReticleState {
   const ReticleState(this.status, {this.distanceM});
@@ -74,6 +83,11 @@ class ReticleAdvisor {
     if (tooClose.isNotEmpty) {
       return ReticleState(ReticleStatus.tooClose,
           distanceM: tooClose.first.distance);
+    }
+    // Vertical hits at a usable distance failed only the wall size/normal
+    // gates — say so instead of an endless "keep scanning" over blue.
+    if (intent == PlacementType.wall) {
+      return const ReticleState(ReticleStatus.tooSmall);
     }
     return const ReticleState(ReticleStatus.searching);
   }

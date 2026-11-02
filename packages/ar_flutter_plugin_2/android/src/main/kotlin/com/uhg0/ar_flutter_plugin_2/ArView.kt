@@ -102,6 +102,12 @@ class ArView(
     private var handleRotation = false
     private var isSessionPaused = false
 
+    // Plane-finding mode the app asked for (handleInit). SceneView's
+    // sessionConfiguration lambda re-applies this whenever it (re)creates
+    // the session — a session born after handleInit, or recreated on
+    // resume, must not boot back into DISABLED or no plane ever appears.
+    private var desiredPlaneFindingMode = Config.PlaneFindingMode.DISABLED
+
     // Last ARCore frame produced by this view's own session.update() call
     // (see the onFrame lambda in handleInit). Gesture callbacks run on the
     // same UI thread between two frame updates, so this frame is still
@@ -131,11 +137,6 @@ class ArView(
 
     private fun planeIdFor(plane: Plane): Int =
         planeIds.getOrPut(plane) { nextPlaneId++ }
-
-    // Throttle for the onPlanesUpdate telemetry: stream the live plane
-    // snapshot to Flutter every ~3rd frame (not every frame) to keep the
-    // channel traffic cheap. Counter is only touched on the frame thread.
-    private var planesFrameCounter = 0
 
     private class PointCloudNode(
         modelInstance: ModelInstance,
@@ -231,7 +232,7 @@ class ArView(
                     instantPlacementMode = Config.InstantPlacementMode.DISABLED
                     lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
                     focusMode = Config.FocusMode.AUTO
-                    planeFindingMode = Config.PlaneFindingMode.DISABLED
+                    planeFindingMode = desiredPlaneFindingMode
                 }
             }
         )
@@ -522,19 +523,29 @@ class ArView(
             handlePans = call.argument<Boolean>("handlePans") ?: false
             handleRotation = call.argument<Boolean>("handleRotation") ?: false
 
+            desiredPlaneFindingMode = when (argPlaneDetectionConfig) {
+                1 -> Config.PlaneFindingMode.HORIZONTAL
+                2 -> Config.PlaneFindingMode.VERTICAL
+                3 -> Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                else -> Config.PlaneFindingMode.DISABLED
+            }
             sceneView.session?.let { session ->
                 session.configure(session.config.apply {
                     depthMode = when (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
                         true -> Config.DepthMode.AUTOMATIC
                         else -> Config.DepthMode.DISABLED
                     }
-                    planeFindingMode = when (argPlaneDetectionConfig) {
-                        1 -> Config.PlaneFindingMode.HORIZONTAL
-                        2 -> Config.PlaneFindingMode.VERTICAL
-                        3 -> Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                        else -> Config.PlaneFindingMode.DISABLED
-                    }
+                    planeFindingMode = desiredPlaneFindingMode
                 })
+                // Probe only. ARCore's SemanticLabel set is outdoor categories
+                // (SKY/ROAD/BUILDING/… — no furniture/floor/table labels), so
+                // semantic mode can never mask indoor objects; logged so the
+                // device-side answer is visible in logcat.
+                Log.d(
+                    TAG,
+                    "semanticSupported=" +
+                        session.isSemanticModeSupported(Config.SemanticMode.ENABLED)
+                )
             }
 
             handleShowWorldOrigin(showWorldOrigin)
@@ -668,13 +679,23 @@ class ArView(
                                     }
                                 }
 
-                                // Stream the snapshot to Flutter every ~3rd frame (throttled).
-                                planesFrameCounter++
-                                if (planesFrameCounter % 3 == 0) {
-                                    val planesPayload = ArrayList(livePlanes.values)
-                                    mainScope.launch {
-                                        sessionChannel.invokeMethod("onPlanesUpdate", planesPayload)
-                                    }
+                                // Stream the snapshot with THIS frame's render matrices — every
+                                // frame so the overlay pose never trails the camera feed (the
+                                // old 3-frame throttle made the overlay swim when moving).
+                                val planesPayload = ArrayList(livePlanes.values)
+                                val projection = FloatArray(16)
+                                frame.camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
+                                val view = FloatArray(16)
+                                frame.camera.getViewMatrix(view, 0)
+                                mainScope.launch {
+                                    sessionChannel.invokeMethod(
+                                        "onPlanesUpdate",
+                                        mapOf(
+                                            "planes" to planesPayload,
+                                            "projection" to projection.map { it.toDouble() },
+                                            "view" to view.map { it.toDouble() },
+                                        ),
+                                    )
                                 }
                             }
                         }
@@ -1080,7 +1101,38 @@ class ArView(
             "extentX" to extentX,
             "extentZ" to extentZ,
             "yaw" to yaw,
+            "polygon" to planePolygonWorld(plane, m),
         )
+    }
+
+    // ARCore's real outline in world space (local x-z verts × centerPose) so
+    // the overlay draws the true shape instead of a bounding rectangle.
+    // Capped at 64 points — ARCore polygons are convex and usually far
+    // smaller; the cap bounds the channel payload on pathological planes.
+    private fun planePolygonWorld(plane: Plane, m: FloatArray): List<Double> {
+        val poly = try {
+            plane.polygon
+        } catch (e: Exception) {
+            return emptyList()
+        }
+        poly.rewind()
+        val total = poly.remaining() / 2
+        if (total < 3) return emptyList()
+        val step = maxOf(1, (total + 63) / 64)
+        val out = ArrayList<Double>(((total + step - 1) / step) * 3)
+        var i = 0
+        while (i < total) {
+            val lx = poly.get()
+            val lz = poly.get()
+            if (i % step == 0) {
+                // Column-major pose: world = R·(lx, 0, lz) + t.
+                out.add((m[0] * lx + m[8] * lz + m[12]).toDouble())
+                out.add((m[1] * lx + m[9] * lz + m[13]).toDouble())
+                out.add((m[2] * lx + m[10] * lz + m[14]).toDouble())
+            }
+            i++
+        }
+        return out
     }
 
     // The render-ready camera pair: getViewMatrix() incorporates the display
@@ -1562,7 +1614,6 @@ class ArView(
         nodesMap.clear()
         livePlanes.clear()
         pointAccumulator.clear()
-        planesFrameCounter = 0
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }
         pointCloudModelInstances.clear()

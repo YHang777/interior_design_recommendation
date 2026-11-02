@@ -189,6 +189,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // furniture as floor coverage while floorY is still unknown.
   double? _lastCameraY;
   DateTime? _lastCameraYAt;
+  double? _lastCameraPitchDeg;
+  DateTime? _lastCameraPitchAt;
 
   double? get _currentLiveFloorY => _planeMemory.isFresh ? _planeMemory.floorY : null;
 
@@ -224,13 +226,25 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   Timer? _reticleTimer;
 
-  // ─── Smoothed plane overlay ───
-
-  Timer? _overlayTimer;
+  // ─── Plane overlay (true polygons, same-frame projection) ───
 
   Matrix4? _overlayViewProjection;
 
   List<PlaneQuad> _overlayQuads = const [];
+
+  // Furniture-classified quads: punched out of the overlay and refused by
+  // placement when they sit between the camera and the tap.
+  List<PlaneQuad> _overlayMasks = const [];
+  final _overlayPolyEma = <int, List<Vector3>>{};
+
+  int _overlayEpoch = 0;
+
+  // Native sends planes+matrices every rendered frame; rebuild the screen
+  // at most ~30 Hz so the fresh pose is never older than one window (the
+  // old 300 ms timer is what made the overlay float).
+  static const _overlayMinInterval = Duration(milliseconds: 33);
+
+  DateTime? _overlayLastBuildAt;
 
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
@@ -270,7 +284,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachReadyTimer?.cancel();
     _scanCoachTicker?.cancel();
     _reticleTimer?.cancel();
-    _overlayTimer?.cancel();
     _stopRotateHold();
     _session?.dispose();
     super.dispose();
@@ -455,12 +468,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         });
       }
     };
-    _session!.onPlanesUpdate = (planes) {
+    _session!.onPlanesUpdate = (planes, vp) {
       if (!mounted) return;
       _planeMemory.ingest(planes);
       _livePlanes = _planeMemory.smoothedPlanes();
       _livePlanesAt = DateTime.now();
       _maybeUpdateScanCoach();
+      _updatePlaneOverlay(planes, vp);
     };
     _session!.onTrackingFailure = (reason) {
       if (!mounted) return;
@@ -489,7 +503,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _startWatchdog();
     _startScanCoachTicker();
     _startReticlePoll();
-    _startPlaneOverlayTick();
   }
 
   void _startScanCoachTicker() {
@@ -507,6 +520,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           _lastCameraY = y;
           _lastCameraYAt = DateTime.now();
           _planeMemory.noteCameraY(y);
+        }
+        // Camera pitch from the pose's Z column: the camera looks along
+        // −Z, so forward.y = −zAxis.y and pitch = asin(forward.y) —
+        // 0° at the horizon, negative when aimed at the floor.
+        final zy = pose?.entry(1, 2);
+        if (zy != null && zy.isFinite && mounted) {
+          _lastCameraPitchDeg =
+              math.asin((-zy).clamp(-1.0, 1.0)) * 180 / math.pi;
+          _lastCameraPitchAt = DateTime.now();
         }
       } catch (_) {
         // Pose can be unavailable early in tracking; the next tick retries.
@@ -528,37 +550,77 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachKey = null; // recompute the coach against the relaxed gate
   }
 
-  void _startPlaneOverlayTick() {
-    _overlayTimer?.cancel();
-    _overlayTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      _refreshPlaneOverlay();
-    });
-    _refreshPlaneOverlay();
+  // Rebuilds straight from the planes event — geometry and viewProjection
+  // come from the same frame, so the overlay stops lagging behind the camera.
+  void _updatePlaneOverlay(List<ARPlaneInfo> planes, Matrix4? vp) {
+    if (vp == null) {
+      // Stale native side still sends the bare list — fetch matrices the
+      // old way so the overlay keeps tracking during the transition.
+      final epoch = ++_overlayEpoch;
+      _session?.getCameraViewProjection().then((v) {
+        if (mounted && v != null && epoch == _overlayEpoch) {
+          _rebuildPlaneOverlay(planes, v);
+        }
+      });
+      return;
+    }
+    final last = _overlayLastBuildAt;
+    if (last != null &&
+        DateTime.now().difference(last) < _overlayMinInterval) {
+      return;
+    }
+    _rebuildPlaneOverlay(planes, vp);
   }
 
-  Future<void> _refreshPlaneOverlay() async {
-    final session = _session;
-    if (session == null || !mounted) return;
-    final vp = await session.getCameraViewProjection();
-    if (!mounted || vp == null) return;
+  void _rebuildPlaneOverlay(List<ARPlaneInfo> planes, Matrix4 vp) {
+    _overlayEpoch++;
+    _overlayLastBuildAt = DateTime.now();
     final quads = <PlaneQuad>[];
-    for (final p in _planeMemory.smoothedPlanes()) {
-      final cls = _planeMemory.classOf(p.id);
-      if (cls != PlaneClass.floor && cls != PlaneClass.wall) continue;
-      quads.add(PlaneQuad(
+    final masks = <PlaneQuad>[];
+    final seenIds = <int>{};
+    final floorY = _planeMemory.floorY;
+    final cameraY = _lastCameraY;
+    for (final p in planes) {
+      final zone = overlayZoneOf(
+        planeType: p.planeType,
+        centerY: p.centerY,
+        floorY: floorY,
+        cameraY: cameraY,
+      );
+      if (zone == OverlayZoneKind.drop) continue;
+      if (p.id != 0) seenIds.add(p.id);
+      final quad = PlaneQuad(
         center: Vector3(p.centerX, p.centerY, p.centerZ),
         yaw: p.yaw,
         extentX: p.extentX,
         extentZ: p.extentZ,
-        vertical: p.planeType == 2,
-        kind:
-            cls == PlaneClass.floor ? PlaneQuadKind.floor : PlaneQuadKind.wall,
-      ));
+        vertical: zone == OverlayZoneKind.wall,
+        kind: zone == OverlayZoneKind.wall
+            ? PlaneQuadKind.wall
+            : PlaneQuadKind.floor,
+        polygon: _smoothOverlayPolygon(p.id, polygonFromFlat(p.polygon)),
+      );
+      if (zone == OverlayZoneKind.mask) {
+        masks.add(quad);
+      } else {
+        quads.add(quad);
+      }
     }
+    _overlayPolyEma.removeWhere((id, _) => !seenIds.contains(id));
     setState(() {
       _overlayViewProjection = vp;
       _overlayQuads = quads;
+      _overlayMasks = masks;
     });
+  }
+
+  // Id-keyed vertex EMA so plane corners stop wobbling frame to frame.
+  // Untouched ids (rect fallback, id-less telemetry) pass through raw.
+  List<Vector3> _smoothOverlayPolygon(int id, List<Vector3> pts) {
+    if (id == 0 || pts.length < 3) return pts;
+    final smoothed = emaPolygon(_overlayPolyEma[id], pts);
+    _overlayPolyEma[id] = smoothed;
+    return smoothed;
   }
 
   ScanCoachState _computeScanCoach() {
@@ -575,6 +637,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             now.difference(cameraAt) <= _liveFloorFreshFor
         ? _lastCameraY
         : null;
+    final pitchAt = _lastCameraPitchAt;
+    final pitchDeg = pitchAt != null &&
+            now.difference(pitchAt) <= _liveFloorFreshFor
+        ? _lastCameraPitchDeg
+        : null;
     return ScanCoach.evaluate(
       planes: fresh ? _livePlanes : const <ARPlaneInfo>[],
       elapsed: _sessionStartedAt == null
@@ -584,6 +651,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       floorY: _planeMemory.floorY,
       floorCoverageM: fresh ? _planeMemory.floorCoverageExtentM() : null,
       cameraY: cameraY,
+      cameraPitchDeg: pitchDeg,
     );
   }
 
@@ -661,7 +729,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         if (_roomMode && _pendingFinish == null) return 'Choose a finish';
         final intent = _reticleIntent;
         if (intent == PlacementType.wall) return 'Tap to place on the wall';
-        if (intent == PlacementType.floor) return 'Tap to place';
+        if (intent == PlacementType.floor) return 'Tap to place on the floor';
         return 'Tap to place here';
       case ReticleStatus.searching:
         return 'Keep scanning';
@@ -671,6 +739,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         return 'Too far — step closer';
       case ReticleStatus.tooClose:
         return 'Too close — step back';
+      case ReticleStatus.tooSmall:
+        return 'Wall section too small — keep scanning';
     }
   }
 
@@ -832,19 +902,33 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
 
     if (hit == null) {
-      _showPlacementHint(requiredPlacement);
+      _showPlacementHint(requiredPlacement, rawHits: hits);
       return null;
     }
+
+    final seed = hit.worldTransform.getTranslation();
 
     // Placed items face the phone instead of a fixed world direction.
     final cameraPose = await _session?.getCameraPose();
     final cameraPos = cameraPose?.getTranslation();
 
+    // Furniture between the camera and the tap (seat tops, counter slabs):
+    // refuse instead of sinking the item behind the real object.
+    if (cameraPos != null &&
+        _overlayMasks.any((q) => segmentBlockedByQuad(
+              origin: cameraPos,
+              target: seed,
+              quad: q,
+            ))) {
+      _showMessage('That spot is behind furniture — tap an open area.',
+          color: AppColors.primaryLight);
+      return null;
+    }
+
     // Refine the surface from ARCore's raw point cloud (RANSAC). A confident
     // fit beats ARCore's jittery plane polygon, which is what made placed
     // items drift / float. Fall back to the raw hit when the fit is weak
     // (clutter, too few points) — never worse than before.
-    final seed = hit.worldTransform.getTranslation();
     final fit = await _session?.refinePlane(
       seed: seed,
       radiusM: 0.6,
@@ -908,18 +992,36 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         color: AppColors.warning, duration: const Duration(seconds: 2));
   }
 
-  void _showPlacementHint(PlacementType requiredPlacement) {
+  void _showPlacementHint(PlacementType requiredPlacement,
+      {List<ARHitTestResult>? rawHits}) {
     final now = DateTime.now();
     if (_lastPlacementHintAt != null &&
         now.difference(_lastPlacementHintAt!) <= const Duration(seconds: 2)) {
       return;
     }
     _lastPlacementHintAt = now;
+    final raw = rawHits ?? const <ARHitTestResult>[];
     String text;
     if (requiredPlacement == PlacementType.floor) {
-      text = 'Point your phone at the floor, then tap to place.';
+      final fy = _planeMemory.floorY;
+      final sawFurniture = fy != null &&
+          raw.any((h) {
+            if (!ArPlacementPolicy.isHorizontalPlane(h)) return false;
+            return h.worldTransform.getTranslation().y > fy + 0.3;
+          });
+      final sawFloorish = raw.any(ArPlacementPolicy.isHorizontalPlane);
+      if (sawFurniture) {
+        text = 'That looks like furniture — tap the open floor instead.';
+      } else if (sawFloorish) {
+        text = 'That floor spot is too small — keep scanning to grow it.';
+      } else {
+        text = 'Point your phone at the floor, then tap to place.';
+      }
     } else if (requiredPlacement == PlacementType.wall) {
-      text = 'Point your phone at a wall, then tap to place.';
+      final sawWall = raw.any((h) => !ArPlacementPolicy.isHorizontalPlane(h));
+      text = sawWall
+          ? 'That wall section is too small — keep scanning to grow it.'
+          : 'Point your phone at a wall, then tap to place.';
     } else {
       text = 'Point your phone at a floor or wall, then tap to place.';
     }
@@ -1560,6 +1662,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             child: PlaneOverlay(
               viewProjection: _overlayViewProjection!,
               quads: _overlayQuads,
+              masks: _overlayMasks,
             ),
           ),
 
@@ -1570,8 +1673,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           Positioned.fill(
             child: IgnorePointer(
               child: Center(
-                child:
-                    PlacementReticle(state: _reticle, label: _reticleLabel),
+                child: PlacementReticle(
+                  state: _reticle,
+                  label: _reticleLabel,
+                  intent: _reticleIntent,
+                ),
               ),
             ),
           ),

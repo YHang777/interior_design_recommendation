@@ -44,6 +44,10 @@ class ScanCoach {
 
   static const Duration stillHintAfter = Duration(seconds: 4);
 
+  // Below this many degrees under the horizon the camera barely sees the
+  // floor — ARCore needs the floor in frame to detect or grow it.
+  static const double shallowPitchDeg = -20;
+
   static ScanCoachState evaluate({
     required List<ARPlaneInfo> planes,
     required Duration elapsed,
@@ -51,6 +55,7 @@ class ScanCoach {
     double? floorY,
     double? floorCoverageM,
     double? cameraY,
+    double? cameraPitchDeg,
   }) {
     // Coverage = the smaller extent of the best FLOOR-level plane — the same
     // gate placement uses (both axes must fit the item footprint). A table
@@ -103,15 +108,29 @@ class ScanCoach {
       step = ScanCoachStep.findFloor;
     }
     final issue = issueTip(trackingIssue);
+    // Tracking trouble first, then the angle the user is holding the phone
+    // at — a shallow camera is usually WHY nothing else is happening.
+    final pitch = ready ? null : pitchTip(cameraPitchDeg);
     return ScanCoachState(
       step: step,
       ready: ready,
       progress: progress,
       tip: issue ??
+          pitch ??
           _baseTip(step,
               elapsed: elapsed, sawPlane: sawPlane, sawElevated: sawElevated),
       hasIssue: issue != null,
     );
+  }
+
+  // Concrete hold-angle advice while the phone is aimed near the horizon.
+  // Null when the reading is missing/stale or the angle is already fine.
+  static String? pitchTip(double? pitchDeg) {
+    if (pitchDeg == null || !pitchDeg.isFinite) return null;
+    if (pitchDeg > shallowPitchDeg) {
+      return 'Point the camera down about 30° toward the floor';
+    }
+    return null;
   }
 
   static String _baseTip(

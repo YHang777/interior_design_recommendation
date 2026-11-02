@@ -58,6 +58,19 @@ dependencies {
 // (flutter_stripe). The parcelize artifact is the drop-in replacement.
 configurations.all {
     exclude(group = "org.jetbrains.kotlin", module = "kotlin-android-extensions-runtime")
+    // 16 KB page-size support (Play requirement; the install-time
+    // "isn't 16 KB-compatible" warning): sceneview 2.2.1 ships filament
+    // 1.52.0 and mlkit vision-internal-vkp 18.2.2 with 4 KB ELF LOAD
+    // segments. These are the nearest versions verified 16 KB-aligned
+    // (filament 1.53.0, vkp 18.2.3) — one minor above each pin.
+    resolutionStrategy {
+        force(
+            "com.google.android.filament:filament-android:1.53.0",
+            "com.google.android.filament:filament-utils-android:1.53.0",
+            "com.google.android.filament:gltfio-android:1.53.0",
+            "com.google.mlkit:vision-internal-vkp:18.2.3",
+        )
+    }
 }
 
 flutter {

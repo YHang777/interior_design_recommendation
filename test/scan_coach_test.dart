@@ -270,4 +270,68 @@ void main() {
       expect(s.step, ScanCoachStep.sweepFloor);
     });
   });
+
+  group('camera pitch guidance', () {
+    test('a shallow camera gets the hold-angle tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: -8,
+      );
+      expect(s.tip, 'Point the camera down about 30° toward the floor');
+      expect(s.hasIssue, isFalse);
+    });
+
+    test('enough tilt keeps the step tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: -45,
+      );
+      expect(s.tip, 'Tilt down until the floor fills the view');
+    });
+
+    test('right at the threshold the angle tip stays quiet', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: ScanCoach.shallowPitchDeg,
+      );
+      expect(s.tip, 'Tilt down until the floor fills the view');
+    });
+
+    test('a tracking issue beats the pitch tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: -5,
+        trackingIssue: 'EXCESSIVE_MOTION',
+      );
+      expect(s.tip, contains('Slow down'));
+    });
+
+    test('ready never shows the pitch tip', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 1.1, z: 1.0)],
+        elapsed: Duration.zero,
+        floorY: -0.5,
+        cameraPitchDeg: -5,
+      );
+      expect(s.ready, isTrue);
+      expect(s.tip, 'Ready — tap the floor to place');
+    });
+
+    test('a missing pitch reading falls back to the step tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: null,
+      );
+      expect(s.tip, 'Tilt down until the floor fills the view');
+      expect(ScanCoach.pitchTip(null), isNull);
+      expect(ScanCoach.pitchTip(double.nan), isNull);
+      expect(ScanCoach.pitchTip(-30), isNull);
+      expect(ScanCoach.pitchTip(-10), isNotNull);
+    });
+  });
 }

@@ -8,6 +8,7 @@ class ARPlaneInfo {
     required this.extentZ,
     this.id = 0,
     this.yaw = 0,
+    this.polygon = const [],
   });
 
   // Stable per-session id minted by the plugin (0 when not reported).
@@ -32,6 +33,11 @@ class ARPlaneInfo {
   // for vertical ones.
   final double yaw;
 
+  // ARCore's real outline as world-space xyz triplets (flat, multiples of
+  // 3). Empty when the plugin doesn't report one — callers then fall back
+  // to the center/extents rectangle.
+  final List<double> polygon;
+
   bool get isHorizontal => planeType == 1;
 
   static ARPlaneInfo fromJson(Map<String, dynamic> json) => ARPlaneInfo(
@@ -43,6 +49,10 @@ class ARPlaneInfo {
         extentX: (json['extentX'] as num?)?.toDouble() ?? 0,
         extentZ: (json['extentZ'] as num?)?.toDouble() ?? 0,
         yaw: (json['yaw'] as num?)?.toDouble() ?? 0,
+        polygon: (json['polygon'] as List?)
+                ?.map((e) => (e as num).toDouble())
+                .toList() ??
+            const [],
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -54,5 +64,6 @@ class ARPlaneInfo {
         'extentX': extentX,
         'extentZ': extentZ,
         'yaw': yaw,
+        'polygon': polygon,
       };
 }

@@ -178,5 +178,36 @@ void main() {
       );
       expect(s.status, ReticleStatus.searching);
     });
+
+    test('wall intent on an undersized section → tooSmall, not searching', () {
+      // 1.2 × 0.6 m: vertical and in range, but under the 0.8 × 1.5 m gate.
+      final s = ReticleAdvisor.evaluate(
+        hits: [
+          verticalPlane(x: 0, z: 2, extentX: 1.2, extentZ: 0.6, distance: 2.0),
+        ],
+        intent: PlacementType.wall,
+      );
+      expect(s.status, ReticleStatus.tooSmall);
+    });
+
+    test('wall too far still reports tooFar before tooSmall', () {
+      final s = ReticleAdvisor.evaluate(
+        hits: [
+          verticalPlane(x: 0, z: 5, extentX: 1.2, extentZ: 0.6, distance: 5.5),
+        ],
+        intent: PlacementType.wall,
+      );
+      expect(s.status, ReticleStatus.tooFar);
+    });
+
+    test('wall intent with no vertical hit stays searching', () {
+      final s = ReticleAdvisor.evaluate(
+        hits: [
+          horizontalPlane(x: 0, y: 0, z: 2, extentX: 3, extentZ: 3),
+        ],
+        intent: PlacementType.wall,
+      );
+      expect(s.status, ReticleStatus.searching);
+    });
   });
 }
