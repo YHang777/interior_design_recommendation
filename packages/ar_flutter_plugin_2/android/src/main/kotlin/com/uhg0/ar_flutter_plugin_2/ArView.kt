@@ -135,6 +135,13 @@ class ArView(
     private var lastAccumCloudTimestamp = -1L
     private var accumFrameCounter = 0
 
+    // onPlanesUpdate goes out every 2nd rendered frame (~30 Hz): the Dart
+    // overlay rebuild is capped at 33 ms anyway, so per-frame sends only
+    // doubled codec/gc pressure for no visible gain.
+    private var planesFrameCounter = 0
+    private var firstFrameTraced = false
+    private var frameErrorTraced = false
+
     private fun planeIdFor(plane: Plane): Int =
         planeIds.getOrPut(plane) { nextPlaneId++ }
 
@@ -223,6 +230,7 @@ class ArView(
         }
 
     init {
+        NativeTrace.log(viewContext, "arview: init start")
         sceneView = ARSceneView(
             context = viewContext,
             sharedLifecycle = lifecycle,
@@ -236,7 +244,8 @@ class ArView(
                 }
             }
         )
-        
+        NativeTrace.log(viewContext, "arview: scene view created")
+
         rootLayout.addView(sceneView)
 
         sessionChannel.setMethodCallHandler(onSessionMethodCall)
@@ -512,6 +521,7 @@ class ArView(
         call: MethodCall,
         result: MethodChannel.Result,
     ) {
+        NativeTrace.log(viewContext, "arview: handleInit begin")
         try {
             val argShowAnimatedGuide = call.argument<Boolean>("showAnimatedGuide") ?: true
             val argShowFeaturePoints = call.argument<Boolean>("showFeaturePoints") ?: false
@@ -540,20 +550,33 @@ class ArView(
                 // Probe only. ARCore's SemanticLabel set is outdoor categories
                 // (SKY/ROAD/BUILDING/… — no furniture/floor/table labels), so
                 // semantic mode can never mask indoor objects; logged so the
-                // device-side answer is visible in logcat.
-                Log.d(
-                    TAG,
-                    "semanticSupported=" +
-                        session.isSemanticModeSupported(Config.SemanticMode.ENABLED)
-                )
+                // device-side answer is visible in logcat. Guarded — a stale
+                // ARCore runtime may not know the API at all.
+                try {
+                    Log.d(
+                        TAG,
+                        "semanticSupported=" +
+                            session.isSemanticModeSupported(Config.SemanticMode.ENABLED)
+                    )
+                } catch (e: Throwable) {
+                    NativeTrace.log(viewContext, "arview: semantic probe failed: $e")
+                }
             }
 
             handleShowWorldOrigin(showWorldOrigin)
             
             sceneView.apply {
-                environment = environmentLoader.createHDREnvironment(
-                    assetFileLocation = "environments/evening_meadow_2k.hdr"
-                )!!
+                // Cosmetic lighting only — decode failure (missing asset, OOM
+                // on a low-RAM device) must degrade to default lighting, not
+                // take the session down.
+                environment = try {
+                    environmentLoader.createHDREnvironment(
+                        assetFileLocation = "environments/evening_meadow_2k.hdr"
+                    )
+                } catch (e: Throwable) {
+                    NativeTrace.log(viewContext, "arview: env load failed: $e")
+                    null
+                }
 
                 planeRenderer.isEnabled = argShowPlanes
                 planeRenderer.isVisible = argShowPlanes
@@ -585,6 +608,10 @@ class ArView(
                         if (!isSessionPaused) {
                             run {
                                 latestFrame = frame
+                                if (!firstFrameTraced) {
+                                    firstFrameTraced = true
+                                    NativeTrace.log(viewContext, "arview: first frame")
+                                }
                                 // Feed the refinePlane point buffer — roughly
                                 // every 2nd frame keeps the cost low while
                                 // still tracking the cloud as the phone moves.
@@ -653,6 +680,9 @@ class ArView(
                                         !detectedPlanes.contains(plane)
                                     ) {
                                         detectedPlanes.add(plane)
+                                        if (detectedPlanes.size == 1) {
+                                            NativeTrace.log(viewContext, "arview: first plane")
+                                        }
                                         mainScope.launch {
                                             sessionChannel.invokeMethod("onPlaneDetected", detectedPlanes.size)
                                         }
@@ -679,27 +709,33 @@ class ArView(
                                     }
                                 }
 
-                                // Stream the snapshot with THIS frame's render matrices — every
-                                // frame so the overlay pose never trails the camera feed (the
-                                // old 3-frame throttle made the overlay swim when moving).
-                                val planesPayload = ArrayList(livePlanes.values)
-                                val projection = FloatArray(16)
-                                frame.camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
-                                val view = FloatArray(16)
-                                frame.camera.getViewMatrix(view, 0)
-                                mainScope.launch {
-                                    sessionChannel.invokeMethod(
-                                        "onPlanesUpdate",
-                                        mapOf(
-                                            "planes" to planesPayload,
-                                            "projection" to projection.map { it.toDouble() },
-                                            "view" to view.map { it.toDouble() },
-                                        ),
-                                    )
+                                // Stream the snapshot with THIS frame's render
+                                // matrices (planes and pose stay same-frame, so
+                                // the overlay never trails), every 2nd rendered
+                                // frame — the Dart overlay rebuild is capped at
+                                // 30 Hz anyway, so per-frame sends only doubled
+                                // codec/gc pressure for no visible gain.
+                                planesFrameCounter++
+                                if (planesFrameCounter % 2 == 0) {
+                                    val planesPayload = ArrayList(livePlanes.values)
+                                    val projection = FloatArray(16)
+                                    frame.camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
+                                    val view = FloatArray(16)
+                                    frame.camera.getViewMatrix(view, 0)
+                                    mainScope.launch {
+                                        sessionChannel.invokeMethod(
+                                            "onPlanesUpdate",
+                                            mapOf(
+                                                "planes" to planesPayload,
+                                                "projection" to projection.map { it.toDouble() },
+                                                "view" to view.map { it.toDouble() },
+                                            ),
+                                        )
+                                    }
                                 }
                             }
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         when (e) {
                             is SessionPausedException -> {
                                 // Ignorer silencieusement cette exception quand la session est en pause
@@ -708,6 +744,13 @@ class ArView(
                             else -> {
                                 Log.e(TAG, "Error during frame update", e)
                                 e.printStackTrace()
+                                // Throwable, not Exception — an Error (e.g.
+                                // OutOfMemoryError under pressure) must skip a
+                                // frame, not kill the app from the render loop.
+                                if (!frameErrorTraced) {
+                                    frameErrorTraced = true
+                                    NativeTrace.log(viewContext, "arview: frame error: $e")
+                                }
                             }
                         }
                     }
@@ -785,9 +828,13 @@ class ArView(
                     Log.i(TAG, "ℹ️ Utilisation de la texture par défaut")
                 }
             }
+            NativeTrace.log(viewContext, "arview: handleInit done")
             result.success(null)
-        } catch (e: Exception) {
-            result.error("AR_VIEW_ERROR", e.message, null)
+        } catch (e: Throwable) {
+            // Throwable, not Exception — OutOfMemoryError from the HDR/model
+            // loads must surface as a channel error, not a process death.
+            NativeTrace.log(viewContext, "arview: handleInit FAILED: $e")
+            result.error("AR_VIEW_ERROR", e.toString(), null)
         }
     }
 
@@ -1608,6 +1655,7 @@ class ArView(
 
     override fun dispose() {
         Log.i(TAG, "dispose")
+        NativeTrace.log(viewContext, "arview: dispose")
         sessionChannel.setMethodCallHandler(null)
         objectChannel.setMethodCallHandler(null)
         anchorChannel.setMethodCallHandler(null)

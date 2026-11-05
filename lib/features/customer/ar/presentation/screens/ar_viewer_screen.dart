@@ -18,6 +18,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/boot_trace.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
@@ -272,6 +273,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   @override
   void initState() {
     super.initState();
+    BootTrace.log('ar-screen: initState product=${widget.product != null}');
     _resolveProductModel();
     _checkArCore();
   }
@@ -294,6 +296,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _watchdog = Timer(const Duration(seconds: 12), () {
       if (!mounted) return;
       if (_planesFound || _arError != null || _placed.isNotEmpty) return;
+      BootTrace.log('ar-screen: watchdog — no planes after 12s');
       setState(() => _arUnresponsive = true);
     });
   }
@@ -417,6 +420,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       available = true;
     }
     if (!mounted) return;
+    BootTrace.log('ar-screen: arCoreAvailable=$available');
     setState(() {
       _arCoreAvailable = available;
       _checking = false;
@@ -445,8 +449,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _objects = objects;
     _anchors = anchors;
     _sessionStartedAt = DateTime.now();
+    BootTrace.log('ar-screen: ar view created');
 
-    _session!.onInitialize(
+    _session!
+        .onInitialize(
       showAnimatedGuide: false,
       showFeaturePoints: false,
       // SceneView's raw ARCore polygons are replaced by the smoothed,
@@ -455,7 +461,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       handleTaps: true,
       handlePans: true,
       handleRotation: true,
-    );
+    )
+        .catchError((Object e) {
+      // init failures used to die as unawaited-future noise; trace them and
+      // surface the same error state a native onError would.
+      BootTrace.log('ar-screen: init failed: $e');
+      if (mounted) setState(() => _arError = 'AR failed to start on this device.');
+    });
     _objects!.onInitialize();
 
     _session!.onPlaneOrPointTap = _onPlaneOrPointTap;
@@ -488,6 +500,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       _maybeUpdateScanCoach();
     };
     _session!.onError = (error) {
+      BootTrace.log('ar-screen: onError $error');
       if (mounted) setState(() => _arError = error);
     };
     _objects!.onNodeTap = _onNodeTap;

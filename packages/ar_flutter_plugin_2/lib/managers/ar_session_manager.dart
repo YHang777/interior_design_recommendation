@@ -271,7 +271,7 @@ class ARSessionManager {
     return Future.value();
   }
 
-  onInitialize({
+  Future<void> onInitialize({
     bool showAnimatedGuide = true,
     bool showFeaturePoints = false,
     bool showPlanes = true,
@@ -281,7 +281,7 @@ class ARSessionManager {
     bool handlePans = false,
     bool handleRotation = false,
   }) {
-    _channel.invokeMethod<void>('init', {
+    return _channel.invokeMethod<void>('init', {
       'showAnimatedGuide': showAnimatedGuide,
       'showFeaturePoints': showFeaturePoints,
       'planeDetectionConfig': planeDetectionConfig.index,
