@@ -58,16 +58,15 @@ dependencies {
 // (flutter_stripe). The parcelize artifact is the drop-in replacement.
 configurations.all {
     exclude(group = "org.jetbrains.kotlin", module = "kotlin-android-extensions-runtime")
-    // 16 KB page-size support (Play requirement; the install-time
-    // "isn't 16 KB-compatible" warning): sceneview 2.2.1 ships filament
-    // 1.52.0 and mlkit vision-internal-vkp 18.2.2 with 4 KB ELF LOAD
-    // segments. These are the nearest versions verified 16 KB-aligned
-    // (filament 1.53.0, vkp 18.2.3) — one minor above each pin.
+    // filament must stay paired with sceneview 2.2.1's pin (1.52.0):
+    // its bundled .filamat blobs carry MAT_VERS 52 and the 1.53.0 runtime
+    // aborts on the version gate (PreconditionPanic SIGABRT) inside the
+    // ARSceneView constructor, closing the whole app. The 16 KB fix is to
+    // move to sceneview 2.3.4 — it bundles filament 1.68.2 with matching
+    // materials — not to force filament across the material ABI. vkp
+    // 18.2.3 is mlkit's 16 KB-aligned patch and unrelated to filament.
     resolutionStrategy {
         force(
-            "com.google.android.filament:filament-android:1.53.0",
-            "com.google.android.filament:filament-utils-android:1.53.0",
-            "com.google.android.filament:gltfio-android:1.53.0",
             "com.google.mlkit:vision-internal-vkp:18.2.3",
         )
     }

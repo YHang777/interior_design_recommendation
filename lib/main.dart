@@ -26,45 +26,7 @@ void main() async {
     statusBarIconBrightness: Brightness.dark,
   ));
 
-  await
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  3
-  BootTrace.log('boot: before Firebase.initializeApp');
+  await BootTrace.log('boot: before Firebase.initializeApp');
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

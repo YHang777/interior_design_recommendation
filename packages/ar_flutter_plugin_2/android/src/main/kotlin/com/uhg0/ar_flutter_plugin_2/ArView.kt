@@ -569,13 +569,12 @@ class ArView(
                 // Cosmetic lighting only — decode failure (missing asset, OOM
                 // on a low-RAM device) must degrade to default lighting, not
                 // take the session down.
-                environment = try {
+                try {
                     environmentLoader.createHDREnvironment(
                         assetFileLocation = "environments/evening_meadow_2k.hdr"
-                    )
+                    )?.let { environment = it }
                 } catch (e: Throwable) {
                     NativeTrace.log(viewContext, "arview: env load failed: $e")
-                    null
                 }
 
                 planeRenderer.isEnabled = argShowPlanes
