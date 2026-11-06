@@ -462,6 +462,13 @@ void main() {
       expect(ARPlaneInfo.fromJson(<String, dynamic>{}).tracking, isTrue,
           reason: 'legacy native sides read as tracking');
     });
+
+    test('subsumed maps from the payload and defaults to false', () {
+      expect(ARPlaneInfo.fromJson({'subsumed': true}).subsumed, isTrue);
+      expect(ARPlaneInfo.fromJson({'subsumed': false}).subsumed, isFalse);
+      expect(ARPlaneInfo.fromJson(<String, dynamic>{}).subsumed, isFalse,
+          reason: 'legacy native sides never flag subsumption');
+    });
   });
 
   group('PlaneMemory floorY probe candidate', () {

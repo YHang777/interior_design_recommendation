@@ -3,6 +3,7 @@ package com.uhg0.ar_flutter_plugin_2
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.Image
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -17,12 +18,15 @@ import android.widget.FrameLayout
 import androidx.lifecycle.Lifecycle
 import com.google.ar.core.Anchor.CloudAnchorState
 import com.google.ar.core.Config
+import com.google.ar.core.Coordinates2d
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
+import com.google.ar.core.exceptions.NotTrackingException
+import com.google.ar.core.exceptions.NotYetAvailableException
 import com.uhg0.ar_flutter_plugin_2.Serialization.deserializePoseParts
 import com.uhg0.ar_flutter_plugin_2.Serialization.serializeHitResult
 import com.uhg0.ar_flutter_plugin_2.Serialization.serializePose
@@ -62,10 +66,13 @@ import io.github.sceneview.math.Scale
 import io.github.sceneview.math.colorOf
 import io.github.sceneview.loaders.MaterialLoader
 import com.google.ar.core.exceptions.SessionPausedException
+import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class ArView(
     context: Context,
@@ -183,6 +190,8 @@ class ArView(
                 "enableCamera" -> handleEnableCamera(result)
                 "refinePlane" -> handleRefinePlane(call, result)
                 "probeFloorY" -> handleProbeFloorY(call, result)
+                "getCloudPoints" -> handleCloudPoints(result)
+                "getDepthPoints" -> handleDepthPoints(result)
                 "hitTest" -> handleHitTest(call, result)
                 else -> result.notImplemented()
             }
@@ -845,14 +854,12 @@ class ArView(
                                 // tracking. Payload is center + type + extent only (cheap).
                                 frame.getUpdatedTrackables(Plane::class.java).forEach { plane ->
                                     // Subsumed planes are absorbed into a larger
-                                    // one — drop them so the app never counts a
-                                    // table top twice (once alone, once inside
-                                    // the floor polygon it merged into).
-                                    if (plane.subsumedBy != null) {
-                                        livePlanes.remove(plane)
-                                        planeLastFreshAt.remove(plane)
-                                        return@forEach
-                                    }
+                                    // one. They stay in the payload flagged
+                                    // `subsumed`: an absorbed table top is
+                                    // exactly the object mask the overlay needs
+                                    // to punch furniture out of the floor paint
+                                    // (Dart routes subsumed planes to masks and
+                                    // keeps them out of floor coverage).
                                     when (plane.trackingState) {
                                         TrackingState.TRACKING -> {
                                             livePlanes[plane] =
@@ -915,6 +922,7 @@ class ArView(
                                         var paused = 0
                                         var stopped = 0
                                         var vertical = 0
+                                        var subsumed = 0
                                         for (p in all) {
                                             when (p.trackingState) {
                                                 TrackingState.TRACKING -> track++
@@ -922,6 +930,7 @@ class ArView(
                                                 else -> stopped++
                                             }
                                             if (p.type == Plane.Type.VERTICAL) vertical++
+                                            if (p.subsumedBy != null) subsumed++
                                         }
                                         val fmq = try {
                                             when (s.estimateFeatureMapQualityForHosting(frame.camera.pose)) {
@@ -934,7 +943,7 @@ class ArView(
                                         }
                                         NativeTrace.log(
                                             viewContext,
-                                            "arview: planeSnap all=${all.size} track=$track paused=$paused stopped=$stopped vertical=$vertical live=${livePlanes.size} fmq=$fmq",
+                                            "arview: planeSnap all=${all.size} track=$track paused=$paused stopped=$stopped vertical=$vertical subsumed=$subsumed live=${livePlanes.size} fmq=$fmq",
                                         )
                                     }
                                 }
@@ -1405,6 +1414,7 @@ class ArView(
             "extentZ" to extentZ,
             "yaw" to yaw,
             "polygon" to planePolygonWorld(plane, m),
+            "subsumed" to (plane.subsumedBy != null),
         )
     }
 
@@ -1667,6 +1677,210 @@ class ArView(
             NativeTrace.log(viewContext, "arview: probeFloorY failed: $e")
             result.error("PROBE_FLOOR_Y_ERROR", e.message, null)
         }
+    }
+
+    private fun handleCloudPoints(result: MethodChannel.Result) {
+        try {
+            val gathered = pointAccumulator.gather(0f, 0f, 0f, 1000f)
+            if (gathered.isEmpty()) {
+                result.success(emptyList<Double>())
+                return
+            }
+            val stride = (gathered.size / 400).coerceAtLeast(1)
+            val out = ArrayList<Double>(((gathered.size + stride - 1) / stride) * 3)
+            var i = 0
+            while (i < gathered.size) {
+                val p = gathered[i]
+                out.add(p[0].toDouble())
+                out.add(p[1].toDouble())
+                out.add(p[2].toDouble())
+                i += stride
+            }
+            result.success(out)
+        } catch (e: Exception) {
+            Log.e(TAG, "getCloudPoints failed", e)
+            NativeTrace.log(viewContext, "arview: getCloudPoints failed: $e")
+            result.error("GET_CLOUD_POINTS_ERROR", e.message, null)
+        }
+    }
+
+    // Depth image → world xyz. Depth is dense geometry, so unlike the
+    // feature-point cloud it still returns points on white/textureless
+    // walls, where ARCore's plane finder has no visual features to track.
+    private fun handleDepthPoints(result: MethodChannel.Result) {
+        try {
+            val session = sceneView.session
+            // Devices without depth (or an app that never enabled it) must
+            // degrade to an empty list, never throw at Dart.
+            if (session == null || session.config.depthMode == Config.DepthMode.DISABLED) {
+                NativeTrace.log(viewContext, "arview: getDepthPoints depth off")
+                result.success(emptyList<Double>())
+                return
+            }
+            // Same frame the render loop already produced — never call
+            // session.update() here (that desyncs tracking).
+            val frame = latestFrame
+            if (frame == null) {
+                result.success(emptyList<Double>())
+                return
+            }
+            val depth = try {
+                frame.acquireDepthImage()
+            } catch (e: NotYetAvailableException) {
+                NativeTrace.log(viewContext, "arview: getDepthPoints not yet available")
+                result.success(emptyList<Double>())
+                return
+            } catch (e: NotTrackingException) {
+                NativeTrace.log(viewContext, "arview: getDepthPoints not tracking")
+                result.success(emptyList<Double>())
+                return
+            }
+            // Compute first, reply second: an exception out of close() must
+            // not race an already-submitted success into result.error.
+            val points = try {
+                depthWorldPoints(frame, depth)
+            } finally {
+                // A leaked depth image makes ARCore fail within seconds.
+                depth.close()
+            }
+            result.success(points)
+        } catch (e: Exception) {
+            Log.e(TAG, "getDepthPoints failed", e)
+            NativeTrace.log(viewContext, "arview: getDepthPoints failed: $e")
+            result.error("GET_DEPTH_POINTS_ERROR", e.message, null)
+        }
+    }
+
+    // Stride-samples the depth grid (≤ ~500 raw candidates), unprojects each
+    // valid pixel to world space, and returns flat xyz triplets downsampled
+    // to at most ~400 points — the same contract as handleCloudPoints.
+    private fun depthWorldPoints(frame: Frame, depth: Image): List<Double> {
+        val camera = frame.camera
+        if (camera.trackingState != TrackingState.TRACKING) {
+            NativeTrace.log(viewContext, "arview: getDepthPoints camera untracked")
+            return emptyList()
+        }
+        val intrinsics = camera.imageIntrinsics
+        val focal = intrinsics.focalLength
+        val principal = intrinsics.principalPoint
+        val camDims = intrinsics.imageDimensions
+        val fx = focal[0]
+        val fy = focal[1]
+        val cx = principal[0]
+        val cy = principal[1]
+        val camW = camDims[0]
+        val camH = camDims[1]
+        if (fx <= 0f || fy <= 0f || camW <= 0 || camH <= 0) return emptyList()
+
+        val pose = camera.pose
+        val tx = pose.tx()
+        val ty = pose.ty()
+        val tz = pose.tz()
+        // Hamilton quaternion → row-major rotation matrix; world = R·p + t.
+        val qx = pose.qx()
+        val qy = pose.qy()
+        val qz = pose.qz()
+        val qw = pose.qw()
+        val r00 = 1f - 2f * (qy * qy + qz * qz)
+        val r01 = 2f * (qx * qy - qz * qw)
+        val r02 = 2f * (qx * qz + qy * qw)
+        val r10 = 2f * (qx * qy + qz * qw)
+        val r11 = 1f - 2f * (qx * qx + qz * qz)
+        val r12 = 2f * (qy * qz - qx * qw)
+        val r20 = 2f * (qx * qz - qy * qw)
+        val r21 = 2f * (qy * qz + qx * qw)
+        val r22 = 1f - 2f * (qx * qx + qy * qy)
+
+        val depthW = depth.width
+        val depthH = depth.height
+        if (depthW <= 0 || depthH <= 0) return emptyList()
+        val plane = depth.planes.getOrNull(0) ?: return emptyList()
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        // DEPTH16 is little-endian but a fresh ByteBuffer declares
+        // BIG_ENDIAN — read through a duplicate pinned to native order.
+        val buffer = plane.buffer.duplicate().order(ByteOrder.nativeOrder())
+
+        fun worldAt(col: Int, row: Int): DoubleArray? {
+            val mm = buffer.getShort(row * rowStride + col * pixelStride).toInt() and 0xFFFF
+            if (mm == 0) return null
+            val d = mm / 1000.0
+            if (d <= 0.0 || d > 8.0) return null
+            // The depth image can be a crop of the camera image, so its
+            // pixels only become rays after ARCore maps them into the CPU
+            // image — plain intrinsics scaling would skew every angle.
+            val tex = floatArrayOf((col + 0.5f) / depthW, (row + 0.5f) / depthH)
+            val img = FloatArray(2)
+            frame.transformCoordinates2d(
+                Coordinates2d.TEXTURE_NORMALIZED, tex,
+                Coordinates2d.IMAGE_PIXELS, img,
+            )
+            val px = img[0].toDouble()
+            val py = img[1].toDouble()
+            if (px < 0.0 || py < 0.0 || px >= camW || py >= camH) return null
+            val xn = (px - cx) / fx
+            val yn = (py - cy) / fy
+            // Depth is z-depth along the optical axis (millimetres), not
+            // radial range. ARCore's camera frame is x right, y up, −z
+            // forward, so a forward distance d maps to (xn·d, −yn·d, −d).
+            val lx = xn * d
+            val ly = -yn * d
+            val lz = -d
+            val wx = r00 * lx + r01 * ly + r02 * lz + tx
+            val wy = r10 * lx + r11 * ly + r12 * lz + ty
+            val wz = r20 * lx + r21 * ly + r22 * lz + tz
+            if (!wx.isFinite() || !wy.isFinite() || !wz.isFinite()) return null
+            return doubleArrayOf(wx, wy, wz, d)
+        }
+
+        val step = max(4, sqrt(depthW.toDouble() * depthH / 500.0).toInt())
+        val raw = ArrayList<Double>(512 * 3)
+        var sumDist = 0.0
+        var row = 0
+        while (row < depthH) {
+            var col = 0
+            while (col < depthW) {
+                val p = worldAt(col, row)
+                if (p != null) {
+                    raw.add(p[0])
+                    raw.add(p[1])
+                    raw.add(p[2])
+                    val vx = p[0] - tx
+                    val vy = p[1] - ty
+                    val vz = p[2] - tz
+                    sumDist += sqrt(vx * vx + vy * vy + vz * vz)
+                }
+                col += step
+            }
+            row += step
+        }
+        val n = raw.size / 3
+        // Sanity invariant: the depth-image centre must land ahead of the
+        // camera (world forward = R·(0,0,−1)); a flipped rotation would put
+        // every point behind the phone.
+        val centre = worldAt(depthW / 2, depthH / 2)
+        var ahead = 0
+        if (centre != null) {
+            val vx = centre[0] - tx
+            val vy = centre[1] - ty
+            val vz = centre[2] - tz
+            if (vx * -r02 + vy * -r12 + vz * -r22 > 0.0) ahead = 1
+        }
+        NativeTrace.log(
+            viewContext,
+            "arview: getDepthPoints n=$n mean=${if (n > 0) sumDist / n else 0.0} ahead=$ahead step=$step",
+        )
+        if (n == 0) return emptyList()
+        val stride = (n / 400).coerceAtLeast(1)
+        val out = ArrayList<Double>(((n + stride - 1) / stride) * 3)
+        var i = 0
+        while (i < raw.size) {
+            out.add(raw[i])
+            out.add(raw[i + 1])
+            out.add(raw[i + 2])
+            i += stride * 3
+        }
+        return out
     }
 
     private fun qStr(q: Quaternion) = "(${q.x},${q.y},${q.z},${q.w})"

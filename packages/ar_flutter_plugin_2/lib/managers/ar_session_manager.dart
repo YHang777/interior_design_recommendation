@@ -198,6 +198,34 @@ class ARSessionManager {
     }
   }
 
+  // Flat world xyz triplets from the accumulated feature-point cloud,
+  // downsampled to at most 400 points; null when empty or on error.
+  Future<List<double>?> acquireCloudPoints() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('getCloudPoints');
+      if (raw == null || raw.isEmpty) return null;
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } catch (e) {
+      if (debug) print('getCloudPoints error: $e');
+      return null;
+    }
+  }
+
+  // Same shape as acquireCloudPoints, but unprojected from the live depth
+  // image: dense geometry that still returns points on white/textureless
+  // walls where the feature-point cloud sees nothing. Null when empty or on
+  // error (devices without depth simply never produce points).
+  Future<List<double>?> acquireDepthPoints() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('getDepthPoints');
+      if (raw == null || raw.isEmpty) return null;
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } catch (e) {
+      if (debug) print('getDepthPoints error: $e');
+      return null;
+    }
+  }
+
   Future<List<ARHitTestResult>> hitTest(double xPx, double yPx) async {
     try {
       final raw = await _channel.invokeMethod<List<dynamic>>('hitTest', {

@@ -71,7 +71,29 @@ List<Vector3> planeQuadCorners(PlaneQuad quad) {
 List<Vector3> _idealizedPolygon(PlaneQuad quad) {
   final c = quad.center;
   if (!quad.vertical) {
-    return [for (final v in quad.polygon) Vector3(v.x, c.y, v.z)];
+    // Also shrink the ring slightly: ARCore outlines creep a few cm past
+    // the physical floor edge (baseboard junction), and painted overlay has
+    // no depth to hide behind the wall. A small centroid pull guarantees the
+    // drawn shape never reaches past the raw outline it came from.
+    const insetM = 0.04;
+    var cx = 0.0;
+    var cz = 0.0;
+    for (final v in quad.polygon) {
+      cx += v.x;
+      cz += v.z;
+    }
+    cx /= quad.polygon.length;
+    cz /= quad.polygon.length;
+    return [
+      for (final v in quad.polygon)
+        () {
+          final dx = v.x - cx;
+          final dz = v.z - cz;
+          final d = math.sqrt(dx * dx + dz * dz);
+          final k = d <= insetM ? 0.0 : (d - insetM) / d;
+          return Vector3(cx + dx * k, c.y, cz + dz * k);
+        }(),
+    ];
   }
   final n = Vector3(math.sin(quad.yaw), 0, math.cos(quad.yaw));
   return [for (final v in quad.polygon) v - n * n.dot(v - c)];
@@ -92,6 +114,18 @@ List<Vector3> _idealizedPolygon(PlaneQuad quad) {
 // guarantee: a table 0.7 m under a standing phone can never paint green.
 enum OverlayZoneKind { floor, wall, mask, drop }
 
+// The height floor paint is flattened onto: the trusted anchor, pulled down
+// to a slightly lower payload plane (the real floor re-appearing under a
+// stale estimate). Shared by zone classification and quad building so paint
+// and gates can never disagree about where the floor is.
+double trustedOverlayRefY({required double floorY, double? lowestPlaneY}) {
+  return (lowestPlaneY != null &&
+          lowestPlaneY < floorY &&
+          floorY - lowestPlaneY <= 0.5)
+      ? lowestPlaneY
+      : floorY;
+}
+
 OverlayZoneKind overlayZoneOf({
   required int planeType,
   required double centerY,
@@ -102,24 +136,20 @@ OverlayZoneKind overlayZoneOf({
 }) {
   if (planeType == 2) return OverlayZoneKind.wall;
   if (planeType != 1) return OverlayZoneKind.drop;
-  const elevatedGapM = 0.3;
+  // Above the reference = an object top (furniture mask); below = a lower
+  // level that must never paint (flattening it up would float phantom
+  // floor over a stairwell). Symmetric band around the proven height.
+  const elevatedGapM = 0.2;
   const plausibleMinM = 0.85;
   const plausibleMaxM = 2.4;
 
   if (floorY != null && floorYTrusted) {
-    // A payload plane slightly below the trusted anchor pulls the reference
-    // down (the real floor re-appeared under a stale estimate); anything
-    // further below is noise the anchor already beat. No live camera-band
-    // check — the height was proven when trust was earned (keeps a crouching
-    // phone painting a proven floor).
-    final ref = (lowestPlaneY != null &&
-            lowestPlaneY < floorY &&
-            floorY - lowestPlaneY <= 0.5)
-        ? lowestPlaneY
-        : floorY;
-    return centerY > ref + elevatedGapM
-        ? OverlayZoneKind.mask
-        : OverlayZoneKind.floor;
+    // No live camera-band check — the height was proven when trust was
+    // earned (keeps a crouching phone painting a proven floor).
+    final ref = trustedOverlayRefY(floorY: floorY, lowestPlaneY: lowestPlaneY);
+    if (centerY > ref + elevatedGapM) return OverlayZoneKind.mask;
+    if (centerY < ref - elevatedGapM) return OverlayZoneKind.drop;
+    return OverlayZoneKind.floor;
   }
 
   // No trusted anchor: never trust floorY alone. The payload's lowest
@@ -127,13 +157,16 @@ OverlayZoneKind overlayZoneOf({
   // below-camera band — and without a camera height nothing may paint.
   final ref = lowestPlaneY;
   if (ref != null) {
+    // Elevated shapes stay masks even when the camera height is stale —
+    // dropping them is how furniture ended up painted over.
+    if (centerY > ref + elevatedGapM) return OverlayZoneKind.mask;
     if (cameraY == null) return OverlayZoneKind.drop;
     final below = cameraY - ref;
     if (below < plausibleMinM || below > plausibleMaxM) {
       return OverlayZoneKind.mask;
     }
-    return centerY > ref + elevatedGapM
-        ? OverlayZoneKind.mask
+    return centerY < ref - elevatedGapM
+        ? OverlayZoneKind.drop
         : OverlayZoneKind.floor;
   }
 
@@ -168,8 +201,8 @@ PlaneQuad? syntheticFloorQuad({
   return PlaneQuad(
     center: Vector3(cameraPos.x, floorY, cameraPos.z),
     yaw: 0,
-    extentX: 3.0,
-    extentZ: 3.0,
+    extentX: 2.0,
+    extentZ: 2.0,
     vertical: false,
     kind: PlaneQuadKind.floor,
   );
@@ -226,7 +259,7 @@ bool rectHitsPolygons({
 // corners/edges floating off the surface. Length changes (ARCore re-fits an
 // outline) reset instead of blending mismatched rings.
 List<Vector3> emaPolygon(List<Vector3>? prev, List<Vector3> next,
-    {double alpha = 0.35, double resetShiftM = 0.15}) {
+    {double alpha = 0.35, double resetShiftM = 0.08}) {
   if (prev == null || prev.length != next.length || next.length < 3) {
     return next;
   }
@@ -599,6 +632,252 @@ List<Vector3> _orientedRectSamples(
     at(-1, 0),
     at(0, 0),
   ];
+}
+
+// ARCore wall fragments routinely stop 10–20 cm above the floor, which
+// leaves exactly the green base strip at the wall foot — the floor−wall
+// clip can't cut what the wall doesn't cover. Stretch a short wall down
+// to just below [refY]; a wall already reaching the floor, a fragment
+// floating well above it (a shelf), or a non-vertical quad pass through
+// untouched.
+PlaneQuad withWallBaseAt(PlaneQuad wall,
+    {required double refY, double maxDropM = 0.45}) {
+  if (!wall.vertical || !refY.isFinite) return wall;
+  if (wall.polygon.length < 3) {
+    final bottom = wall.center.y - wall.extentZ / 2;
+    if (bottom <= refY || bottom - refY > maxDropM) return wall;
+    final newBottom = refY - 0.02;
+    final newExtentZ = wall.extentZ + (bottom - newBottom);
+    return PlaneQuad(
+      center: Vector3(wall.center.x, newBottom + newExtentZ / 2, wall.center.z),
+      yaw: wall.yaw,
+      extentX: wall.extentX,
+      extentZ: newExtentZ,
+      vertical: true,
+      kind: wall.kind,
+    );
+  }
+  var minY = double.infinity;
+  for (final v in wall.polygon) {
+    if (v.y < minY) minY = v.y;
+  }
+  if (!minY.isFinite || minY <= refY || minY - refY > maxDropM) return wall;
+  // ARCore's bottom edge wobbles a few cm — snap the whole bottom row
+  // (within 10 cm of the lowest vertex) flat onto the floor line.
+  final newBottomY = refY - 0.02;
+  final delta = newBottomY - minY;
+  return PlaneQuad(
+    center: Vector3(wall.center.x, wall.center.y + delta, wall.center.z),
+    yaw: wall.yaw,
+    extentX: wall.extentX,
+    extentZ: wall.extentZ,
+    vertical: true,
+    kind: wall.kind,
+    polygon: [
+      for (final v in wall.polygon)
+        v.y <= minY + 0.10 ? Vector3(v.x, newBottomY, v.z) : v,
+    ],
+  );
+}
+
+// Greedy union of near-coplanar wall fragments into single clean
+// rectangles — ARCore reports a wall as a row of small patches whose
+// union reads as a stepped "tetris" silhouette. Compatible fragments
+// (similar yaw, overlapping heights, footprints within 0.18 m) merge
+// until nothing more combines; a merged wall deliberately drops the
+// per-fragment outlines. Unmerged quads pass through with their polygon
+// intact. Callers run withWallBaseAt BEFORE this so merged y-ranges
+// already include the stretched bases.
+List<PlaneQuad> mergeWallQuads(List<PlaneQuad> walls) {
+  if (walls.length < 2) return List<PlaneQuad>.of(walls);
+  final sorted = List<PlaneQuad>.of(walls)..sort(_wallMergeOrder);
+  var groups = <List<PlaneQuad>>[
+    for (final q in sorted) [q],
+  ];
+  var merged = true;
+  while (merged) {
+    merged = false;
+    search:
+    for (var i = 0; i < groups.length; i++) {
+      for (var j = i + 1; j < groups.length; j++) {
+        if (_wallGroupsCompatible(groups[i], groups[j])) {
+          groups[i] = [...groups[i], ...groups[j]];
+          groups.removeAt(j);
+          merged = true;
+          break search;
+        }
+      }
+    }
+  }
+  return [
+    for (final g in groups) g.length == 1 ? g.single : _mergeWallGroup(g),
+  ];
+}
+
+int _wallMergeOrder(PlaneQuad a, PlaneQuad b) {
+  final byWidth = b.extentX.compareTo(a.extentX);
+  if (byWidth != 0) return byWidth;
+  final byX = a.center.x.compareTo(b.center.x);
+  if (byX != 0) return byX;
+  final byZ = a.center.z.compareTo(b.center.z);
+  if (byZ != 0) return byZ;
+  final byY = a.center.y.compareTo(b.center.y);
+  if (byY != 0) return byY;
+  return a.yaw.compareTo(b.yaw);
+}
+
+bool _wallGroupsCompatible(List<PlaneQuad> a, List<PlaneQuad> b) {
+  if (a.isEmpty || b.isEmpty) return false;
+  if (!a.every((q) => q.vertical) || !b.every((q) => q.vertical)) return false;
+  if ((_wrapYaw(_groupYaw(a) - _groupYaw(b))).abs() > 0.26) return false;
+  final ra = _groupYRange(a);
+  final rb = _groupYRange(b);
+  if (ra.$2 < rb.$1 - 0.05 || rb.$2 < ra.$1 - 0.05) return false;
+  for (final qa in a) {
+    for (final qb in b) {
+      if (_wallFootprintGap(qa, qb) <= 0.18) return true;
+    }
+  }
+  return false;
+}
+
+// Widest fragment owns the merged frame — its yaw is the most reliable.
+double _groupYaw(List<PlaneQuad> g) {
+  var best = g.first.extentX;
+  var yaw = g.first.yaw;
+  for (var i = 1; i < g.length; i++) {
+    if (g[i].extentX > best) {
+      best = g[i].extentX;
+      yaw = g[i].yaw;
+    }
+  }
+  return yaw;
+}
+
+(double, double) _groupYRange(List<PlaneQuad> g) {
+  var lo = double.infinity;
+  var hi = double.negativeInfinity;
+  for (final q in g) {
+    for (final c in planeQuadCorners(q)) {
+      if (c.y < lo) lo = c.y;
+      if (c.y > hi) hi = c.y;
+    }
+  }
+  return (lo, hi);
+}
+
+double _wrapYaw(double delta) {
+  var w = delta % (2 * math.pi);
+  if (w > math.pi) w -= 2 * math.pi;
+  return w;
+}
+
+// XZ gap between two wall footprints: 0 when either outline touches or
+// crosses the other, otherwise the closest corner-to-outline distance.
+double _wallFootprintGap(PlaneQuad a, PlaneQuad b) {
+  final ca = _flattenXZ(planeQuadCorners(a));
+  final cb = _flattenXZ(planeQuadCorners(b));
+  if (ca.length < 3 || cb.length < 3) return double.infinity;
+  if (_xzCornersInside(ca, cb) || _xzCornersInside(cb, ca)) return 0;
+  if (_xzOutlinesCross(ca, cb)) return 0;
+  var best = double.infinity;
+  for (final p in ca) {
+    final n = _nearestOnOutlineXZ(p, cb);
+    final d = math.sqrt((p.x - n.x) * (p.x - n.x) + (p.z - n.z) * (p.z - n.z));
+    if (d < best) best = d;
+  }
+  for (final p in cb) {
+    final n = _nearestOnOutlineXZ(p, ca);
+    final d = math.sqrt((p.x - n.x) * (p.x - n.x) + (p.z - n.z) * (p.z - n.z));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+List<Vector3> _flattenXZ(List<Vector3> pts) =>
+    [for (final p in pts) Vector3(p.x, 0, p.z)];
+
+bool _xzCornersInside(List<Vector3> corners, List<Vector3> poly) {
+  final n = _polygonNormal(poly);
+  if (n == null) return false;
+  for (final c in corners) {
+    if (_pointInPolygon(c, poly, n)) return true;
+  }
+  return false;
+}
+
+bool _xzOutlinesCross(List<Vector3> a, List<Vector3> b) {
+  for (var i = 0; i < a.length; i++) {
+    final a1 = a[i];
+    final a2 = a[(i + 1) % a.length];
+    for (var j = 0; j < b.length; j++) {
+      final b1 = b[j];
+      final b2 = b[(j + 1) % b.length];
+      if (_segmentsProperCross(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+// Proper (strict) crossing only — abutting outlines already measure gap 0
+// through the corner-to-outline distance.
+bool _segmentsProperCross(Vector3 p1, Vector3 p2, Vector3 q1, Vector3 q2) {
+  final d1 = _crossXZ(q1, q2, p1);
+  final d2 = _crossXZ(q1, q2, p2);
+  final d3 = _crossXZ(p1, p2, q1);
+  final d4 = _crossXZ(p1, p2, q2);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+      ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+double _crossXZ(Vector3 o, Vector3 a, Vector3 b) =>
+    (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+
+// One clean rect through every member's corners, expressed in the
+// canonical yaw frame: extentX spans the wall, extentZ the height, and
+// the outline (polygon) is dropped on purpose.
+PlaneQuad _mergeWallGroup(List<PlaneQuad> g) {
+  final yaw = _groupYaw(g);
+  final cosY = math.cos(yaw);
+  final sinY = math.sin(yaw);
+  // along = (cos yaw, 0, −sin yaw); normal = (sin yaw, 0, cos yaw).
+  final ux = cosY;
+  final uz = -sinY;
+  final nx = sinY;
+  final nz = cosY;
+  var minAlong = double.infinity;
+  var maxAlong = double.negativeInfinity;
+  var minY = double.infinity;
+  var maxY = double.negativeInfinity;
+  var normalSum = 0.0;
+  var normalCount = 0;
+  for (final q in g) {
+    for (final c in planeQuadCorners(q)) {
+      final along = c.x * ux + c.z * uz;
+      if (along < minAlong) minAlong = along;
+      if (along > maxAlong) maxAlong = along;
+      if (c.y < minY) minY = c.y;
+      if (c.y > maxY) maxY = c.y;
+      normalSum += c.x * nx + c.z * nz;
+      normalCount++;
+    }
+  }
+  final width = maxAlong - minAlong;
+  final height = maxY - minY;
+  final midAlong = (minAlong + maxAlong) / 2;
+  final normalMid = normalCount == 0 ? 0.0 : normalSum / normalCount;
+  return PlaneQuad(
+    center: Vector3(
+      midAlong * ux + normalMid * nx,
+      minY + height / 2,
+      midAlong * uz + normalMid * nz,
+    ),
+    yaw: yaw,
+    extentX: width,
+    extentZ: height,
+    vertical: true,
+    kind: PlaneQuadKind.wall,
+  );
 }
 
 // One merged path per placement zone, assembled from already-projected

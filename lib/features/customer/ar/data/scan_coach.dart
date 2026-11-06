@@ -181,6 +181,7 @@ class ScanCoach {
           'Move left and right along the wall — ARCore needs two viewing angles',
           'Step back 1–2 m so a full wall section is in view',
           'Plain paint is hard — angle across it so light reveals texture',
+          'Point straight ahead, level — wall edges show best edge-on',
         ]);
       case ScanCoachStep.ready:
         return 'Ready — tap the wall to place';

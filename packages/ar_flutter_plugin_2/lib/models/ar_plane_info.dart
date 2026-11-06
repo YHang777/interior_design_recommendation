@@ -11,6 +11,7 @@ class ARPlaneInfo {
     this.polygon = const [],
     this.fresh = true,
     this.tracking = true,
+    this.subsumed = false,
   });
 
   // Stable per-session id minted by the plugin (0 when not reported).
@@ -52,6 +53,12 @@ class ARPlaneInfo {
   // every placement gate stays TRACKING-only upstream.
   final bool tracking;
 
+  // ARCore absorbed this plane into a larger one. The outline is already
+  // inside the parent's polygon, but the plane itself is often an object
+  // top (a table the floor merged over) — the overlay keeps it only as a
+  // furniture mask, never as floor paint or memory coverage.
+  final bool subsumed;
+
   bool get isHorizontal => planeType == 1;
 
   // A plane ARCore hasn't touched for over a second counts as cached.
@@ -72,6 +79,7 @@ class ARPlaneInfo {
             const [],
         fresh: ((json['freshMs'] as num?)?.toInt() ?? 0) <= 1000,
         tracking: (json['tracking'] as bool?) ?? true,
+        subsumed: (json['subsumed'] as bool?) ?? false,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -86,5 +94,6 @@ class ARPlaneInfo {
         'polygon': polygon,
         'freshMs': fresh ? 0 : 60000,
         'tracking': tracking,
+        'subsumed': subsumed,
       };
 }

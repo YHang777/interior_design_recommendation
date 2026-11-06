@@ -1,0 +1,429 @@
+import 'dart:math' as math;
+
+import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
+import 'package:vector_math/vector_math_64.dart';
+
+import 'plane_overlay_math.dart';
+
+// Feature-point cells dense with obstacle-height samples → mask quads.
+// Same treatment as furniture plane masks: clip green paint, block
+// placement. Cells are XZ buckets of cellM; a cell needs ≥3 obstacle
+// points before it counts (a lone noisy point masks nothing). Cells
+// cluster with 8-connectivity (diagonals merge) and each cluster becomes
+// ONE convex-hull quad — one chair masks as a smooth outline, not a
+// staircase of grid cells. Clusters that mostly hug a detected wall are
+// dropped: those points describe the wall, not an object on the floor.
+List<PlaneQuad> obstacleMaskQuads({
+  required List<double> points,
+  required double refY,
+  List<ARPlaneInfo> walls = const [],
+  double cellM = 0.3,
+}) {
+  if (cellM <= 0) return const [];
+  final cells = <String, _Cell>{};
+  for (var i = 0; i + 2 < points.length; i += 3) {
+    final x = points[i];
+    final y = points[i + 1];
+    final z = points[i + 2];
+    if (!x.isFinite || !y.isFinite || !z.isFinite) continue;
+    final dy = y - refY;
+    // Obstacle band only: floor-band points and anything at/above2.2 m
+    // (door frames, ceilings) never mask the floor.
+    if (dy <= 0.25 || dy >= 2.2) continue;
+    final ix = (x / cellM).floor();
+    final iz = (z / cellM).floor();
+    final cell = cells.putIfAbsent('$ix:$iz', () => _Cell(ix, iz));
+    cell.add(y);
+  }
+  final dense = <_Cell>[
+    for (final c in cells.values)
+      if (c.count >= 3) c,
+  ];
+  if (dense.isEmpty) return const [];
+  final clusters = <_MaskCluster>[];
+  for (final cluster in _clusterCells(dense)) {
+    if (_clusterSitsOnWall(cluster, walls, cellM)) continue;
+    clusters.add(cluster);
+  }
+  // Biggest cluster first; min (ix, iz) breaks ties so the same cloud
+  // always masks the same 14 cells-worth of hulls.
+  clusters.sort((a, b) {
+    if (a.total != b.total) return b.total.compareTo(a.total);
+    if (a.minIx != b.minIx) return a.minIx.compareTo(b.minIx);
+    return a.minIz.compareTo(b.minIz);
+  });
+  return [
+    for (final c in clusters.take(14)) _clusterToQuad(c, cellM),
+  ];
+}
+
+// 8-connected components over the dense cells: diagonal neighbours merge,
+// which is what kills the staircase silhouette.
+List<_MaskCluster> _clusterCells(List<_Cell> dense) {
+  final byPos = <String, _Cell>{
+    for (final c in dense) '${c.ix}:${c.iz}': c,
+  };
+  final seen = <String>{};
+  final out = <_MaskCluster>[];
+  for (final start in dense) {
+    final startKey = '${start.ix}:${start.iz}';
+    if (seen.contains(startKey)) continue;
+    seen.add(startKey);
+    final queue = <_Cell>[start];
+    final cells = <_Cell>[];
+    while (queue.isNotEmpty) {
+      final cur = queue.removeLast();
+      cells.add(cur);
+      for (var dx = -1; dx <= 1; dx++) {
+        for (var dz = -1; dz <= 1; dz++) {
+          if (dx == 0 && dz == 0) continue;
+          final key = '${cur.ix + dx}:${cur.iz + dz}';
+          if (seen.contains(key)) continue;
+          final nb = byPos[key];
+          if (nb == null) continue;
+          seen.add(key);
+          queue.add(nb);
+        }
+      }
+    }
+    cells.sort((a, b) =>
+        a.ix != b.ix ? a.ix.compareTo(b.ix) : a.iz.compareTo(b.iz));
+    var total = 0;
+    for (final c in cells) {
+      total += c.count;
+    }
+    out.add(_MaskCluster(cells, total, cells.first.ix, cells.first.iz));
+  }
+  return out;
+}
+
+// ≥60% of the cluster's points (weighted) sitting on a wall plane means
+// the cluster IS wall surface — punching it into the floor/mask would
+// carve holes into the painted wall itself.
+bool _clusterSitsOnWall(
+  _MaskCluster cluster,
+  List<ARPlaneInfo> walls,
+  double cellM,
+) {
+  if (walls.isEmpty) return false;
+  var total = 0;
+  var hug = 0;
+  for (final c in cluster.cells) {
+    total += c.count;
+    if (_cellHugsWall(c, walls, cellM)) hug += c.count;
+  }
+  return hug * 5 >= total * 3;
+}
+
+bool _cellHugsWall(_Cell cell, List<ARPlaneInfo> walls, double cellM) {
+  final cx = (cell.ix + 0.5) * cellM;
+  final cz = (cell.iz + 0.5) * cellM;
+  for (final w in walls) {
+    if (w.planeType != 2) continue;
+    final sinY = math.sin(w.yaw);
+    final cosY = math.cos(w.yaw);
+    // Vertical plane: normal (sin yaw, 0, cos yaw), width along
+    // (cos yaw, 0, −sin yaw); extentZ is the height.
+    final dx = cx - w.centerX;
+    final dz = cz - w.centerZ;
+    if ((dx * sinY + dz * cosY).abs() > 0.15) continue;
+    if ((dx * cosY - dz * sinY).abs() > w.extentX / 2 + 0.25) continue;
+    final bottom = w.centerY - w.extentZ / 2;
+    final top = w.centerY + w.extentZ / 2;
+    if (cell.meanY < bottom - 0.06 || cell.meanY > top + 0.06) continue;
+    return true;
+  }
+  return false;
+}
+
+// Convex hull of every cell-square corner (XZ), flat at the cluster's
+// weighted mean Y — one smooth mask outline instead of per-cell quads.
+PlaneQuad _clusterToQuad(_MaskCluster cluster, double cellM) {
+  final corners = <Vector2>[];
+  var sumWeightedY = 0.0;
+  var sumCount = 0;
+  for (final c in cluster.cells) {
+    final x0 = c.ix * cellM;
+    final x1 = (c.ix + 1) * cellM;
+    final z0 = c.iz * cellM;
+    final z1 = (c.iz + 1) * cellM;
+    corners
+      ..add(Vector2(x0, z0))
+      ..add(Vector2(x1, z0))
+      ..add(Vector2(x0, z1))
+      ..add(Vector2(x1, z1));
+    sumWeightedY += c.meanY * c.count;
+    sumCount += c.count;
+  }
+  final hull = _convexHullXZ(corners);
+  var minX = hull.first.x;
+  var maxX = hull.first.x;
+  var minZ = hull.first.y;
+  var maxZ = hull.first.y;
+  for (final p in hull) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minZ) minZ = p.y;
+    if (p.y > maxZ) maxZ = p.y;
+  }
+  final meanY = sumWeightedY / sumCount;
+  return PlaneQuad(
+    center: Vector3((minX + maxX) / 2, meanY, (minZ + maxZ) / 2),
+    yaw: 0,
+    extentX: maxX - minX,
+    extentZ: maxZ - minZ,
+    vertical: false,
+    kind: PlaneQuadKind.floor,
+    polygon: [for (final p in hull) Vector3(p.x, meanY, p.y)],
+  );
+}
+
+// Andrew's monotone chain over (x, z): deterministic CCW, collinear
+// midpoints dropped so a straight run of cells has no fake vertices.
+List<Vector2> _convexHullXZ(List<Vector2> pts) {
+  final sorted = [...pts]..sort((a, b) {
+      final c = a.x.compareTo(b.x);
+      if (c != 0) return c;
+      return a.y.compareTo(b.y);
+    });
+  final uniq = <Vector2>[];
+  for (final p in sorted) {
+    if (uniq.isNotEmpty && uniq.last.x == p.x && uniq.last.y == p.y) {
+      continue;
+    }
+    uniq.add(p);
+  }
+  if (uniq.length <= 2) return uniq;
+  double cross(Vector2 o, Vector2 a, Vector2 b) =>
+      (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  final lower = <Vector2>[];
+  for (final p in uniq) {
+    while (lower.length >= 2 &&
+        cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.removeLast();
+    }
+    lower.add(p);
+  }
+  final upper = <Vector2>[];
+  for (var i = uniq.length - 1; i >= 0; i--) {
+    final p = uniq[i];
+    while (upper.length >= 2 &&
+        cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.removeLast();
+    }
+    upper.add(p);
+  }
+  lower.removeLast();
+  upper.removeLast();
+  return [...lower, ...upper];
+}
+
+// Median Y of the floor-band points — the robust refocus signal when
+// plane telemetry is quiet. Null below 8 samples so one stray speck can
+// never steer floorY (PlaneMemory applies its own deadband on top).
+double? floorProbeCandidate({
+  required List<double> points,
+  required double refY,
+}) {
+  final ys = <double>[];
+  for (var i = 0; i + 2 < points.length; i += 3) {
+    final y = points[i + 1];
+    if (!y.isFinite) continue;
+    if ((y - refY).abs() <= 0.15) ys.add(y);
+  }
+  if (ys.length < 8) return null;
+  ys.sort();
+  final mid = ys.length ~/ 2;
+  return ys.length.isOdd ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
+}
+
+// RANSAC vertical planes from the feature-point cloud — ARCore reports
+// zero vertical planes on white walls, but the cloud still sees them.
+// Ids live at 900001+: native planeIdFor mints 1..N per session
+// (nextPlaneId++), so the synthetic range can never collide with a real
+// plane id.
+List<ARPlaneInfo> fitWallPlanes({
+  required List<double> points,
+  required double refY,
+  int maxPlanes = 2,
+}) {
+  if (maxPlanes <= 0) return const [];
+  final cand = <Vector3>[];
+  for (var i = 0; i + 2 < points.length; i += 3) {
+    final x = points[i];
+    final y = points[i + 1];
+    final z = points[i + 2];
+    if (!x.isFinite || !y.isFinite || !z.isFinite) continue;
+    if (y > refY + 0.2 && y < refY + 2.2) cand.add(Vector3(x, y, z));
+  }
+  if (cand.length < 30) return const [];
+  // Sorted input + seeded pick sequence → identical output for identical
+  // clouds, so tests can pin the fits.
+  cand.sort((a, b) {
+    final c = a.x.compareTo(b.x);
+    if (c != 0) return c;
+    final c2 = a.y.compareTo(b.y);
+    if (c2 != 0) return c2;
+    return a.z.compareTo(b.z);
+  });
+
+  var seed = 12345;
+  int next(int n) {
+    seed = (seed * 48271) % 2147483647;
+    return seed % n;
+  }
+
+  final out = <ARPlaneInfo>[];
+  var pool = cand;
+  while (out.length < maxPlanes && pool.length >= 30) {
+    final fit = _ransacWall(pool, next);
+    if (fit == null) break;
+    out.add(ARPlaneInfo(
+      id: 900001 + out.length,
+      planeType: 2,
+      centerX: fit.cx,
+      centerY: fit.cy,
+      centerZ: fit.cz,
+      extentX: fit.width,
+      extentZ: fit.height,
+      yaw: fit.yaw,
+    ));
+    final drop = fit.inliers.toSet();
+    pool = [
+      for (var i = 0; i < pool.length; i++)
+        if (!drop.contains(i)) pool[i],
+    ];
+  }
+  return out;
+}
+
+_Fit? _ransacWall(List<Vector3> pool, int Function(int) next) {
+  const rounds = 60;
+  final n = pool.length;
+  _Fit? best;
+  for (var r = 0; r < rounds; r++) {
+    final i0 = next(n);
+    var i1 = next(n - 1);
+    if (i1 >= i0) i1++;
+    var i2 = next(n - 2);
+    if (i2 >= i0) i2++;
+    if (i2 >= i1) i2++;
+    final p0 = pool[i0];
+    final p1 = pool[i1];
+    final p2 = pool[i2];
+    final nrm = (p1 - p0).cross(p2 - p0);
+    if (nrm.length2 < 1e-12) continue;
+    nrm.normalize();
+    if (nrm.y.abs() >= 0.3) continue;
+    final inliers = <int>[];
+    for (var i = 0; i < n; i++) {
+      if ((pool[i] - p0).dot(nrm).abs() <= 0.05) inliers.add(i);
+    }
+    if (inliers.length < 30) continue;
+    // Width runs along the wall's horizontal axis — the same direction
+    // extentX spans for a telemetry vertical plane (cos yaw, 0, −sin yaw).
+    final rXZ = math.sqrt(nrm.x * nrm.x + nrm.z * nrm.z);
+    if (rXZ < 1e-9) continue;
+    final hx = nrm.z / rXZ;
+    final hz = -nrm.x / rXZ;
+    var minH = double.infinity;
+    var maxH = double.negativeInfinity;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    var sx = 0.0;
+    var sy = 0.0;
+    var sz = 0.0;
+    for (final i in inliers) {
+      final p = pool[i];
+      final h = p.x * hx + p.z * hz;
+      if (h < minH) minH = h;
+      if (h > maxH) maxH = h;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+      sx += p.x;
+      sy += p.y;
+      sz += p.z;
+    }
+    final width = maxH - minH;
+    final height = maxY - minY;
+    if (width < 0.7 || height < 0.5) continue;
+    if (best != null && inliers.length <= best.inliers.length) continue;
+    // Canonical hemisphere (+z, tie → +x): the cross-product sign depends
+    // on which triple won, and the same wall must always report one yaw.
+    var nx = nrm.x;
+    var nz = nrm.z;
+    if (nz < 0 || (nz == 0 && nx < 0)) {
+      nx = -nx;
+      nz = -nz;
+    }
+    final count = inliers.length;
+    best = _Fit(
+      yaw: math.atan2(nx, nz),
+      inliers: inliers,
+      cx: sx / count,
+      cy: sy / count,
+      cz: sz / count,
+      width: width,
+      height: height,
+    );
+  }
+  return best;
+}
+
+class _Fit {
+  _Fit({
+    required this.yaw,
+    required this.inliers,
+    required this.cx,
+    required this.cy,
+    required this.cz,
+    required this.width,
+    required this.height,
+  });
+
+  final double yaw;
+
+  final List<int> inliers;
+
+  final double cx;
+
+  final double cy;
+
+  final double cz;
+
+  final double width;
+
+  final double height;
+}
+
+class _Cell {
+  _Cell(this.ix, this.iz);
+
+  final int ix;
+
+  final int iz;
+
+  int count = 0;
+
+  double _sumY = 0;
+
+  void add(double y) {
+    count++;
+    _sumY += y;
+  }
+
+  double get meanY => _sumY / count;
+}
+
+class _MaskCluster {
+  _MaskCluster(this.cells, this.total, this.minIx, this.minIz);
+
+  // Sorted by (ix, iz) — first entry is the lexicographic min.
+  final List<_Cell> cells;
+
+  final int total;
+
+  final int minIx;
+
+  final int minIz;
+}

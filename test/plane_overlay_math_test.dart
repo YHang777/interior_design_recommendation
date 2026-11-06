@@ -184,8 +184,11 @@ void main() {
         polygon: polygon,
       ));
       expect(corners, hasLength(5));
-      for (final p in polygon) {
-        expect(corners.any((c) => sameCorner(c, p)), isTrue);
+      // The drawn ring hugs the raw outline (shrunk only by the edge
+      // inset) — it never expands to the center/extents rectangle at (10,10).
+      for (var i = 0; i < polygon.length; i++) {
+        expect(corners[i].distanceTo(polygon[i]), lessThan(0.06),
+            reason: 'vertex $i stays on the raw outline');
       }
     });
 
@@ -224,8 +227,30 @@ void main() {
         expect(c.y, closeTo(-1.5, 1e-9),
             reason: 'every vertex sits at the plane height');
       }
-      expect(corners.any((v) => v.x == 2 && v.z == -5), isTrue,
-          reason: 'the outline itself is preserved');
+      // Outline preserved apart from the edge inset: each corner sits
+      // 0.04 m closer to the XZ centroid than its raw vertex.
+      var cx = 0.0;
+      var cz = 0.0;
+      for (final v in corners) {
+        cx += v.x;
+        cz += v.z;
+      }
+      cx /= corners.length;
+      cz /= corners.length;
+      final raw = [
+        Vector3(-2, -1.4, -5),
+        Vector3(2, -1.4, -5),
+        Vector3(2, -1.6, -1),
+        Vector3(-2, -1.6, -1),
+      ];
+      for (var i = 0; i < corners.length; i++) {
+        final rawD =
+            math.sqrt(math.pow(raw[i].x - cx, 2) + math.pow(raw[i].z - cz, 2));
+        final outD = math.sqrt(
+            math.pow(corners[i].x - cx, 2) + math.pow(corners[i].z - cz, 2));
+        expect(outD, closeTo(rawD - 0.04, 1e-9),
+            reason: 'corner $i is inset toward the centroid, never expanded');
+      }
     });
 
     test('a leaning wall polygon snaps onto its vertical plane', () {
@@ -425,6 +450,311 @@ void main() {
         reason: 'a 2 m gap is noise — the anchor wins',
       );
     });
+
+    test('a low object top masks instead of painting floor', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0.25,
+            floorY: 0,
+            cameraY: 1.5,
+            floorYTrusted: true),
+        OverlayZoneKind.mask,
+        reason: '0.25 m above the proven floor is an object top, not drift',
+      );
+    });
+
+    test('planes clearly below a trusted floor never paint', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: -0.25,
+            floorY: 0,
+            cameraY: 1.5,
+            floorYTrusted: true),
+        OverlayZoneKind.drop,
+        reason: 'flattening a lower level up would float phantom floor',
+      );
+    });
+
+    test('elevated untrusted planes mask even with no camera height', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0.3,
+            floorY: null,
+            cameraY: null,
+            lowestPlaneY: 0),
+        OverlayZoneKind.mask,
+        reason: 'object masks are never dropped — that painted furniture green',
+      );
+    });
+  });
+
+  group('trustedOverlayRefY', () {
+    test('the anchor stands unless a slightly lower plane contradicts it', () {
+      expect(
+          trustedOverlayRefY(floorY: -1.09, lowestPlaneY: -1.02), -1.09);
+      expect(trustedOverlayRefY(floorY: -1.09, lowestPlaneY: null), -1.09);
+    });
+
+    test('a plane up to 0.5 m below pulls the reference down', () {
+      expect(trustedOverlayRefY(floorY: 0, lowestPlaneY: -0.45), -0.45);
+    });
+
+    test('noise far below never moves the reference', () {
+      expect(trustedOverlayRefY(floorY: 0, lowestPlaneY: -2.0), 0);
+    });
+  });
+
+  group('withWallBaseAt', () {
+    PlaneQuad rectWall({
+      double y = 1.15,
+      double height = 2,
+      bool vertical = true,
+    }) =>
+        PlaneQuad(
+          center: Vector3(1, y, 2),
+          yaw: 0,
+          extentX: 2,
+          extentZ: height,
+          vertical: vertical,
+          kind: vertical ? PlaneQuadKind.wall : PlaneQuadKind.floor,
+        );
+
+    test('a rect wall short of the floor stretches down to just below it',
+        () {
+      final wall = rectWall(); // bottom at 0.15 m
+      final out = withWallBaseAt(wall, refY: 0);
+      expect(out, isNot(same(wall)));
+      expect(out.center.x, closeTo(1, 1e-12));
+      expect(out.center.z, closeTo(2, 1e-12));
+      expect(out.yaw, closeTo(0, 1e-12));
+      expect(out.extentX, 2);
+      expect(out.extentZ, closeTo(2.17, 1e-9));
+      expect(out.center.y, closeTo(1.065, 1e-9));
+      expect(out.center.y - out.extentZ / 2, closeTo(-0.02, 1e-9));
+      expect(out.vertical, isTrue);
+      expect(out.kind, PlaneQuadKind.wall);
+      expect(out.polygon, isEmpty);
+    });
+
+    test('the drop happens at exactly maxDropM and stops past it', () {
+      final wall = rectWall(y: 1.5); // bottom = 0.5 exactly
+      final inLimit = withWallBaseAt(wall, refY: 0, maxDropM: 0.5);
+      expect(inLimit.center.y - inLimit.extentZ / 2, closeTo(-0.02, 1e-9));
+      expect(withWallBaseAt(wall, refY: 0, maxDropM: 0.49), same(wall),
+          reason: 'a fragment floating past the limit is genuinely high');
+    });
+
+    test('a wall already reaching the floor is untouched', () {
+      final atFloor = rectWall(y: 1.0); // bottom = 0
+      expect(withWallBaseAt(atFloor, refY: 0), same(atFloor));
+      final below = rectWall(y: 0.9); // bottom = −0.1
+      expect(withWallBaseAt(below, refY: 0), same(below));
+    });
+
+    test('a fragment floating above maxDropM is untouched', () {
+      final high = rectWall(y: 1.6); // bottom = 0.6 > 0.45
+      expect(withWallBaseAt(high, refY: 0), same(high));
+    });
+
+    test('a horizontal quad and a non-finite refY are untouched', () {
+      final floorQuad = rectWall(vertical: false);
+      expect(withWallBaseAt(floorQuad, refY: 0), same(floorQuad));
+      final wall = rectWall();
+      expect(withWallBaseAt(wall, refY: double.nan), same(wall));
+      expect(withWallBaseAt(wall, refY: double.infinity), same(wall));
+    });
+
+    test('a polygon wall drops its wobbly bottom row', () {
+      final wall = PlaneQuad(
+        center: Vector3(0, 1.1, 2),
+        yaw: 0,
+        extentX: 3,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1.5, 0.15, 2.05),
+          Vector3(0, 0.30, 2.0), // 15 cm above the low point — stays
+          Vector3(1.5, 0.18, 1.95),
+          Vector3(1.5, 2.0, 2.0),
+          Vector3(-1.5, 2.0, 2.0),
+        ],
+      );
+      final out = withWallBaseAt(wall, refY: 0);
+      expect(out, isNot(same(wall)));
+      expect(out.polygon, hasLength(5));
+      expect(out.polygon[0].y, closeTo(-0.02, 1e-9));
+      expect(out.polygon[1].y, closeTo(0.30, 1e-9),
+          reason: 'only the bottom row (≤ low + 0.10) moves');
+      expect(out.polygon[2].y, closeTo(-0.02, 1e-9));
+      expect(out.polygon[3].y, closeTo(2.0, 1e-9));
+      expect(out.polygon[4].y, closeTo(2.0, 1e-9));
+      expect(out.polygon[0].x, closeTo(-1.5, 1e-9));
+      expect(out.polygon[2].z, closeTo(1.95, 1e-9));
+      // center.y shifts by the same delta: −0.02 − 0.15 = −0.17
+      expect(out.center.y, closeTo(1.1 - 0.17, 1e-9));
+      expect(out.center.x, closeTo(0, 1e-12));
+      expect(out.center.z, closeTo(2, 1e-12));
+      expect(out.extentX, 3);
+      expect(out.extentZ, 2);
+      expect(out.vertical, isTrue);
+      expect(out.kind, PlaneQuadKind.wall);
+    });
+
+    test('a polygon wall already at the floor is untouched', () {
+      final wall = PlaneQuad(
+        center: Vector3.zero(),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1, -0.05, 0),
+          Vector3(1, -0.05, 0),
+          Vector3(1, 2, 0),
+          Vector3(-1, 2, 0),
+        ],
+      );
+      expect(withWallBaseAt(wall, refY: 0), same(wall));
+    });
+
+    test('a polygon wall floating high is untouched', () {
+      final wall = PlaneQuad(
+        center: Vector3(0, 1.6, 2),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1, 0.6, 2),
+          Vector3(1, 0.6, 2),
+          Vector3(1, 2.6, 2),
+          Vector3(-1, 2.6, 2),
+        ],
+      );
+      expect(withWallBaseAt(wall, refY: 0), same(wall));
+    });
+  });
+
+  group('mergeWallQuads', () {
+    PlaneQuad wall({
+      required double x,
+      required double z,
+      double yaw = 0,
+      double width = 2,
+      double height = 2,
+      double y = 1,
+    }) =>
+        PlaneQuad(
+          center: Vector3(x, y, z),
+          yaw: yaw,
+          extentX: width,
+          extentZ: height,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+        );
+
+    test('abutting same-yaw fragments merge into one rectangle', () {
+      final a = wall(x: 0, z: 2); // x ∈ [−1, 1]
+      final b = wall(x: 2, z: 2); // x ∈ [1, 3]
+      final out = mergeWallQuads([a, b]);
+      expect(out, hasLength(1));
+      final m = out.single;
+      expect(m.polygon, isEmpty,
+          reason: 'merged walls drop per-fragment outlines');
+      expect(m.vertical, isTrue);
+      expect(m.kind, PlaneQuadKind.wall);
+      expect(m.yaw, closeTo(0, 1e-12));
+      expect(m.extentX, closeTo(4, 1e-9));
+      expect(m.extentZ, closeTo(2, 1e-9));
+      expect(m.center.x, closeTo(1, 1e-9));
+      expect(m.center.y, closeTo(1, 1e-9));
+      expect(m.center.z, closeTo(2, 1e-9));
+      final corners = planeQuadCorners(m);
+      expect(
+        corners.every((c) => c.x >= -1 - 1e-9 && c.x <= 3 + 1e-9),
+        isTrue,
+        reason: 'the merged rect spans both fragments',
+      );
+      expect(corners.every((c) => c.y >= 0 - 1e-9 && c.y <= 2 + 1e-9), isTrue);
+    });
+
+    test('perpendicular walls stay separate', () {
+      final a = wall(x: 0, z: 2, yaw: 0);
+      final b = wall(x: 2, z: 0, yaw: math.pi / 2);
+      final out = mergeWallQuads([a, b]);
+      expect(out, hasLength(2));
+      expect(out.any((q) => identical(q, a)), isTrue);
+      expect(out.any((q) => identical(q, b)), isTrue);
+    });
+
+    test('same-wall fragments 2 m apart stay separate', () {
+      final a = wall(x: 0, z: 2); // x ∈ [−1, 1]
+      final far = wall(x: 4, z: 2); // x ∈ [3, 5] — a 2 m gap
+      final out = mergeWallQuads([a, far]);
+      expect(out, hasLength(2));
+      expect(out.any((q) => identical(q, a)), isTrue);
+      expect(out.any((q) => identical(q, far)), isTrue);
+    });
+
+    test('input order does not change the result', () {
+      final quads = [
+        wall(x: 0, z: 2),
+        wall(x: 2, z: 2),
+        wall(x: 4, z: 2),
+        wall(x: 1, z: 0, yaw: math.pi / 2),
+      ];
+      final a = mergeWallQuads(quads);
+      final b = mergeWallQuads([quads[2], quads[0], quads[3], quads[1]]);
+      String key(PlaneQuad q) =>
+          '${q.yaw}|${q.center.x}|${q.center.y}|${q.center.z}|'
+          '${q.extentX}|${q.extentZ}|${q.polygon.length}';
+      expect([for (final q in a) key(q)], [for (final q in b) key(q)]);
+      expect(a, hasLength(2));
+      // The three abutting fragments became one 6 m rectangle.
+      expect(a.first.extentX, closeTo(6, 1e-9));
+      expect(a.first.center.x, closeTo(2, 1e-9));
+      expect(a.first.yaw, closeTo(0, 1e-12));
+    });
+
+    test('an extended base survives the merge', () {
+      final a = withWallBaseAt(wall(x: 0, z: 2, y: 1.15), refY: 0);
+      final b = wall(x: 2, z: 2);
+      final out = mergeWallQuads([a, b]);
+      expect(out, hasLength(1));
+      final m = out.single;
+      expect(m.center.y - m.extentZ / 2, closeTo(-0.02, 1e-9),
+          reason: 'the stretched base is part of the merged y-range');
+      expect(m.extentZ, closeTo(2.17, 1e-9));
+      expect(m.center.y, closeTo(1.065, 1e-9));
+    });
+
+    test('a lone polygon wall passes through unchanged', () {
+      final w = PlaneQuad(
+        center: Vector3(0, 1, 2),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1, 0, 2),
+          Vector3(1, 0, 2),
+          Vector3(1, 2, 2),
+          Vector3(-1, 2, 2),
+        ],
+      );
+      final out = mergeWallQuads([w]);
+      expect(out, hasLength(1));
+      expect(out.single, same(w));
+      expect(out.single.polygon, hasLength(4));
+      expect(mergeWallQuads(const []), isEmpty);
+    });
   });
 
   group('emaPolygon', () {
@@ -438,11 +768,15 @@ void main() {
       // Sub-threshold jitter only — a jump past the reset shift snaps
       // (covered in the re-fit reset group).
       final prev = [Vector3.zero(), Vector3.zero(), Vector3.zero()];
-      final next = [Vector3(0.1, 0, 0), Vector3(0, 0.1, 0), Vector3(0, 0, 0.1)];
+      final next = [
+        Vector3(0.05, 0, 0),
+        Vector3(0, 0.05, 0),
+        Vector3(0, 0, 0.05),
+      ];
       final out = emaPolygon(prev, next, alpha: 0.35);
-      expect(out[0].x, closeTo(0.035, 1e-9));
-      expect(out[1].y, closeTo(0.035, 1e-9));
-      expect(out[2].z, closeTo(0.035, 1e-9));
+      expect(out[0].x, closeTo(0.0175, 1e-9));
+      expect(out[1].y, closeTo(0.0175, 1e-9));
+      expect(out[2].z, closeTo(0.0175, 1e-9));
     });
 
     test('a re-fitted outline of a different length resets', () {
@@ -1184,6 +1518,7 @@ void main() {
       expect(quad.center.x, closeTo(2, 1e-9));
       expect(quad.center.y, closeTo(0.1, 1e-9));
       expect(quad.center.z, closeTo(-3, 1e-9));
+      expect(quad.extentX, 2.0, reason: 'the stand-in stays small');
     });
 
     test('stays null when ARCore already paints a floor at that height', () {

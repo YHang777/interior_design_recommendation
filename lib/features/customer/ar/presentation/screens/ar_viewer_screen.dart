@@ -27,6 +27,8 @@ import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/float_button.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
+import '../../data/cloud_zone_builder.dart';
+import '../../data/depth_cloud.dart';
 import '../../data/furniture_model_library.dart';
 import '../../data/glb_bounds.dart';
 import '../../data/placement_policy.dart';
@@ -41,6 +43,29 @@ import '../../data/scan_coach.dart';
 import '../widgets/placement_reticle.dart';
 import '../widgets/plane_overlay.dart';
 import '../widgets/scan_coach_overlay.dart';
+
+// One overlay frame: geometry + the same-frame projection matrix. Kept in
+// a ValueNotifier so ~30 Hz plane events repaint only PlaneOverlay instead
+// of rebuilding the whole screen (platform view + chips + reticle).
+class _OverlaySnapshot {
+  const _OverlaySnapshot({
+    required this.vp,
+    required this.quads,
+    required this.masks,
+    required this.synthetic,
+  });
+
+  final Matrix4 vp;
+  final List<PlaneQuad> quads;
+
+  // Furniture/object quads: punched out of the overlay and refused by
+  // placement when they sit between the camera and the tap.
+  final List<PlaneQuad> masks;
+
+  // Render-only floor at the probe-corrected height when ARCore has no
+  // floor-zone plane there — never feeds placement gates.
+  final PlaneQuad? synthetic;
+}
 
 class _PlacedItem {
   _PlacedItem(this.label, this.node, this.anchor, {this.footprint});
@@ -235,13 +260,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   // ─── Plane overlay (true polygons, same-frame projection) ───
 
-  Matrix4? _overlayViewProjection;
+  // Only PlaneOverlay listens; placement gates read .value on demand.
+  final ValueNotifier<_OverlaySnapshot?> _overlay = ValueNotifier(null);
 
-  List<PlaneQuad> _overlayQuads = const [];
-
-  // Furniture-classified quads: punched out of the overlay and refused by
-  // placement when they sit between the camera and the tap.
-  List<PlaneQuad> _overlayMasks = const [];
+  // Cloud-derived obstacle cells and RANSAC walls — rebuilt each ticker
+  // tick, merged into every overlay build and into the memory ingest.
+  List<PlaneQuad> _cloudMasks = const [];
+  List<ARPlaneInfo> _syntheticWalls = const [];
   final _overlayPolyEma = <int, List<Vector3>>{};
 
   // Per-id EMA of the reported center height — the polygon idealizer
@@ -250,11 +275,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   final _overlayCenterY = <int, double>{};
 
   bool _payloadWasNonEmpty = false;
-
-  // Render-only floor at the probe-corrected height when ARCore has no
-  // floor-zone plane there — kept out of _overlayQuads so placement gates
-  // never see it.
-  PlaneQuad? _syntheticFloor;
 
   int _overlayEpoch = 0;
 
@@ -308,6 +328,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachTicker?.cancel();
     _reticleTimer?.cancel();
     _stopRotateHold();
+    _overlay.dispose();
     _session?.dispose();
     super.dispose();
   }
@@ -523,7 +544,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             'ar-screen: payload empty (floorRecords=${_planeMemory.floorPlanes.length} floorY=${_planeMemory.floorY})');
       }
       _payloadWasNonEmpty = planes.isNotEmpty;
-      _planeMemory.ingest(planes);
+      // Subsumed planes never feed memory: their coverage already lives
+      // inside the parent polygon (counting both fakes early readiness).
+      // Synthetic cloud walls are never subsumed — they feed memory and
+      // the coach until the cloud stops seeing them.
+      _planeMemory.ingest([
+        for (final p in [...planes, ..._syntheticWalls])
+          if (!p.subsumed) p
+      ]);
       _livePlanes = _planeMemory.smoothedPlanes();
       _livePlanesAt = DateTime.now();
       _maybeUpdateScanCoach();
@@ -587,6 +615,30 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               BootTrace.log(
                   'ar-screen: probe $candidate → floorY=${_planeMemory.floorY}');
             }
+            // Feature points starve on white surfaces (logged: 16–29 pts
+            // total, 0 in the floor band for seconds); the depth map stays
+            // dense regardless of texture. Merge both sources into one
+            // cloud — assign (never append) so each tick fully replaces
+            // the previous analysis.
+            final feature = await _session?.acquireCloudPoints();
+            final depth = await _session?.acquireDepthPoints();
+            final pts = mergeClouds([
+              if (feature != null && feature.isNotEmpty) feature,
+              if (depth != null && depth.isNotEmpty) depth,
+            ]);
+            if (pts.isNotEmpty && mounted) {
+              final wallPlanes = <int, ARPlaneInfo>{
+                for (final p in [..._livePlanes, ..._syntheticWalls])
+                  if (p.planeType == 2) p.id: p,
+              }.values.toList();
+              _cloudMasks = obstacleMaskQuads(
+                  points: pts, refY: fy, walls: wallPlanes);
+              final probe = floorProbeCandidate(points: pts, refY: fy);
+              if (probe != null) {
+                _planeMemory.noteFloorYCandidate(probe);
+              }
+              _syntheticWalls = fitWallPlanes(points: pts, refY: fy);
+            }
           }
         }
         // Camera pitch from the pose's Z column: the camera looks along
@@ -621,13 +673,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // Rebuilds straight from the planes event — geometry and viewProjection
   // come from the same frame, so the overlay stops lagging behind the camera.
   void _updatePlaneOverlay(List<ARPlaneInfo> planes, Matrix4? vp) {
+    // Synthetic cloud walls ride every rebuild — the async and direct
+    // paths must both see them, not just the raw planes event.
+    final merged = [...planes, ..._syntheticWalls];
     if (vp == null) {
       // Stale native side still sends the bare list — fetch matrices the
       // old way so the overlay keeps tracking during the transition.
       final epoch = ++_overlayEpoch;
       _session?.getCameraViewProjection().then((v) {
         if (mounted && v != null && epoch == _overlayEpoch) {
-          _rebuildPlaneOverlay(planes, v);
+          _rebuildPlaneOverlay(merged, v);
         }
       });
       return;
@@ -637,7 +692,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         DateTime.now().difference(last) < _overlayMinInterval) {
       return;
     }
-    _rebuildPlaneOverlay(planes, vp);
+    _rebuildPlaneOverlay(merged, vp);
   }
 
   void _rebuildPlaneOverlay(List<ARPlaneInfo> planes, Matrix4 vp) {
@@ -656,18 +711,26 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         ? _lastCameraY
         : null;
     // Payload-lowest horizontal plane: the untrusted-floorY reference and
-    // a fail-safe — a plane above it can never paint floor.
+    // a fail-safe — a plane above it can never paint floor. Subsumed planes
+    // are mask material, never the floor anchor.
     double? lowestPlaneY;
     for (final p in planes) {
-      if (p.planeType != 1) continue;
+      if (p.planeType != 1 || p.subsumed) continue;
       if (lowestPlaneY == null || p.centerY < lowestPlaneY) {
         lowestPlaneY = p.centerY;
       }
     }
+    // Floor paint lands HERE, not on the plane's own drifted center height:
+    // ARCore fitted Ys sit 7-20 cm above the probe-proven floor, which is
+    // exactly the sheet that hovers through furniture.
+    final refY = (trusted && floorY != null)
+        ? trustedOverlayRefY(floorY: floorY, lowestPlaneY: lowestPlaneY)
+        : null;
     for (final p in planes) {
+      final smoothY = _smoothOverlayCenterY(p.id, p.centerY);
       final zone = overlayZoneOf(
         planeType: p.planeType,
-        centerY: p.centerY,
+        centerY: smoothY,
         floorY: floorY,
         cameraY: cameraY,
         lowestPlaneY: lowestPlaneY,
@@ -675,9 +738,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       );
       if (zone == OverlayZoneKind.drop) continue;
       if (p.id != 0) seenIds.add(p.id);
+      // A subsumed plane's outline already lives inside its parent's
+      // polygon — only its elevated shape is news, and that is a mask.
+      if (p.subsumed && zone != OverlayZoneKind.mask) continue;
+      final paintY =
+          zone == OverlayZoneKind.floor && refY != null ? refY : smoothY;
       final quad = PlaneQuad(
-        center: Vector3(p.centerX, _smoothOverlayCenterY(p.id, p.centerY),
-            p.centerZ),
+        center: Vector3(p.centerX, paintY, p.centerZ),
         yaw: p.yaw,
         extentX: p.extentX,
         extentZ: p.extentZ,
@@ -693,26 +760,49 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         quads.add(quad);
       }
     }
+    // Cloud obstacle cells bypass zone classification — they are holes.
+    masks.addAll(_cloudMasks);
+    // Wall bottoms must reach the floor: a wall quad stopping 10–20 cm
+    // short leaves exactly the green base strip at the wall foot, and the
+    // floor−wall clip can't cut what the wall doesn't cover. Merging
+    // near-coplanar fragments afterwards turns ARCore's patchwork
+    // silhouette into one clean rectangle (the "tetris" look).
+    final baseY = refY ?? floorY;
+    if (baseY != null) {
+      final walls = <PlaneQuad>[];
+      final rest = <PlaneQuad>[];
+      for (final q in quads) {
+        if (q.kind == PlaneQuadKind.wall) {
+          walls.add(withWallBaseAt(q, refY: baseY));
+        } else {
+          rest.add(q);
+        }
+      }
+      quads
+        ..clear()
+        ..addAll(rest)
+        ..addAll(mergeWallQuads(walls));
+    }
     _overlayPolyEma.removeWhere((id, _) => !seenIds.contains(id));
     _overlayCenterY.removeWhere((id, _) => !seenIds.contains(id));
     // The synthetic stand-in may only paint at a PROVEN height — otherwise
     // it floats at a wrong floorY next to (or instead of) the real floor.
     final synthetic = syntheticFloorQuad(
-      floorY: trusted ? floorY : null,
+      floorY: refY,
       cameraPos: _lastCameraPos,
       existing: quads,
     );
-    setState(() {
-      _overlayViewProjection = vp;
-      _overlayQuads = quads;
-      _overlayMasks = masks;
-      _syntheticFloor = synthetic;
-    });
+    _overlay.value = _OverlaySnapshot(
+      vp: vp,
+      quads: quads,
+      masks: masks,
+      synthetic: synthetic,
+    );
     // Throttled: only log when the overlay state actually changes shape.
     final key = '$trusted|${floorY?.toStringAsFixed(2)}|'
         '${cameraY?.toStringAsFixed(2)}|'
         '${quads.length}|${masks.length}|${lowestPlaneY?.toStringAsFixed(2)}|'
-        '${synthetic != null}';
+        '${synthetic != null}|${_cloudMasks.length}';
     if (key != _overlayStateKey) {
       _overlayStateKey = key;
       BootTrace.log('ar-screen: overlay $key');
@@ -735,6 +825,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (id == 0 || !y.isFinite) return y;
     final prev = _overlayCenterY[id];
     if (prev == null) {
+      _overlayCenterY[id] = y;
+      return y;
+    }
+    // A jump past the deadband is a re-fit, not jitter — snap like
+    // emaPolygon does so render height never glides on a stale EMA.
+    if ((y - prev).abs() > 0.15) {
       _overlayCenterY[id] = y;
       return y;
     }
@@ -877,7 +973,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     BootTrace.log('ar-screen: tap hits=${hits.length} intent=$_reticleIntent '
         'floorY=${_planeMemory.floorY} fresh=${_planeMemory.isFresh} '
         'trusted=${_planeMemory.floorYRenderTrusted} '
-        'quads=${_overlayQuads.length} masks=${_overlayMasks.length} '
+        'quads=${_overlay.value?.quads.length ?? 0} '
+        'masks=${_overlay.value?.masks.length ?? 0} '
         'placeable=${_selectedEntry?.placeable}');
 
     if (_arError != null) {
@@ -1064,13 +1161,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
     // Furniture between the camera and the tap (seat tops, counter slabs):
     // refuse instead of sinking the item behind the real object.
+    final overlayMasks = _overlay.value?.masks ?? const <PlaneQuad>[];
     if (cameraPos != null &&
-        _overlayMasks.any((q) => segmentBlockedByQuad(
+        overlayMasks.any((q) => segmentBlockedByQuad(
               origin: cameraPos,
               target: seed,
               quad: q,
             ))) {
-      BootTrace.log('ar-screen: refuse behind-furniture masks=${_overlayMasks.length}');
+      BootTrace.log('ar-screen: refuse behind-furniture masks=${overlayMasks.length}');
       _showMessage('That spot is behind furniture — tap an open area.',
           color: AppColors.primaryLight);
       return null;
@@ -1087,7 +1185,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (cameraPos != null && onFloorHit) {
       landing = pushIntoFloorZone(
         point: seed,
-        masks: _overlayMasks,
+        masks: overlayMasks,
         floorZones: _floorZoneQuads,
         cameraPos: cameraPos,
         clearanceM: 0.3,
@@ -1158,11 +1256,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         depthM: footprintDims.depthM,
         floorZones: _floorZoneQuads,
         // Finishes are cut around objects, not refused by them.
-        masks: isFinish ? const [] : _overlayMasks,
+        masks: isFinish ? const [] : overlayMasks,
       )) {
         BootTrace.log(
             'ar-screen: refuse footprint zones=${_floorZoneQuads.length} '
-            'masks=${_overlayMasks.length} '
+            'masks=${overlayMasks.length} '
             'w=${footprintDims.widthM.toStringAsFixed(2)} '
             'd=${footprintDims.depthM.toStringAsFixed(2)} '
             'center=(${center.x.toStringAsFixed(2)},'
@@ -1274,7 +1372,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 
   List<PlaneQuad> get _floorZoneQuads => [
-        for (final q in _overlayQuads)
+        for (final q in _overlay.value?.quads ?? const <PlaneQuad>[])
           if (q.kind == PlaneQuadKind.floor) q,
       ];
 
@@ -1501,14 +1599,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // the anchor's yaw about Y (scale factor is 1: scaleToUnits normalizes
   // longest edge to the meter bounds the mesh already has).
   List<List<double>> _finishCutoutHoles(Matrix4 transform) {
-    if (_overlayMasks.isEmpty) return const [];
+    final masks = _overlay.value?.masks ?? const <PlaneQuad>[];
+    if (masks.isEmpty) return const [];
     final col2 = transform.getColumn(2);
     final yaw = math.atan2(col2.x, col2.z);
     final c = math.cos(yaw);
     final s = math.sin(yaw);
     final t = transform.getTranslation();
     final holes = <List<double>>[];
-    for (final q in _overlayMasks) {
+    for (final q in masks) {
       final world = planeQuadCorners(q);
       if (world.length < 3) continue;
       final flat = <double>[];
@@ -1984,18 +2083,25 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
 
-        if (_overlayViewProjection != null &&
-            (_overlayQuads.isNotEmpty || _syntheticFloor != null))
-          Positioned.fill(
-            child: PlaneOverlay(
-              viewProjection: _overlayViewProjection!,
-              quads: [
-                if (_syntheticFloor != null) _syntheticFloor!,
-                ..._overlayQuads,
-              ],
-              masks: _overlayMasks,
-            ),
-          ),
+        ValueListenableBuilder<_OverlaySnapshot?>(
+          valueListenable: _overlay,
+          builder: (context, snap, _) {
+            if (snap == null ||
+                (snap.quads.isEmpty && snap.synthetic == null)) {
+              return const SizedBox.shrink();
+            }
+            return Positioned.fill(
+              child: PlaneOverlay(
+                viewProjection: snap.vp,
+                quads: [
+                  if (snap.synthetic != null) snap.synthetic!,
+                  ...snap.quads,
+                ],
+                masks: snap.masks,
+              ),
+            );
+          },
+        ),
 
         if (_sessionStartedAt != null &&
             _arError == null &&
