@@ -79,14 +79,22 @@ class _PlaneOverlayPainter extends CustomPainter {
           ..style = PaintingStyle.fill
           ..color = const Color(0x3D4CAF50),
       );
-      canvas.drawPath(
-        floorPath,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..strokeJoin = StrokeJoin.round
-          ..color = const Color(0xB366BB6A),
-      );
+      // A near-camera floor fills the frame; a heavy outline over a huge
+      // path reads as a harsh floating edge. Calm alpha, and skip the
+      // stroke entirely when the zone owns most of the viewport.
+      final bounds = floorPath.getBounds();
+      final dominates = bounds.width > size.width * 0.7 &&
+          bounds.height > size.height * 0.7;
+      if (!dominates) {
+        canvas.drawPath(
+          floorPath,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..strokeJoin = StrokeJoin.round
+            ..color = const Color(0x6666BB6A),
+        );
+      }
     }
 
     final wallPath = zones.wall;

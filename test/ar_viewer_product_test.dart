@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/ar_product_entry.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_rescaler.dart';
 import 'package:interior_design_recommendation/models/product.dart';
@@ -147,6 +148,53 @@ void main() {
         resolvedFile: file,
       );
       expect(entry.scaleToMeters, entry.scaleToMeters);
+    });
+  });
+
+  group('worldFootprint (fails open, never guessed)', () {
+    test('mirrors the resolved geometry bounds exactly', () {
+      final file = _resolvedGlb(_dims);
+      addTearDown(() {
+        if (file.existsSync()) file.deleteSync();
+      });
+      final entry = ArProductEntry(
+        product: _product(dimensions: _dims),
+        resolvedFile: file,
+      );
+      final b = GlbBounds.fromGlbBytes(file.readAsBytesSync());
+      final fp = entry.worldFootprint;
+      expect(fp, isNotNull);
+      expect(fp!.widthM, b.widthM,
+          reason: 'products render at GlbBounds scale — footprint == '
+              'geometry bounds');
+      expect(fp.depthM, b.depthM);
+      expect(fp.centerX, b.centerX);
+      expect(fp.centerZ, b.centerZ);
+      expect(entry.scaleToMeters, b.maxExtent);
+    });
+
+    test('is null when there is no resolved file', () {
+      final entry = ArProductEntry(product: _product(dimensions: _dims));
+      expect(entry.worldFootprint, isNull,
+          reason: 'no geometry → no footprint → placement fails open');
+    });
+
+    test('is null for an unparseable file instead of throwing', () {
+      final file = File(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'ar_entry_garbage_footprint.glb')
+        ..writeAsStringSync('not a glb');
+      addTearDown(() {
+        if (file.existsSync()) file.deleteSync();
+      });
+      final entry = ArProductEntry(
+        product: _product(dimensions: _dims),
+        resolvedFile: file,
+      );
+      expect(entry.worldFootprint, isNull);
+      expect(() => entry.scaleToMeters, throwsStateError,
+          reason: 'the scale pipeline stays strict — only the footprint '
+              'getter fails open');
     });
   });
 

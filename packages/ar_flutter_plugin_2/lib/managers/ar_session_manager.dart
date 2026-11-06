@@ -171,6 +171,33 @@ class ARSessionManager {
     }
   }
 
+  // Low-percentile Y of accumulated point-cloud samples near [floorY],
+  // or null when there aren't enough points to trust. The cloud keeps
+  // receiving raw depth while plane telemetry goes quiet, so this is the
+  // refocus signal that sees the real floor without any plane update.
+  Future<double?> probeFloorY({
+    required double floorY,
+    double radiusM = 2.5,
+    int minPoints = 12,
+  }) async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'probeFloorY',
+        {
+          'floorY': floorY,
+          'radiusM': radiusM,
+          'minPoints': minPoints,
+        },
+      );
+      if (raw == null) return null;
+      final y = (raw['y'] as num?)?.toDouble();
+      return y != null && y.isFinite ? y : null;
+    } catch (e) {
+      if (debug) print('probeFloorY error: $e');
+      return null;
+    }
+  }
+
   Future<List<ARHitTestResult>> hitTest(double xPx, double yPx) async {
     try {
       final raw = await _channel.invokeMethod<List<dynamic>>('hitTest', {

@@ -4,7 +4,14 @@ import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 
 import 'placement_policy.dart';
 
-enum ScanCoachStep { findFloor, sweepFloor, expandCoverage, ready }
+enum ScanCoachStep {
+  findFloor,
+  sweepFloor,
+  expandCoverage,
+  findWall,
+  sweepWall,
+  ready,
+}
 
 class ScanCoachState {
   const ScanCoachState({
@@ -13,6 +20,7 @@ class ScanCoachState {
     required this.progress,
     required this.tip,
     this.hasIssue = false,
+    this.wall = false,
   });
 
   final ScanCoachStep step;
@@ -24,6 +32,10 @@ class ScanCoachState {
   final String tip;
 
   final bool hasIssue;
+
+  // True when the user is placing something on a wall — the overlay shows
+  // the wall step ladder instead of the floor one.
+  final bool wall;
 }
 
 class ScanCoach {
@@ -56,7 +68,9 @@ class ScanCoach {
     double? floorCoverageM,
     double? cameraY,
     double? cameraPitchDeg,
+    bool wall = false,
   }) {
+    if (wall) return _evaluateWall(planes, elapsed, trackingIssue);
     // Coverage = the smaller extent of the best FLOOR-level plane — the same
     // gate placement uses (both axes must fit the item footprint). A table
     // top scanned before the floor must not fake "Ready". [floorCoverageM]
@@ -123,6 +137,68 @@ class ScanCoach {
     );
   }
 
+  // Wall placement: ARCore vertical planes are the whole game here (and
+  // the weakest link on white walls), so the ladder tracks the wall gates
+  // both placement uses — no floor-height requirement, no floor pitch tip.
+  static ScanCoachState _evaluateWall(
+    List<ARPlaneInfo> planes,
+    Duration elapsed,
+    String? trackingIssue,
+  ) {
+    var wallProgress = 0.0;
+    for (final p in planes) {
+      if (p.planeType != 2) continue;
+      final a =
+          math.min(p.extentX, p.extentZ) / ArPlacementPolicy.minWallExtentM;
+      final b =
+          math.max(p.extentX, p.extentZ) / ArPlacementPolicy.minWallLongExtentM;
+      final prog = math.min(a, b).clamp(0.0, 1.0);
+      if (prog > wallProgress) wallProgress = prog;
+    }
+    final ready = wallProgress >= 1.0;
+    final step = ready
+        ? ScanCoachStep.ready
+        : wallProgress > 0
+            ? ScanCoachStep.sweepWall
+            : ScanCoachStep.findWall;
+    final issue = issueTip(trackingIssue);
+    return ScanCoachState(
+      step: step,
+      ready: ready,
+      progress: wallProgress,
+      wall: true,
+      tip: issue ?? _wallTip(step, elapsed),
+      hasIssue: issue != null,
+    );
+  }
+
+  static String _wallTip(ScanCoachStep step, Duration elapsed) {
+    switch (step) {
+      case ScanCoachStep.findWall:
+        return 'Aim at the wall — a corner or floor junction gives ARCore an edge';
+      case ScanCoachStep.sweepWall:
+        return _rotate(elapsed, const [
+          'Move left and right along the wall — ARCore needs two viewing angles',
+          'Step back 1–2 m so a full wall section is in view',
+          'Plain paint is hard — angle across it so light reveals texture',
+        ]);
+      case ScanCoachStep.ready:
+        return 'Ready — tap the wall to place';
+      default:
+        return 'Aim at the wall';
+    }
+  }
+
+  // White-surface advice rotates in after the plain tip has had its turn —
+  // textureless floors/walls are the #1 failure and parallax/lighting is
+  // what actually fixes them. First entry is always the classic tip so the
+  // early-session copy is unchanged.
+  static String _rotate(Duration elapsed, List<String> tips) {
+    if (tips.length == 1) return tips.first;
+    final idx = (elapsed.inSeconds ~/ 6) % tips.length;
+    return tips[idx];
+  }
+
   // Concrete hold-angle advice while the phone is aimed near the horizon.
   // Null when the reading is missing/stale or the angle is already fine.
   static String? pitchTip(double? pitchDeg) {
@@ -145,15 +221,31 @@ class ScanCoach {
           return 'That looks like furniture — scan the open floor';
         }
         if (!sawPlane && elapsed >= stillHintAfter) {
-          return 'Check the lighting and hold still';
+          return _rotate(elapsed, const [
+            'Check the lighting and hold still',
+            'Move slowly side to side — white floors need parallax',
+            'Aim near a rug, edge, or seam for something to lock onto',
+          ]);
         }
         return 'Tilt down until the floor fills the view';
       case ScanCoachStep.sweepFloor:
-        return 'Sweep slowly side to side — about a second each way';
+        return _rotate(elapsed, const [
+          'Sweep slowly side to side — about a second each way',
+          'Kneel and view the floor at about 30° so shadows give it texture',
+          'Avoid glare — even a little texture helps ARCore lock on',
+        ]);
       case ScanCoachStep.expandCoverage:
-        return 'Keep sweeping a little wider';
+        return _rotate(elapsed, const [
+          'Keep sweeping a little wider',
+          'White floors are hard — walk the perimeter slowly',
+          'Point at where the floor meets the wall for a clear edge',
+        ]);
       case ScanCoachStep.ready:
         return 'Ready — tap the floor to place';
+      // Wall steps never reach the floor path — evaluate() branches first.
+      case ScanCoachStep.findWall:
+      case ScanCoachStep.sweepWall:
+        return 'Tilt down until the floor fills the view';
     }
   }
 

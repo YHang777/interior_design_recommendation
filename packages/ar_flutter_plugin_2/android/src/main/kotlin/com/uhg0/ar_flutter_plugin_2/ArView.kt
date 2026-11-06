@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -20,6 +21,7 @@ import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
 import com.google.ar.core.Pose
+import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import com.uhg0.ar_flutter_plugin_2.Serialization.deserializePoseParts
 import com.uhg0.ar_flutter_plugin_2.Serialization.serializeHitResult
@@ -62,6 +64,8 @@ import io.github.sceneview.loaders.MaterialLoader
 import com.google.ar.core.exceptions.SessionPausedException
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 class ArView(
     context: Context,
@@ -128,6 +132,11 @@ class ArView(
     private val planeIds = java.util.IdentityHashMap<Plane, Int>()
     private var nextPlaneId = 1
 
+    // Last time each plane genuinely appeared in getUpdatedTrackables.
+    // Stable planes keep re-emitting from the cache; freshMs tells Dart
+    // which observations are real updates (see the payload builder).
+    private val planeLastFreshAt = java.util.IdentityHashMap<Plane, Long>()
+
     // Sliding point-cloud buffer feeding refinePlane — a single frame's cloud
     // is too sparse for a confident RANSAC fit on weak sensors. Same
     // UI-thread-only contract as latestFrame / livePlanes.
@@ -141,6 +150,15 @@ class ArView(
     private var planesFrameCounter = 0
     private var firstFrameTraced = false
     private var frameErrorTraced = false
+
+    // Session identity for the config-time cache clears — see the
+    // sessionConfiguration lambda. Plus diagnostic cadence counters and
+    // one-shot wall logs (NativeTrace, ~5s cadence, never per-frame).
+    private var lastConfiguredSession: Session? = null
+    private var cloudLogFrameCounter = 0
+    private var planeSnapFrameCounter = 0
+    private var firstWallLogged = false
+    private var firstPausedWallLogged = false
 
     private fun planeIdFor(plane: Plane): Int =
         planeIds.getOrPut(plane) { nextPlaneId++ }
@@ -164,6 +182,7 @@ class ArView(
                 "disableCamera" -> handleDisableCamera(result)
                 "enableCamera" -> handleEnableCamera(result)
                 "refinePlane" -> handleRefinePlane(call, result)
+                "probeFloorY" -> handleProbeFloorY(call, result)
                 "hitTest" -> handleHitTest(call, result)
                 else -> result.notImplemented()
             }
@@ -235,13 +254,38 @@ class ArView(
             context = viewContext,
             sharedLifecycle = lifecycle,
             sessionConfiguration = { session, config ->
+                // Depth from the very first apply: handleInit races session
+                // creation, and a session born with DISABLED stayed that way
+                // for its whole life (nothing re-applies after creation).
                 config.apply {
-                    depthMode = Config.DepthMode.DISABLED
+                    depthMode = if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                        Config.DepthMode.AUTOMATIC
+                    } else {
+                        Config.DepthMode.DISABLED
+                    }
                     instantPlacementMode = Config.InstantPlacementMode.DISABLED
                     lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
                     focusMode = Config.FocusMode.AUTO
                     planeFindingMode = desiredPlaneFindingMode
                 }
+                // SceneView fires this on EVERY ARSession.configure — each
+                // app resume included. Only wipe the telemetry when the
+                // session object itself is new: a resume wipe emptied
+                // livePlanes and stable (white-floor) planes never re-appear
+                // as "updated", blanking the overlay until geometry moved.
+                // A (re)created session mints new Plane objects, so stale
+                // keys must go.
+                val newSession = session !== lastConfiguredSession
+                if (newSession) {
+                    livePlanes.clear()
+                    planeLastFreshAt.clear()
+                    detectedPlanes.clear()
+                    lastConfiguredSession = session
+                }
+                NativeTrace.log(
+                    viewContext,
+                    "arview: cfg pf=${config.planeFindingMode} depth=${config.depthMode} live=${livePlanes.size} wiped=${if (newSession) 1 else 0}",
+                )
             }
         )
         NativeTrace.log(viewContext, "arview: scene view created")
@@ -293,12 +337,26 @@ class ArView(
             ((nodeData["data"] as? Map<*, *>)
                 ?.get("horizontalOnly") as? Boolean) ?: false
 
+        // World-meter geometry footprint embedded at placement (Dart's
+        // tap-time gate). Missing keys → no drag clamp; wall items
+        // (horizontalOnly=false) never clamp.
+        val fpData = nodeData["data"] as? Map<*, *>
+        val fpW = (fpData?.get("footprintWidthM") as? Number)?.toDouble()
+        val fpD = (fpData?.get("footprintDepthM") as? Number)?.toDouble()
+        val fpCx = (fpData?.get("footprintCenterX") as? Number)?.toDouble()
+        val fpCz = (fpData?.get("footprintCenterZ") as? Number)?.toDouble()
+
         return try {
             sceneView.modelLoader.loadModelInstance(fileLocation)?.let { modelInstance ->
                 object : ModelNode(
                     modelInstance = modelInstance,
                     scaleToUnits = transformation.first().toFloat(),
                 ) {
+                    // Rotation teleport guard + twist-seam baseline (see
+                    // onRotate / onRotateEnd below).
+                    var lastAppliedWorldQ: Quaternion? = null
+                    var prevGestureAngle: Float? = null
+
                     // Drag = re-hit-test the finger against REAL tracked
                     // planes and glue the parent AnchorNode to that surface
                     // point. SceneView's default move snaps to the parent's
@@ -360,8 +418,28 @@ class ArView(
                                     }
                                     ?.let { hit ->
                                         val t = hit.hitPose.translation
-                                        anchorNode.worldPosition =
-                                            Position(t[0], t[1], t[2])
+                                        // Floor items with a known footprint
+                                        // may not overhang the plane they are
+                                        // glued to — position-only; rotation
+                                        // lives on this node and is never
+                                        // restored from a cached matrix here.
+                                        var allowed = true
+                                        if (horizontalOnly && fpW != null && fpD != null &&
+                                            fpCx != null && fpCz != null && fpW > 0 && fpD > 0
+                                        ) {
+                                            val wt = worldTransform.toFloatArray()
+                                            allowed = footprintWithinPlane(
+                                                t[0], t[1], t[2],
+                                                atan2(wt[8], wt[10]),
+                                                fpW.toFloat(), fpD.toFloat(),
+                                                fpCx.toFloat(), fpCz.toFloat(),
+                                                hit.trackable as? Plane,
+                                            )
+                                        }
+                                        if (allowed) {
+                                            anchorNode.worldPosition =
+                                                Position(t[0], t[1], t[2])
+                                        }
                                     }
                             } catch (ex: Exception) {
                                 // Frame went stale mid-drag — keep the last
@@ -378,10 +456,27 @@ class ArView(
                         e: MotionEvent
                     ) {
                         if (handlePans) {
+                            // SceneView's detach-drag-reattach lifecycle
+                            // re-anchors from PoseNode.pose at gesture end,
+                            // and the drag only ever wrote worldPosition —
+                            // sync the pose to the dragged spot first or
+                            // createAnchor() rebuilds the anchor at the
+                            // ORIGINAL placement and the model teleports
+                            // back. Rotation never moves (it lives on this
+                            // node), so keep the placement orientation.
+                            (parent as? AnchorNode)?.let { anchorNode ->
+                                val p = anchorNode.worldPosition
+                                anchorNode.pose = Pose(
+                                    floatArrayOf(p.x, p.y, p.z),
+                                    anchorNode.pose.rotationQuaternion,
+                                )
+                            }
                             parent?.onMoveEnd(detector, e)
+                            // World, not local: the drag moved the parent
+                            // anchor, which the local matrix never sees.
                             val transformMap = mapOf(
                                 "name" to name,
-                                "transform" to transform.toFloatArray().toList()
+                                "transform" to worldTransform.toFloatArray().toList()
                             )
                             objectChannel.invokeMethod("onPanEnd", transformMap)
                         }
@@ -389,6 +484,8 @@ class ArView(
 
                     override fun onRotateBegin(detector: RotateGestureDetector, e: MotionEvent): Boolean {
                         if (handleRotation) {
+                            prevGestureAngle = null
+                            lastAppliedWorldQ = null
                             val defaultResult = super.onRotateBegin(detector, e)
                             objectChannel.invokeMethod("onRotationStart", name)
                             return defaultResult
@@ -407,7 +504,19 @@ class ArView(
                         // +Y-axis rotation onto the world quaternion, so
                         // furniture turns like a turntable and can never
                         // pitch or roll.
-                        val deltaRad = detector.currentAngle - detector.lastAngle
+                        val cur = detector.currentAngle
+                        val prev = prevGestureAngle
+                        prevGestureAngle = cur
+                        if (prev == null) return true // first frame: baseline only
+                        var deltaRad = cur - prev
+                        // atan2 seam: the absolute twist angle jumps ±2π at
+                        // the branch cut — wrap so a full circle never
+                        // hiccups backwards by ~358°.
+                        if (deltaRad > Math.PI.toFloat()) {
+                            deltaRad -= (2.0 * Math.PI).toFloat()
+                        } else if (deltaRad < -Math.PI.toFloat()) {
+                            deltaRad += (2.0 * Math.PI).toFloat()
+                        }
                         if (deltaRad != 0f) {
                             // fromAxisAngle takes DEGREES in this kotlin-math
                             // build (it internally multiplies by π/180).
@@ -418,6 +527,7 @@ class ArView(
                                 deltaYawDeg
                             )
                             worldQuaternion = deltaQ * worldQuaternion
+                            lastAppliedWorldQ = worldQuaternion
                         }
                         objectChannel.invokeMethod("onRotationChange", name)
                         return true
@@ -426,9 +536,28 @@ class ArView(
                     override fun onRotateEnd(detector: RotateGestureDetector, e: MotionEvent) {
                         if (handleRotation) {
                             super.onRotateEnd(detector, e)
+                            // The end-of-gesture path (move END runs first on
+                            // touch-up) can clobber the twist — re-assert what
+                            // this gesture applied or it teleports back.
+                            lastAppliedWorldQ?.let { applied ->
+                                worldQuaternion = applied
+                                rootLayout.postDelayed({
+                                    try {
+                                        val later = worldQuaternion
+                                        NativeTrace.log(
+                                            viewContext,
+                                            "arview: rotateEnd later=$later applied=$applied match=${qStr(later) == qStr(applied)}",
+                                        )
+                                    } catch (_: Exception) {
+                                    }
+                                }, 500)
+                            }
+                            // World matrix: after a drag the footprint needs
+                            // the anchor's position too, not just this
+                            // node's local rotation.
                             val transformMap = mapOf(
                                 "name" to name,
-                                "transform" to transform.toFloatArray().toList()
+                                "transform" to worldTransform.toFloatArray().toList()
                             )
                             objectChannel.invokeMethod("onRotationEnd", transformMap)
                         }
@@ -521,7 +650,10 @@ class ArView(
         call: MethodCall,
         result: MethodChannel.Result,
     ) {
-        NativeTrace.log(viewContext, "arview: handleInit begin")
+        NativeTrace.log(
+            viewContext,
+            "arview: handleInit begin sessionNull=${sceneView.session == null}",
+        )
         try {
             val argShowAnimatedGuide = call.argument<Boolean>("showAnimatedGuide") ?: true
             val argShowFeaturePoints = call.argument<Boolean>("showFeaturePoints") ?: false
@@ -547,6 +679,7 @@ class ArView(
                     }
                     planeFindingMode = desiredPlaneFindingMode
                 })
+                NativeTrace.log(viewContext, "arview: handleInit depthMode=${session.config.depthMode} pf=${session.config.planeFindingMode} arg=$argPlaneDetectionConfig")
                 // Probe only. ARCore's SemanticLabel set is outdoor categories
                 // (SKY/ROAD/BUILDING/… — no furniture/floor/table labels), so
                 // semantic mode can never mask indoor objects; logged so the
@@ -620,6 +753,17 @@ class ArView(
                                         try {
                                             if (cloud.timestamp != lastAccumCloudTimestamp) {
                                                 lastAccumCloudTimestamp = cloud.timestamp
+                                                // White floors starve every
+                                                // point-cloud consumer (probe,
+                                                // refine) — log the raw yield so
+                                                // the next device run shows it.
+                                                cloudLogFrameCounter++
+                                                if (cloudLogFrameCounter % 150 == 0) {
+                                                    NativeTrace.log(
+                                                        viewContext,
+                                                        "arview: cloud pts=${cloud.points.limit() / 4}",
+                                                    )
+                                                }
                                                 pointAccumulator.ingest(
                                                     cloud.points,
                                                     frame.timestamp / 1_000_000L,
@@ -645,29 +789,34 @@ class ArView(
                                     val currentFps = frame.fps(lastPointCloudFrame)
                                     if (currentFps < 10) {
                                         frame.acquirePointCloud()?.let { pointCloud ->
-                                            if (pointCloud.timestamp != lastPointCloudTimestamp) {
-                                                lastPointCloudFrame = frame
-                                                lastPointCloudTimestamp = pointCloud.timestamp
+                                            // Release on EVERY acquire — the
+                                            // unchanged-timestamp path used to
+                                            // leak the cloud.
+                                            try {
+                                                if (pointCloud.timestamp != lastPointCloudTimestamp) {
+                                                    lastPointCloudFrame = frame
+                                                    lastPointCloudTimestamp = pointCloud.timestamp
 
-                                                val pointsSize = pointCloud.ids?.limit() ?: 0
+                                                    val pointsSize = pointCloud.ids?.limit() ?: 0
 
-                                                if (pointCloudNodes.isNotEmpty()) {
+                                                    if (pointCloudNodes.isNotEmpty()) {
+                                                    }
+                                                    pointCloudNodes.toList().forEach { removePointCloudNode(it) }
+
+                                                    val pointsBuffer = pointCloud.points
+                                                    for (index in 0 until pointsSize) {
+                                                        val pointIndex = index * 4
+                                                        val position =
+                                                            Position(
+                                                                pointsBuffer[pointIndex],
+                                                                pointsBuffer[pointIndex + 1],
+                                                                pointsBuffer[pointIndex + 2],
+                                                            )
+                                                        val confidence = pointsBuffer[pointIndex + 3]
+                                                        addPointCloudNode(index, position, confidence)
+                                                    }
                                                 }
-                                                pointCloudNodes.toList().forEach { removePointCloudNode(it) }
-
-                                                val pointsBuffer = pointCloud.points
-                                                for (index in 0 until pointsSize) {
-                                                    val pointIndex = index * 4
-                                                    val position =
-                                                        Position(
-                                                            pointsBuffer[pointIndex],
-                                                            pointsBuffer[pointIndex + 1],
-                                                            pointsBuffer[pointIndex + 2],
-                                                        )
-                                                    val confidence = pointsBuffer[pointIndex + 3]
-                                                    addPointCloudNode(index, position, confidence)
-                                                }
-
+                                            } finally {
                                                 pointCloud.release()
                                             }
                                         }
@@ -699,12 +848,94 @@ class ArView(
                                     // one — drop them so the app never counts a
                                     // table top twice (once alone, once inside
                                     // the floor polygon it merged into).
-                                    if (plane.trackingState == TrackingState.TRACKING &&
-                                        plane.subsumedBy == null
-                                    ) {
-                                        livePlanes[plane] = planeTelemetry(plane)
-                                    } else {
+                                    if (plane.subsumedBy != null) {
                                         livePlanes.remove(plane)
+                                        planeLastFreshAt.remove(plane)
+                                        return@forEach
+                                    }
+                                    when (plane.trackingState) {
+                                        TrackingState.TRACKING -> {
+                                            livePlanes[plane] =
+                                                planeTelemetry(plane) + ("tracking" to true)
+                                            planeLastFreshAt[plane] =
+                                                SystemClock.elapsedRealtime()
+                                            if (plane.type == Plane.Type.VERTICAL &&
+                                                !firstWallLogged
+                                            ) {
+                                                firstWallLogged = true
+                                                NativeTrace.log(
+                                                    viewContext,
+                                                    "arview: first wall id=${planeIdFor(plane)} extents=${plane.extentX}x${plane.extentZ}",
+                                                )
+                                            }
+                                        }
+                                        // PAUSED = ARCore found it but lacks views to
+                                        // refine — common on white walls. Emit it for
+                                        // RENDER/memory (freshMs grows: last genuinely
+                                        // updated when it was TRACKING). Every
+                                        // placement gate stays TRACKING-only, so a
+                                        // paused plane can never become placeable.
+                                        TrackingState.PAUSED -> {
+                                            val wasPresent = livePlanes.containsKey(plane)
+                                            livePlanes[plane] =
+                                                planeTelemetry(plane) + ("tracking" to false)
+                                            if (!wasPresent) {
+                                                planeLastFreshAt.putIfAbsent(
+                                                    plane,
+                                                    SystemClock.elapsedRealtime(),
+                                                )
+                                                if (plane.type == Plane.Type.VERTICAL &&
+                                                    !firstPausedWallLogged
+                                                ) {
+                                                    firstPausedWallLogged = true
+                                                    NativeTrace.log(
+                                                        viewContext,
+                                                        "arview: first pausedWall id=${planeIdFor(plane)} extents=${plane.extentX}x${plane.extentZ}",
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        else -> {
+                                            livePlanes.remove(plane)
+                                            planeLastFreshAt.remove(plane)
+                                        }
+                                    }
+                                }
+
+                                // ~5s diagnostic snapshot: how many planes ARCore
+                                // actually holds per state (the white-wall question),
+                                // how many the payload carries, and the feature-map
+                                // quality — the single best white-surface health
+                                // signal ARCore exposes.
+                                planeSnapFrameCounter++
+                                if (planeSnapFrameCounter % 150 == 0) {
+                                    sceneView.session?.let { s ->
+                                        val all = s.getAllTrackables(Plane::class.java)
+                                        var track = 0
+                                        var paused = 0
+                                        var stopped = 0
+                                        var vertical = 0
+                                        for (p in all) {
+                                            when (p.trackingState) {
+                                                TrackingState.TRACKING -> track++
+                                                TrackingState.PAUSED -> paused++
+                                                else -> stopped++
+                                            }
+                                            if (p.type == Plane.Type.VERTICAL) vertical++
+                                        }
+                                        val fmq = try {
+                                            when (s.estimateFeatureMapQualityForHosting(frame.camera.pose)) {
+                                                Session.FeatureMapQuality.GOOD -> "GOOD"
+                                                Session.FeatureMapQuality.SUFFICIENT -> "SUFFICIENT"
+                                                else -> "INSUFFICIENT"
+                                            }
+                                        } catch (e: Throwable) {
+                                            "n/a"
+                                        }
+                                        NativeTrace.log(
+                                            viewContext,
+                                            "arview: planeSnap all=${all.size} track=$track paused=$paused stopped=$stopped vertical=$vertical live=${livePlanes.size} fmq=$fmq",
+                                        )
                                     }
                                 }
 
@@ -716,7 +947,15 @@ class ArView(
                                 // codec/gc pressure for no visible gain.
                                 planesFrameCounter++
                                 if (planesFrameCounter % 2 == 0) {
-                                    val planesPayload = ArrayList(livePlanes.values)
+                                    // freshMs = time since ARCore last genuinely
+                                    // updated this plane; stable ones would
+                                    // otherwise look fresh forever.
+                                    val nowMs = SystemClock.elapsedRealtime()
+                                    val planesPayload = ArrayList<Map<String, Any>>(livePlanes.size)
+                                    for ((plane, telemetry) in livePlanes) {
+                                        val freshAt = planeLastFreshAt[plane] ?: nowMs
+                                        planesPayload.add(telemetry + ("freshMs" to (nowMs - freshAt)))
+                                    }
                                     val projection = FloatArray(16)
                                     frame.camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
                                     val view = FloatArray(16)
@@ -770,10 +1009,28 @@ class ArView(
                                 if (anchorName != null) break
                                 currentNode = currentNode.parent
                             }
-                            if(handleTaps) {
+                            if (anchorName != null && handleTaps) {
                                 objectChannel.invokeMethod("onNodeTap", listOf(anchorName))
+                                true
+                            } else {
+                                // Feature-point / renderer nodes are not
+                                // furniture — a tap on one must hit-test the
+                                // surface behind it, not be swallowed as a
+                                // phantom node tap (that killed placement
+                                // the moment showFeaturePoints went on).
+                                latestFrame?.let { frame ->
+                                    val hitResults = frame.hitTest(motionEvent)
+                                    val planeHits = hitResults
+                                        .filter { hit ->
+                                            val trackable = hit.trackable
+                                            trackable is Plane &&
+                                                    trackable.trackingState ==
+                                                    TrackingState.TRACKING
+                                        }.map { hit -> serializePlaneHit(hit) }
+                                    notifyPlaneOrPointTap(planeHits)
+                                }
+                                true
                             }
-                            true
                         } else {
                             // Hit-test against the frame the render loop already
                             // produced. Calling session.update() here (as this
@@ -1296,6 +1553,11 @@ class ArView(
             }
 
             val cloud = frame.acquirePointCloud()
+            if (cloud == null) {
+                NativeTrace.log(viewContext, "arview: refinePlane null cloud")
+                result.success(null)
+                return
+            }
             try {
                 val points = cloud.points
                 // Fold this frame into the sliding buffer, then fit against
@@ -1341,8 +1603,112 @@ class ArView(
             }
         } catch (e: Exception) {
             Log.e(TAG, "refinePlane failed", e)
+            NativeTrace.log(viewContext, "arview: refinePlane failed: $e")
             result.error("REFINE_PLANE_ERROR", e.message, null)
         }
+    }
+
+    // Low-percentile Y of point-cloud samples near the live floor estimate.
+    // Plane telemetry freezes once ARCore stops refining a stable plane, but
+    // raw depth keeps arriving — this is the refocus signal that drags a
+    // wrong floorY down to the real floor without any plane update.
+    private fun handleProbeFloorY(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val floorY = (call.argument<Number>("floorY"))?.toFloat()
+            val radiusM = (call.argument<Number>("radiusM"))?.toFloat() ?: 2.5f
+            val minPoints = (call.argument<Number>("minPoints"))?.toInt() ?: 12
+            if (floorY == null) {
+                result.error("INVALID_ARGUMENT", "floorY required", null)
+                return
+            }
+            val frame = latestFrame
+            if (frame == null) {
+                result.success(null)
+                return
+            }
+            val cloud = frame.acquirePointCloud()
+            if (cloud == null) {
+                NativeTrace.log(viewContext, "arview: probeFloorY null cloud")
+                result.success(null)
+                return
+            }
+            try {
+                pointAccumulator.ingest(cloud.points, frame.timestamp / 1_000_000L)
+                val cam = frame.camera.pose.translation
+                val gathered = pointAccumulator.gather(cam[0], floorY, cam[2], radiusM)
+                // Keep only the band a real floor can occupy under the phone:
+                // never above the estimate (a table up there must not drag
+                // floorY the wrong way) and not deep noise under it.
+                val band = ArrayList<Float>(gathered.size)
+                for (p in gathered) {
+                    val y = p[1]
+                    if (y >= floorY - 2.0f && y <= floorY + 0.6f) band.add(y)
+                }
+                if (band.size < minPoints) {
+                    NativeTrace.log(
+                        viewContext,
+                        "arview: probeFloorY starved gathered=${gathered.size} band=${band.size}",
+                    )
+                    result.success(null)
+                    return
+                }
+                band.sort()
+                val p20 = band[((band.size - 1) * 0.2).toInt()]
+                NativeTrace.log(
+                    viewContext,
+                    "arview: probeFloorY y=$p20 band=${band.size}",
+                )
+                result.success(mapOf("y" to p20.toDouble(), "pointCount" to band.size))
+            } finally {
+                cloud.release()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "probeFloorY failed", e)
+            NativeTrace.log(viewContext, "arview: probeFloorY failed: $e")
+            result.error("PROBE_FLOOR_Y_ERROR", e.message, null)
+        }
+    }
+
+    private fun qStr(q: Quaternion) = "(${q.x},${q.y},${q.z},${q.w})"
+
+    // True while every sample of the yawed footprint rect sits inside the
+    // glue plane's polygon — the drag-side twin of Dart's footprintFitsInZones.
+    private fun footprintWithinPlane(
+        px: Float,
+        py: Float,
+        pz: Float,
+        yaw: Float,
+        widthM: Float,
+        depthM: Float,
+        centerX: Float,
+        centerZ: Float,
+        plane: Plane?,
+    ): Boolean {
+        if (plane == null || plane.trackingState != TrackingState.TRACKING) return false
+        val c = cos(yaw)
+        val s = sin(yaw)
+        val halfW = widthM * 0.5f
+        val halfD = depthM * 0.5f
+        // 4 corners + 4 edge midpoints + center, same sample set as Dart.
+        val offsets = floatArrayOf(
+            -1f, -1f, 1f, -1f, 1f, 1f, -1f, 1f,
+            0f, -1f, 1f, 0f, 0f, 1f, -1f, 0f,
+            0f, 0f,
+        )
+        var i = 0
+        while (i < offsets.size) {
+            val lx = centerX + offsets[i] * halfW
+            val lz = centerZ + offsets[i + 1] * halfD
+            i += 2
+            val wx = px + lx * c + lz * s
+            val wz = pz - lx * s + lz * c
+            val pose = Pose(
+                floatArrayOf(wx, py, wz),
+                floatArrayOf(0f, 0f, 0f, 1f),
+            )
+            if (!plane.isPoseInPolygon(pose)) return false
+        }
+        return true
     }
 
     private fun handleGetAnchorPose(
@@ -1660,6 +2026,7 @@ class ArView(
         anchorChannel.setMethodCallHandler(null)
         nodesMap.clear()
         livePlanes.clear()
+        planeLastFreshAt.clear()
         pointAccumulator.clear()
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }

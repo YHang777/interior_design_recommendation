@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -31,6 +32,10 @@ void main() {
       expectNear(bounds.depthM, 3.0, 0.05, 'plank floor depth');
       expect(bounds.heightM, greaterThan(0));
       expect(bounds.heightM, lessThan(0.05), reason: 'floor is thin');
+      // Pattern/detail quads must float above the slab (depth tiers) —
+      // coplanar layers z-fight and the finish pixel-shakes.
+      expect(bounds.heightM, greaterThanOrEqualTo(0.011),
+          reason: 'pattern is lifted off the slab');
     });
 
     test('ceramic tile floor parses to ≈ 3 × 3 m', () {
@@ -122,6 +127,101 @@ void main() {
             widthM: 0,
             heightM: 2.7),
         throwsArgumentError,
+      );
+    });
+  });
+
+  group('floor cut-outs (holes around detected objects)', () {
+    ({int count, List<List<double>> positions}) readPositions(
+        Uint8List bytes) {
+      final data = ByteData.sublistView(bytes);
+      final jsonLen = data.getUint32(12, Endian.little);
+      final json = jsonDecode(String.fromCharCodes(bytes.sublist(
+              12 + 8, 12 + 8 + jsonLen)))
+          as Map<String, dynamic>;
+      final accessor =
+          (json['accessors'] as List).first as Map<String, dynamic>;
+      final bufferViews = json['bufferViews'] as List;
+      final stride = ((bufferViews.first as Map<String, dynamic>)['byteStride']
+              as int?) ??
+          36;
+      final count = accessor['count'] as int;
+      // Bin chunk header follows the (padded) JSON chunk.
+      final off = 12 + 8 + jsonLen + 8;
+      final pts = <List<double>>[];
+      for (var i = 0; i < count; i++) {
+        final at = off + i * stride;
+        pts.add([
+          data.getFloat32(at, Endian.little),
+          data.getFloat32(at + 4, Endian.little),
+          data.getFloat32(at + 8, Endian.little),
+        ]);
+      }
+      return (count: count, positions: pts);
+    }
+
+    // 0.5 m tile grid runs from −1.5, so [−0.5, 0]² is one cell; the hole
+    // sits inside it with margin (cut grows by the 0.05 clearance).
+    final hole = <double>[
+      -0.45, -0.45,
+      -0.05, -0.45,
+      -0.05, -0.05,
+      -0.45, -0.05,
+    ];
+    const finish = FloorFinish(
+        type: FloorFinishType.ceramicTiles, colorArgb: 0xFFD8D200);
+
+    bool coreHasPattern(List<List<double>> pts) => pts.any((p) =>
+        p[1] > 0.0005 &&
+        p[1] < 0.005 &&
+        p[0] > -0.4 &&
+        p[0] < -0.1 &&
+        p[2] > -0.4 &&
+        p[2] < -0.1);
+
+    test('uncut floor has pattern vertices inside the future hole', () {
+      final pts = readPositions(generateFloorGlb(finish: finish));
+      expect(coreHasPattern(pts.positions), isTrue,
+          reason: 'sanity — the region is tiled before the cut');
+    });
+
+    test('cells overlapping the hole are cut out of the pattern', () {
+      final cut = readPositions(
+          generateFloorGlb(finish: finish, holes: [hole]));
+      expect(coreHasPattern(cut.positions), isFalse,
+          reason: 'no tile geometry may cover the detected object');
+      final uncut = readPositions(generateFloorGlb(finish: finish));
+      expect(cut.count, lessThan(uncut.count));
+    });
+
+    test('the cut floor keeps its 3 × 3 m bounds (sides only)', () {
+      final bounds =
+          parseGlb(generateFloorGlb(finish: finish, holes: [hole]));
+      expectNear(bounds.widthM, 3.0, 0.05, 'cut floor width');
+      expectNear(bounds.depthM, 3.0, 0.05, 'cut floor depth');
+      expect(bounds.heightM, greaterThanOrEqualTo(0.011),
+          reason: 'pattern tiers still float above the slab rim');
+    });
+
+    test('holes outside the finish change nothing and stay deterministic',
+        () {
+      Uint8List gen() => generateFloorGlb(
+          finish: finish,
+          holes: [
+            [8, 8, 9, 8, 9, 9, 8, 9]
+          ]);
+      expect(gen(), gen());
+      expect(gen(), generateFloorGlb(finish: finish),
+          reason: 'a far-away hole must not alter the mesh at all');
+    });
+
+    test('malformed hole lists are ignored', () {
+      expect(
+        generateFloorGlb(finish: finish, holes: [
+          [0, 0],
+          [1, 2, 3],
+        ]),
+        generateFloorGlb(finish: finish),
       );
     });
   });

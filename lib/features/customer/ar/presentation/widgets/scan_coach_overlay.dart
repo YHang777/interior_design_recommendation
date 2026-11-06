@@ -59,9 +59,14 @@ class ScanCoachOverlay extends StatelessWidget {
               ),
             ],
           ),
-          _stepRow(ScanCoachStep.findFloor, 'Point at the floor'),
-          _stepRow(ScanCoachStep.sweepFloor, 'Sweep side to side'),
-          _stepRow(ScanCoachStep.expandCoverage, 'Map a bit more'),
+          if (state.wall) ...[
+            _stepRow(ScanCoachStep.findWall, 'Find the wall'),
+            _stepRow(ScanCoachStep.sweepWall, 'Move along the wall'),
+          ] else ...[
+            _stepRow(ScanCoachStep.findFloor, 'Point at the floor'),
+            _stepRow(ScanCoachStep.sweepFloor, 'Sweep side to side'),
+            _stepRow(ScanCoachStep.expandCoverage, 'Map a bit more'),
+          ],
           const SizedBox(height: 6),
           ClipRRect(
             borderRadius: BorderRadius.circular(3),

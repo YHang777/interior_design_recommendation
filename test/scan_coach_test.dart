@@ -334,4 +334,125 @@ void main() {
       expect(ScanCoach.pitchTip(-10), isNotNull);
     });
   });
+
+  group('ScanCoach wall intent', () {
+    test('no planes → findWall with the corner tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(s.step, ScanCoachStep.findWall);
+      expect(s.ready, isFalse);
+      expect(s.wall, isTrue);
+      expect(s.tip, contains('corner'));
+    });
+
+    test('floor planes never advance the wall ladder', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 1.2, z: 1.1)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(s.step, ScanCoachStep.findWall);
+      expect(s.ready, isFalse);
+      expect(s.progress, 0);
+    });
+
+    test('a partial wall asks to sweep it', () {
+      final s = ScanCoach.evaluate(
+        planes: [_wall(x: 1.0, z: 0.5)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(s.step, ScanCoachStep.sweepWall);
+      expect(s.ready, isFalse);
+      expect(s.progress, greaterThan(0));
+      expect(s.progress, lessThan(1));
+      expect(s.tip, contains('Move left and right'));
+    });
+
+    test('a wall at both placement gates → ready without any floorY', () {
+      final s = ScanCoach.evaluate(
+        planes: [_wall(x: 2, z: 1.5)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(s.step, ScanCoachStep.ready);
+      expect(s.ready, isTrue);
+      expect(s.progress, 1.0);
+      expect(s.tip, 'Ready — tap the wall to place');
+    });
+
+    test('wall mode never shows the floor pitch tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        cameraPitchDeg: -5,
+        wall: true,
+      );
+      expect(s.tip, isNot('Point the camera down about 30° toward the floor'));
+      expect(s.tip, contains('wall'));
+    });
+
+    test('a tracking issue overrides the wall tip', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: Duration.zero,
+        trackingIssue: 'EXCESSIVE_MOTION',
+        wall: true,
+      );
+      expect(s.hasIssue, isTrue);
+      expect(s.tip, contains('Slow down'));
+    });
+
+    test('sweepWall tips rotate after the first entry has had its turn', () {
+      final early = ScanCoach.evaluate(
+        planes: [_wall(x: 1.0, z: 0.5)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(early.tip, contains('Move left and right'));
+
+      final later = ScanCoach.evaluate(
+        planes: [_wall(x: 1.0, z: 0.5)],
+        elapsed: const Duration(seconds: 6),
+        wall: true,
+      );
+      expect(later.tip, contains('Step back'));
+    });
+  });
+
+  group('ScanCoach white-surface tip rotation', () {
+    test('the classic lighting tip keeps the early slot', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: const Duration(seconds: 5),
+      );
+      expect(s.tip, 'Check the lighting and hold still');
+    });
+
+    test('findFloor tips rotate once the classic tip has had its turn', () {
+      final s = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: const Duration(seconds: 6),
+      );
+      expect(s.tip, 'Move slowly side to side — white floors need parallax');
+
+      final s2 = ScanCoach.evaluate(
+        planes: const [],
+        elapsed: const Duration(seconds: 12),
+      );
+      expect(s2.tip, 'Aim near a rug, edge, or seam for something to lock onto');
+    });
+
+    test('sweepFloor tips rotate too', () {
+      final s = ScanCoach.evaluate(
+        planes: [_floor(x: 0.35, z: 0.4)],
+        elapsed: const Duration(seconds: 6),
+      );
+      expect(s.step, ScanCoachStep.sweepFloor);
+      expect(s.tip, contains('Kneel'));
+    });
+  });
 }

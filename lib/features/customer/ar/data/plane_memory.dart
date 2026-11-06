@@ -6,6 +6,11 @@ import 'placement_policy.dart';
 
 enum PlaneClass { floor, wall, elevatedSurface, smallSurface, unknown }
 
+// Re-fit detection: ARCore revising a floor's surface height or pulling an
+// over-extended outline back is a new observation, not drift to smooth over.
+const _reopenHeightM = 0.15;
+const _reopenShrinkM = 0.4;
+
 class _TrackedPlane {
   _TrackedPlane(this.id, ARPlaneInfo p, DateTime seen)
       : planeType = p.planeType,
@@ -36,6 +41,9 @@ class _TrackedPlane {
 
   final DateTime firstSeen;
 
+  // Last time the payload carried this plane at all. A plane in the payload
+  // is TRACKING by construction (native cache only re-emits live planes),
+  // so presence — not observation freshness — is what keeps a record alive.
   DateTime lastSeen;
 
   PlaneClass? cls;
@@ -54,6 +62,23 @@ class _TrackedPlane {
     extentZ += (p.extentZ - extentZ) * extentAlpha;
     // Yaw is circular: glide across the ±π seam instead of through zero.
     yaw += _wrapPi(p.yaw - yaw) * centerAlpha;
+    lastSeen = seen;
+  }
+
+  // Re-fit: adopt the raw observation and clear classification history so
+  // the next frames vote from scratch instead of inheriting the previous
+  // (wrong) state.
+  void reopen(ARPlaneInfo p, DateTime seen) {
+    planeType = p.planeType;
+    centerX = p.centerX;
+    centerY = p.centerY;
+    centerZ = p.centerZ;
+    extentX = p.extentX;
+    extentZ = p.extentZ;
+    yaw = p.yaw;
+    cls = null;
+    pendingVotes = 0;
+    pendingClass = null;
     lastSeen = seen;
   }
 
@@ -206,6 +231,23 @@ class PlaneMemory {
 
   double? _cameraY;
 
+  // Last time a probe candidate lowered floorY. A live probe outranks the
+  // plane path's upward pull — without this the wrong plane's establishable
+  // record drags every correction back up within ~2 ingests and the refocus
+  // zone flip lasts 1–2 frames.
+  DateTime? _floorYProbeAt;
+
+  static const _probeHold = Duration(seconds: 5);
+
+  // Render-trust state — gates PAINTING only, never placement. A loose or
+  // camera-unknown establishment can land on a table top, and painting green
+  // at that height is the floating detection plane; only a strict band
+  // establishment (camera known) or a live point-cloud probe proves the
+  // height is really the floor.
+  bool _floorYStrictEstablished = false;
+
+  double? _probeProvenY;
+
   DateTime? _lastIngest;
 
   int _nextSyntheticKey = 1;
@@ -213,6 +255,18 @@ class PlaneMemory {
   double? get floorY => _floorY;
 
   bool get floorEstablished => _floorY != null;
+
+  // Whether floorY may anchor green rendering (overlayZoneOf floorYTrusted,
+  // synthetic floor). A probe-proven height always decides — after the hold
+  // lapses the plane path can drag floorY back up toward furniture, and
+  // |floorY − probeY| > 0.25 then drops trust automatically.
+  bool get floorYRenderTrusted {
+    final fy = _floorY;
+    if (fy == null) return false;
+    final provenY = _probeProvenY;
+    if (provenY != null) return (fy - provenY).abs() <= 0.25;
+    return _floorYStrictEstablished;
+  }
 
   bool get isFresh {
     final at = _lastIngest;
@@ -232,6 +286,31 @@ class PlaneMemory {
     _reclassify();
   }
 
+  // Point-cloud probe correction: raw depth points keep arriving while
+  // plane telemetry goes quiet, so a low-percentile Y can drag a floorY
+  // that locked onto a furniture top or floating phantom down to the real
+  // floor — then _reclassify flips the wrong plane within a couple of
+  // votes and the geometric overlay repaints (overlayZoneOf reads floorY
+  // directly). Downward only with a deadband (a low percentile reads
+  // slightly low on noise), inside the same camera band the plane path
+  // trusts, and it never ESTABLISHES floorY — planes do that.
+  void noteFloorYCandidate(double y, {DateTime? now}) {
+    if (!y.isFinite || _floorY == null) return;
+    if (_cameraY != null) {
+      final below = _cameraY! - y;
+      if (below < loosePhoneAboveFloorM || below > maxPhoneAboveFloorM) {
+        return;
+      }
+    }
+    final fy = _floorY!;
+    const deadbandM = 0.05;
+    if (y >= fy - deadbandM) return;
+    _floorY = fy + (y - fy) * 0.85;
+    _floorYProbeAt = now ?? DateTime.now();
+    _probeProvenY = y;
+    _reclassify();
+  }
+
   void ingest(List<ARPlaneInfo> planes, {DateTime? now}) {
     final t = now ?? DateTime.now();
     _lastIngest = t;
@@ -247,6 +326,9 @@ class PlaneMemory {
       if (stream == null) continue;
       _absorbInto(stream, p, t);
     }
+    // Presence-based liveness: anything in this payload was refreshed above
+    // and can never be pruned here, so a prune means the plane has been
+    // absent from the payload for recordMaxAge.
     _floor.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
     _wall.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
     _updateFloorY(t);
@@ -319,15 +401,13 @@ class PlaneMemory {
     if (p.id != 0) {
       final byId = stream[p.id];
       if (byId != null) {
-        byId.absorb(p, t,
-            centerAlpha: centerAlpha, extentAlpha: extentAlpha);
+        _absorbOrReopen(byId, p, t);
         return;
       }
     } else {
       final near = _nearestRecord(stream, p);
       if (near != null) {
-        near.absorb(p, t,
-            centerAlpha: centerAlpha, extentAlpha: extentAlpha);
+        _absorbOrReopen(near, p, t);
         return;
       }
     }
@@ -339,6 +419,26 @@ class PlaneMemory {
       final synthetic = -_nextSyntheticKey++;
       stream[synthetic] = _TrackedPlane(synthetic, p, t);
     }
+  }
+
+  // A floor whose surface height was revised, or an outline ARCore pulled
+  // back after over-extending, is a re-fit — gliding toward it would keep
+  // the previous wrong classification alive for seconds. Snap and re-open
+  // instead so refocused frames reclassify from scratch. Floors only: a
+  // growing wall's midpoint moves, and ARCore re-refines wall extents near
+  // the classify gates — snapping there would bypass the flip hysteresis
+  // the wall stream relies on. Plain growth never re-opens either.
+  void _absorbOrReopen(_TrackedPlane r, ARPlaneInfo p, DateTime t) {
+    if (r.planeType == 1) {
+      final heightJump = (p.centerY - r.centerY).abs() > _reopenHeightM;
+      final shrinkX = r.extentX - p.extentX > _reopenShrinkM;
+      final shrinkZ = r.extentZ - p.extentZ > _reopenShrinkM;
+      if (heightJump || shrinkX || shrinkZ) {
+        r.reopen(p, t);
+        return;
+      }
+    }
+    r.absorb(p, t, centerAlpha: centerAlpha, extentAlpha: extentAlpha);
   }
 
   _TrackedPlane? _nearestRecord(
@@ -406,45 +506,127 @@ class PlaneMemory {
   }
 
   void _updateFloorY(DateTime t) {
-    double? strictBest;
-    double? looseBest;
+    // Camera-band buckets only at this stage: the size gate is applied to
+    // merged clusters, not per record — a room's floor reported as several
+    // sub-gate fragments must still beat one large furniture top.
+    final strict = <_TrackedPlane>[];
+    final loose = <_TrackedPlane>[];
     for (final r in _floor.values) {
-      final shortSide = math.min(r.extentX, r.extentZ);
-      if (shortSide < minFloorEstablishExtentM) continue;
       final below = _cameraY == null ? null : _cameraY! - r.centerY;
-      if (below != null) {
-        if (below >= minPhoneAboveFloorM && below <= maxPhoneAboveFloorM) {
-          if (strictBest == null || r.centerY < strictBest) {
-            strictBest = r.centerY;
-          }
-        } else if (below >= loosePhoneAboveFloorM && below <= maxPhoneAboveFloorM) {
-          if (looseBest == null || r.centerY < looseBest) {
-            looseBest = r.centerY;
-          }
-        } else {
-          continue;
-        }
-      }
       if (below == null) {
-        if (strictBest == null || r.centerY < strictBest) {
-          strictBest = r.centerY;
-        }
+        strict.add(r);
+      } else if (below >= minPhoneAboveFloorM && below <= maxPhoneAboveFloorM) {
+        strict.add(r);
+      } else if (below >= loosePhoneAboveFloorM &&
+          below <= maxPhoneAboveFloorM) {
+        loose.add(r);
       }
     }
+    final strictBest = _lowestEstablishable(strict);
+    final looseBest = _lowestEstablishable(loose);
     // Once relaxed (long scan), the loose 0.5 m window can no longer lock
     // the floor — a bed top sitting 0.55 m below the phone must not become
     // floorY and then refuse the real floor via the height gate.
     final target = strictBest ?? (gatesRelaxed ? null : looseBest);
     if (target == null) return;
+    // Only a strict-band target with a known camera height proves the paint
+    // height; loose/camera-unknown assignments demote the flag instead.
+    final fromStrict = strictBest != null && _cameraY != null;
     final current = _floorY;
     if (current == null) {
       _floorY = target;
+      _floorYStrictEstablished = fromStrict;
       return;
+    }
+    // A live probe correction outranks the plane path's upward pull (the
+    // wrong plane IS the establishable one); downward corrections still
+    // apply. The hold lapses after _probeHold so a too-low probe reading
+    // can be repaired.
+    if (target > current) {
+      final probeAt = _floorYProbeAt;
+      if (probeAt != null && t.difference(probeAt) < _probeHold) return;
     }
     // Correct a wrong (too-high) estimate faster than drift upward: the
     // floor is the LOWEST confirmed surface, so a lower one is a correction.
     final alpha = target < current ? 0.85 : 0.35;
     _floorY = current + (target - current) * alpha;
+    _floorYStrictEstablished = fromStrict;
+  }
+
+  // Lowest surface height among clusters that clear the establish gate on
+  // their own OR after merging with coplanar neighbors — a fragmented real
+  // floor passes as one swept region while an isolated furniture top of the
+  // same total area still fails. Returns null when no cluster qualifies.
+  double? _lowestEstablishable(List<_TrackedPlane> recs) {
+    if (recs.isEmpty) return null;
+    final groups = <List<_TrackedPlane>>[];
+    for (final r in recs) {
+      var placed = false;
+      for (final g in groups) {
+        if (g.any((o) => _coplanarNear(o, r))) {
+          g.add(r);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) groups.add([r]);
+    }
+    // Single-linkage merge: two groups join when ANY cross pair is both
+    // coplanar (same surface height) and near in XZ — the greedy pass above
+    // can leave a chain split across groups.
+    var merged = true;
+    while (merged) {
+      merged = false;
+      outer:
+      for (var i = 0; i < groups.length; i++) {
+        for (var j = i + 1; j < groups.length; j++) {
+          if (_groupsCoplanarNear(groups[i], groups[j])) {
+            groups[i].addAll(groups[j]);
+            groups.removeAt(j);
+            merged = true;
+            break outer;
+          }
+        }
+      }
+    }
+    double? best;
+    for (final g in groups) {
+      var xMin = double.infinity, xMax = -double.infinity;
+      var zMin = double.infinity, zMax = -double.infinity;
+      var low = double.infinity;
+      for (final r in g) {
+        xMin = math.min(xMin, r.centerX - r.extentX / 2);
+        xMax = math.max(xMax, r.centerX + r.extentX / 2);
+        zMin = math.min(zMin, r.centerZ - r.extentZ / 2);
+        zMax = math.max(zMax, r.centerZ + r.extentZ / 2);
+        if (r.centerY < low) low = r.centerY;
+      }
+      final shortSide = math.min(xMax - xMin, zMax - zMin);
+      if (shortSide < minFloorEstablishExtentM) continue;
+      if (best == null || low < best) best = low;
+    }
+    return best;
+  }
+
+  bool _coplanarNear(_TrackedPlane a, _TrackedPlane b) {
+    if ((a.centerY - b.centerY).abs() > floorLevelToleranceM) return false;
+    return _near(_boxOf(a), _boxOf(b));
+  }
+
+  _Box _boxOf(_TrackedPlane r) => _Box(
+        r.centerX - r.extentX / 2,
+        r.centerX + r.extentX / 2,
+        r.centerZ - r.extentZ / 2,
+        r.centerZ + r.extentZ / 2,
+      );
+
+  bool _groupsCoplanarNear(List<_TrackedPlane> a, List<_TrackedPlane> b) {
+    for (final x in a) {
+      for (final y in b) {
+        if (_coplanarNear(x, y)) return true;
+      }
+    }
+    return false;
   }
 
   void _reclassify() {

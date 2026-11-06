@@ -84,6 +84,12 @@ List<Vector3> _idealizedPolygon(PlaneQuad quad) {
 // floor-level horizontal plane is floor zone, any vertical plane is wall
 // zone, anything clearly above the floor is a furniture mask. Placement
 // gates are untouched — zones say "detected", the reticle says "placeable".
+//
+// floorY only anchors green when [floorYTrusted] — an untrusted estimate
+// (loose/table-height lock, no probe) is demoted: the payload's lowest
+// horizontal plane inside the strict below-camera band becomes the
+// reference, else the per-plane band decides. That is the never-float
+// guarantee: a table 0.7 m under a standing phone can never paint green.
 enum OverlayZoneKind { floor, wall, mask, drop }
 
 OverlayZoneKind overlayZoneOf({
@@ -91,27 +97,126 @@ OverlayZoneKind overlayZoneOf({
   required double centerY,
   double? floorY,
   double? cameraY,
+  double? lowestPlaneY,
+  bool floorYTrusted = false,
 }) {
   if (planeType == 2) return OverlayZoneKind.wall;
   if (planeType != 1) return OverlayZoneKind.drop;
   const elevatedGapM = 0.3;
-  if (floorY != null) {
-    return centerY > floorY + elevatedGapM
+  const plausibleMinM = 0.85;
+  const plausibleMaxM = 2.4;
+
+  if (floorY != null && floorYTrusted) {
+    // A payload plane slightly below the trusted anchor pulls the reference
+    // down (the real floor re-appeared under a stale estimate); anything
+    // further below is noise the anchor already beat. No live camera-band
+    // check — the height was proven when trust was earned (keeps a crouching
+    // phone painting a proven floor).
+    final ref = (lowestPlaneY != null &&
+            lowestPlaneY < floorY &&
+            floorY - lowestPlaneY <= 0.5)
+        ? lowestPlaneY
+        : floorY;
+    return centerY > ref + elevatedGapM
         ? OverlayZoneKind.mask
         : OverlayZoneKind.floor;
   }
-  // Floor height not established yet — fall back to the same strict
-  // below-camera band the scan coach counts as plausible floor, so the
-  // overlay and the coach agree on when green may appear.
+
+  // No trusted anchor: never trust floorY alone. The payload's lowest
+  // horizontal plane is the floor candidate, but it must sit in the strict
+  // below-camera band — and without a camera height nothing may paint.
+  final ref = lowestPlaneY;
+  if (ref != null) {
+    if (cameraY == null) return OverlayZoneKind.drop;
+    final below = cameraY - ref;
+    if (below < plausibleMinM || below > plausibleMaxM) {
+      return OverlayZoneKind.mask;
+    }
+    return centerY > ref + elevatedGapM
+        ? OverlayZoneKind.mask
+        : OverlayZoneKind.floor;
+  }
+
+  // Nothing corroborates — fall back to the same strict below-camera band
+  // the scan coach counts as plausible floor, so the overlay and the coach
+  // agree on when green may appear. floorY is deliberately ignored here.
   if (cameraY != null) {
     final below = cameraY - centerY;
-    const plausibleMinM = 0.85;
-    const plausibleMaxM = 2.4;
     return below >= plausibleMinM && below <= plausibleMaxM
         ? OverlayZoneKind.floor
         : OverlayZoneKind.mask;
   }
   return OverlayZoneKind.drop;
+}
+
+// Render-only floor quad at [floorY] under the camera when ARCore has no
+// floor-zone plane near that height (probe-corrected floor while the real
+// floor was never detected). Placement never sees it — callers keep it out
+// of the zone lists they gate on.
+PlaneQuad? syntheticFloorQuad({
+  required double? floorY,
+  required Vector3? cameraPos,
+  required List<PlaneQuad> existing,
+}) {
+  if (floorY == null || cameraPos == null) return null;
+  for (final q in existing) {
+    if (q.kind == PlaneQuadKind.floor &&
+        (q.center.y - floorY).abs() <= 0.15) {
+      return null; // ARCore already paints the floor at that height
+    }
+  }
+  return PlaneQuad(
+    center: Vector3(cameraPos.x, floorY, cameraPos.z),
+    yaw: 0,
+    extentX: 3.0,
+    extentZ: 3.0,
+    vertical: false,
+    kind: PlaneQuadKind.floor,
+  );
+}
+
+// True when the yawed rect samples inside any polygon, comes within
+// [clearanceM] of an outline, or a polygon vertex lands inside the rect —
+// the cell-blocking test that punches finish tiles around detected objects.
+// Rect and polygons must share one coordinate frame.
+bool rectHitsPolygons({
+  required Vector3 center,
+  required double yaw,
+  required double widthM,
+  required double depthM,
+  required List<List<Vector3>> polygons,
+  double clearanceM = 0.05,
+}) {
+  if (polygons.isEmpty || widthM <= 0 || depthM <= 0) return false;
+  final samples =
+      _orientedRectSamples(center, yaw, widthM, depthM, inflateM: 0);
+  final c = math.cos(yaw);
+  final s = math.sin(yaw);
+  final halfW = widthM / 2 + clearanceM;
+  final halfD = depthM / 2 + clearanceM;
+  final clearance2 = clearanceM * clearanceM;
+  for (final pts in polygons) {
+    if (pts.length < 3) continue;
+    final n = _polygonNormal(pts);
+    if (n == null) continue;
+    for (final sample in samples) {
+      if (_pointInPolygon(sample, pts, n)) return true;
+      final np = _nearestOnOutlineXZ(sample, pts);
+      final dx = sample.x - np.x;
+      final dz = sample.z - np.z;
+      if (dx * dx + dz * dz < clearance2) return true;
+    }
+    // A small hole fully inside the cell has no sample inside it — catch
+    // its own vertices landing in the (clearance-inflated) rect instead.
+    for (final v in pts) {
+      final dx = v.x - center.x;
+      final dz = v.z - center.z;
+      final lx = dx * c - dz * s;
+      final lz = dx * s + dz * c;
+      if (lx.abs() <= halfW && lz.abs() <= halfD) return true;
+    }
+  }
+  return false;
 }
 
 // Per-plane vertex smoothing for the overlay. Round 2 dropped geometry EMA
@@ -121,9 +226,17 @@ OverlayZoneKind overlayZoneOf({
 // corners/edges floating off the surface. Length changes (ARCore re-fits an
 // outline) reset instead of blending mismatched rings.
 List<Vector3> emaPolygon(List<Vector3>? prev, List<Vector3> next,
-    {double alpha = 0.35}) {
+    {double alpha = 0.35, double resetShiftM = 0.15}) {
   if (prev == null || prev.length != next.length || next.length < 3) {
     return next;
+  }
+  // A jump past the reset shift is ARCore re-fitting the outline (or
+  // relocalizing), not per-frame jitter — blending would drag the old wrong
+  // ring toward the new one for seconds. Snap to the fresh ring so a
+  // refocused view shows the correction immediately.
+  final resetShift2 = resetShiftM * resetShiftM;
+  for (var i = 0; i < next.length; i++) {
+    if ((next[i] - prev[i]).length2 > resetShift2) return next;
   }
   return [for (var i = 0; i < next.length; i++) prev[i] * (1 - alpha) + next[i] * alpha];
 }
@@ -193,6 +306,299 @@ bool segmentBlockedByQuad({
   final t = normal.dot(points[0] - origin) / denom;
   if (t <= 0.02 || t >= dist - marginM) return false;
   return _pointInPolygon(origin + dir * t, points, normal);
+}
+
+// Nearest point on [pts]'s outline to [p], measured in the XZ plane.
+Vector3 _nearestOnOutlineXZ(Vector3 p, List<Vector3> pts) {
+  var best = Vector3(p.x, p.y, p.z);
+  var bestD2 = double.infinity;
+  for (var i = 0; i < pts.length; i++) {
+    final a = pts[i];
+    final b = pts[(i + 1) % pts.length];
+    final abx = b.x - a.x;
+    final abz = b.z - a.z;
+    final len2 = abx * abx + abz * abz;
+    var t = 0.0;
+    if (len2 > 1e-12) {
+      t = ((p.x - a.x) * abx + (p.z - a.z) * abz) / len2;
+      if (t < 0) {
+        t = 0;
+      } else if (t > 1) {
+        t = 1;
+      }
+    }
+    final cx = a.x + abx * t;
+    final cz = a.z + abz * t;
+    final dx = p.x - cx;
+    final dz = p.z - cz;
+    final d2 = dx * dx + dz * dz;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = Vector3(cx, p.y, cz);
+    }
+  }
+  return best;
+}
+
+Vector3 _polygonCentroidXZ(List<Vector3> pts) {
+  var x = 0.0;
+  var z = 0.0;
+  for (final p in pts) {
+    x += p.x;
+    z += p.z;
+  }
+  return Vector3(x / pts.length, pts.first.y, z / pts.length);
+}
+
+// A tap grazing a detected object lands the item hugging the object's edge —
+// it reads as floating on the object. Slide the point horizontally away from
+// the nearest mask edge to exactly [clearanceM] (a tap inside the mask's
+// outline slides out past it by [clearanceM]), keeping it inside a floor-zone
+// quad, clear of every mask from [cameraPos], and inside the placement
+// distance window. When the item's half extents and yaw are passed, the
+// clearance is measured from the item's BODY (its support extent along the
+// push direction), so a wide sofa slides far enough that its edge — not just
+// its center — clears the object. Returns [point] unchanged when there is
+// nothing to push away from or no valid landing exists — never worse than
+// the raw tap.
+Vector3 pushIntoFloorZone({
+  required Vector3 point,
+  required List<PlaneQuad> masks,
+  required List<PlaneQuad> floorZones,
+  required Vector3 cameraPos,
+  double clearanceM = 0.3,
+  double minDistanceM = 0.25,
+  double maxDistanceM = 4.0,
+  double? halfWidthM,
+  double? halfDepthM,
+  double? footprintYaw,
+}) {
+  if (masks.isEmpty || floorZones.isEmpty) return point;
+
+  Vector3? nearest;
+  var nearestD2 = double.infinity;
+  for (final m in masks) {
+    final pts = planeQuadCorners(m);
+    if (pts.length < 3) continue;
+    final np = _nearestOnOutlineXZ(point, pts);
+    final dx = point.x - np.x;
+    final dz = point.z - np.z;
+    final d2 = dx * dx + dz * dz;
+    if (d2 < nearestD2) {
+      nearestD2 = d2;
+      nearest = np;
+    }
+  }
+  if (nearest == null) return point;
+
+  var insideAny = false;
+  for (final m in masks) {
+    final pts = planeQuadCorners(m);
+    if (pts.length < 3) continue;
+    final n = _polygonNormal(pts);
+    if (n != null && _pointInPolygon(point, pts, n)) {
+      insideAny = true;
+      break;
+    }
+  }
+
+  // Outside: away from the nearest edge. Inside: out through the nearest
+  // edge and beyond it by the clearance. Degenerate (on the outline, or a
+  // point at the mask's center): radial from the mask center, then away
+  // from the camera.
+  var dirX = insideAny ? nearest.x - point.x : point.x - nearest.x;
+  var dirZ = insideAny ? nearest.z - point.z : point.z - nearest.z;
+  var len = math.sqrt(dirX * dirX + dirZ * dirZ);
+  if (len < 1e-6) {
+    Vector3? centerOf;
+    for (final m in masks) {
+      final pts = planeQuadCorners(m);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n != null && _pointInPolygon(point, pts, n)) {
+        centerOf = _polygonCentroidXZ(pts);
+        break;
+      }
+    }
+    if (centerOf != null) {
+      dirX = point.x - centerOf.x;
+      dirZ = point.z - centerOf.z;
+      len = math.sqrt(dirX * dirX + dirZ * dirZ);
+    }
+    if (len < 1e-6) {
+      dirX = point.x - cameraPos.x;
+      dirZ = point.z - cameraPos.z;
+      len = math.sqrt(dirX * dirX + dirZ * dirZ);
+      if (len < 1e-6) return point;
+    }
+  }
+
+  // How far the item's BODY must stay from the outline along the push
+  // direction: half the rect's support in that direction plus clearance.
+  var need = clearanceM;
+  final hasFootprint =
+      halfWidthM != null && halfDepthM != null && footprintYaw != null;
+  if (hasFootprint) {
+    final ux = dirX / len;
+    final uz = dirZ / len;
+    final c = math.cos(footprintYaw);
+    final s = math.sin(footprintYaw);
+    // Local axes match FinishFootprint: +X = (cos, −sin), +Z = (sin, cos).
+    final uDotAx = ux * c + uz * -s;
+    final uDotAz = ux * s + uz * c;
+    need = halfWidthM.abs() * uDotAx.abs() +
+        halfDepthM.abs() * uDotAz.abs() +
+        clearanceM;
+  }
+  if (!insideAny && nearestD2 >= need * need) return point;
+
+  final dist = math.sqrt(nearestD2);
+  final push = insideAny ? dist + need : need - dist;
+  final candidate = Vector3(
+    point.x + dirX / len * push,
+    point.y,
+    point.z + dirZ / len * push,
+  );
+
+  // Validate the landing: open floor under it, still clear of every mask,
+  // unblocked from the camera, inside the distance window.
+  if (hasFootprint) {
+    if (!footprintFitsInZones(
+      center: candidate,
+      yaw: footprintYaw,
+      widthM: halfWidthM * 2,
+      depthM: halfDepthM * 2,
+      floorZones: floorZones,
+      masks: masks,
+      maskClearanceM: clearanceM - 0.01,
+    )) {
+      return point;
+    }
+  } else {
+    var onFloor = false;
+    for (final zone in floorZones) {
+      final pts = planeQuadCorners(zone);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n != null && _pointInPolygon(candidate, pts, n)) {
+        onFloor = true;
+        break;
+      }
+    }
+    if (!onFloor) return point;
+    for (final m in masks) {
+      final pts = planeQuadCorners(m);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n != null && _pointInPolygon(candidate, pts, n)) return point;
+      final np = _nearestOnOutlineXZ(candidate, pts);
+      final dx = candidate.x - np.x;
+      final dz = candidate.z - np.z;
+      if (math.sqrt(dx * dx + dz * dz) < clearanceM - 0.01) return point;
+    }
+  }
+  for (final m in masks) {
+    if (segmentBlockedByQuad(origin: cameraPos, target: candidate, quad: m)) {
+      return point;
+    }
+  }
+  final camDist = (candidate - cameraPos).length;
+  if (camDist < minDistanceM || camDist > maxDistanceM) return point;
+  return candidate;
+}
+
+// Oriented-rectangle fit: the item's footprint (width × depth at [yaw],
+// centered at [center] in XZ) must sit entirely on open floor — every sample
+// inside at least one floor-zone polygon (union) and clear of every mask.
+// Sample points (corners, edge midpoints, center) instead of exact polygon
+// clipping: zones are unions of quads, and the sample union matches what
+// pushIntoFloorZone already validates against. The floor check uses a rect
+// deflated by [floorMarginM] so a footprint flush against a zone edge still
+// passes; the mask check uses the full rect with [maskClearanceM] to keep
+// the body off detected objects. Empty [floorZones] fails open — nothing
+// there says the spot is bad.
+bool footprintFitsInZones({
+  required Vector3 center,
+  required double yaw,
+  required double widthM,
+  required double depthM,
+  required List<PlaneQuad> floorZones,
+  List<PlaneQuad> masks = const [],
+  double floorMarginM = 0.04,
+  double maskClearanceM = 0.05,
+}) {
+  if (widthM <= 0 || depthM <= 0) return true;
+  if (floorZones.isEmpty) return true;
+  final full = _orientedRectSamples(center, yaw, widthM, depthM, inflateM: 0);
+  final shrinkOk = floorMarginM * 2 < widthM && floorMarginM * 2 < depthM;
+  final inset = shrinkOk
+      ? _orientedRectSamples(center, yaw, widthM, depthM,
+          inflateM: -floorMarginM)
+      : full;
+  for (final s in inset) {
+    var onFloor = false;
+    for (final zone in floorZones) {
+      final pts = planeQuadCorners(zone);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n != null && _pointInPolygon(s, pts, n)) {
+        onFloor = true;
+        break;
+      }
+    }
+    if (!onFloor) return false;
+  }
+  for (final m in masks) {
+    final pts = planeQuadCorners(m);
+    if (pts.length < 3) continue;
+    final n = _polygonNormal(pts);
+    if (n == null) continue;
+    for (final s in full) {
+      if (_pointInPolygon(s, pts, n)) return false;
+      final np = _nearestOnOutlineXZ(s, pts);
+      final dx = s.x - np.x;
+      final dz = s.z - np.z;
+      if (math.sqrt(dx * dx + dz * dz) < maskClearanceM) return false;
+    }
+  }
+  return true;
+}
+
+// Nine sample points of the oriented rect: four corners, four edge
+// midpoints, and the center. [inflateM] grows (positive) or shrinks
+// (negative) the rect on both axes.
+List<Vector3> _orientedRectSamples(
+  Vector3 center,
+  double yaw,
+  double widthM,
+  double depthM, {
+  required double inflateM,
+}) {
+  final halfW = widthM / 2 + inflateM;
+  final halfD = depthM / 2 + inflateM;
+  if (halfW <= 0 || halfD <= 0) {
+    return [Vector3(center.x, center.y, center.z)];
+  }
+  final axX = math.cos(yaw);
+  final axZ = -math.sin(yaw);
+  final azX = math.sin(yaw);
+  final azZ = math.cos(yaw);
+  Vector3 at(double sx, double sz) => Vector3(
+        center.x + axX * halfW * sx + azX * halfD * sz,
+        center.y,
+        center.z + axZ * halfW * sx + azZ * halfD * sz,
+      );
+  return [
+    at(1, 1),
+    at(1, -1),
+    at(-1, -1),
+    at(-1, 1),
+    at(0, 1),
+    at(0, -1),
+    at(1, 0),
+    at(-1, 0),
+    at(0, 0),
+  ];
 }
 
 // One merged path per placement zone, assembled from already-projected

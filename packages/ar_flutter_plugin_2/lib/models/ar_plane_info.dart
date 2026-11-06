@@ -9,6 +9,8 @@ class ARPlaneInfo {
     this.id = 0,
     this.yaw = 0,
     this.polygon = const [],
+    this.fresh = true,
+    this.tracking = true,
   });
 
   // Stable per-session id minted by the plugin (0 when not reported).
@@ -38,8 +40,23 @@ class ARPlaneInfo {
   // to the center/extents rectangle.
   final List<double> polygon;
 
+  // False when the native plane cache re-emitted a stable plane whose
+  // telemetry ARCore last genuinely updated over a second ago. Geometry is
+  // byte-identical either way — freshness only tells memory code whether
+  // this frame is a new observation (refresh last-seen clocks, create
+  // records) or just a cached stream flush.
+  final bool fresh;
+
+  // Native emits PAUSED planes too (they exist but ARCore won't refine
+  // them yet — typical for white walls). Rendering/memory may see them;
+  // every placement gate stays TRACKING-only upstream.
+  final bool tracking;
+
   bool get isHorizontal => planeType == 1;
 
+  // A plane ARCore hasn't touched for over a second counts as cached.
+  // Missing key (legacy native side) reads as fresh — behavior then
+  // matches the pre-flag pipeline.
   static ARPlaneInfo fromJson(Map<String, dynamic> json) => ARPlaneInfo(
         id: (json['id'] as num?)?.toInt() ?? 0,
         planeType: (json['planeType'] as num?)?.toInt() ?? 0,
@@ -53,6 +70,8 @@ class ARPlaneInfo {
                 ?.map((e) => (e as num).toDouble())
                 .toList() ??
             const [],
+        fresh: ((json['freshMs'] as num?)?.toInt() ?? 0) <= 1000,
+        tracking: (json['tracking'] as bool?) ?? true,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -65,5 +84,7 @@ class ARPlaneInfo {
         'extentZ': extentZ,
         'yaw': yaw,
         'polygon': polygon,
+        'freshMs': fresh ? 0 : 60000,
+        'tracking': tracking,
       };
 }

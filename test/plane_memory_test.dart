@@ -13,6 +13,7 @@ ARPlaneInfo plane({
   double yaw = 0,
   required double ex,
   required double ez,
+  bool fresh = true,
 }) {
   return ARPlaneInfo(
     id: id,
@@ -23,6 +24,7 @@ ARPlaneInfo plane({
     extentX: ex,
     extentZ: ez,
     yaw: yaw,
+    fresh: fresh,
   );
 }
 
@@ -181,9 +183,11 @@ void main() {
     test('centers glide toward new frames instead of jumping', () {
       final m = PlaneMemory(centerAlpha: 0.35);
       m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
-      m.ingest([plane(id: 1, type: 1, cy: 1.0, ex: 3, ez: 3)]);
+      // Sub-threshold jitter smooths; a re-fit jump past 0.15 m snaps
+      // instead (see the re-fit reopen group).
+      m.ingest([plane(id: 1, type: 1, cy: 0.05, ex: 3, ez: 3)]);
       final smoothed = m.smoothedPlanes().single;
-      expect(smoothed.centerY, closeTo(0.35, 1e-9));
+      expect(smoothed.centerY, closeTo(0.05 * 0.35, 1e-9));
     });
   });
 
@@ -331,6 +335,295 @@ void main() {
         plane(id: 2, type: 1, cy: 0.75, cx: 2.5, ex: 1.5, ez: 1.2),
       ]);
       expect(m.knowsFloorAt(2.5, 2), isFalse);
+    });
+  });
+
+  group('PlaneMemory re-fit reopen', () {
+    test('a floor height re-fit snaps and reclassifies from scratch', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      expect(m.classOf(1), PlaneClass.floor);
+
+      // ARCore re-fits the surface 0.5 m up — gliding toward it would keep
+      // the wrong height (and the latched floor class) alive for seconds.
+      m.ingest([plane(id: 1, type: 1, cy: 0.5, ex: 3, ez: 3)]);
+      expect(m.smoothedPlanes().single.centerY, closeTo(0.5, 1e-9),
+          reason: 'a re-fit snaps to the fresh observation');
+      expect(m.classOf(1), PlaneClass.elevatedSurface,
+          reason: 'classification is re-proposed, not inherited');
+    });
+
+    test('an outline pull-back snaps the geometry', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 1.0, ez: 3)]);
+      expect(m.smoothedPlanes().single.extentX, closeTo(1.0, 1e-9),
+          reason: 'a 2 m over-extension pulled back is a re-fit, not jitter');
+      expect(m.classOf(1), PlaneClass.floor);
+    });
+
+    test('plain growth keeps gliding — growth is not a re-fit', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 5, ez: 3)]);
+      expect(m.smoothedPlanes().single.extentX, closeTo(3.6, 1e-9));
+      expect(m.classOf(1), PlaneClass.floor);
+    });
+  });
+
+  group('PlaneMemory clustered floorY', () {
+    test('fragmented floor beats one big furniture top', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      // Each floor fragment (0.8 m) is below the 1.2 m establish gate on
+      // its own, but the coplanar 2×2 cluster merges to 1.8 m — while the
+      // only gate-clearing plane (the table) sits alone in the loose band.
+      m.ingest([
+        plane(id: 1, type: 1, cy: 0, cx: -0.5, cz: 1.5, ex: 0.8, ez: 0.8),
+        plane(id: 2, type: 1, cy: 0, cx: 0.5, cz: 1.5, ex: 0.8, ez: 0.8),
+        plane(id: 3, type: 1, cy: 0, cx: -0.5, cz: 2.5, ex: 0.8, ez: 0.8),
+        plane(id: 4, type: 1, cy: 0, cx: 0.5, cz: 2.5, ex: 0.8, ez: 0.8),
+        plane(id: 5, type: 1, cy: 0.75, cx: 0, cz: 4, ex: 1.5, ez: 1.2),
+      ]);
+      expect(m.floorY, closeTo(0, 1e-9));
+    });
+  });
+
+  group('PlaneMemory freshness (cached re-emits)', () {
+    final t0 = DateTime(2026, 11, 6, 10);
+
+    test('a cached re-emit keeps the record alive past recordMaxAge', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t0);
+      expect(m.floorPlanes, hasLength(1));
+
+      // A plane in the payload is TRACKING by construction — presence is
+      // liveness, so a stable plane's cached re-emit keeps its record (and
+      // the scan coach) alive no matter how quiet ARCore has gone.
+      m.ingest(
+          [plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3, fresh: false)],
+          now: t0.add(const Duration(seconds: 20)));
+      expect(m.floorPlanes, hasLength(1));
+      // Aging a record never clears the height estimate.
+      expect(m.floorY, closeTo(0, 1e-9));
+    });
+
+    test('fresh observations keep the record alive past recordMaxAge', () {
+      final m = PlaneMemory();
+      var t = t0;
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t);
+      for (var i = 0; i < 3; i++) {
+        t = t.add(const Duration(seconds: 10));
+        m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t);
+      }
+      expect(m.floorPlanes, hasLength(1));
+    });
+
+    test('payload absence prunes the record after recordMaxAge', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t0);
+      m.ingest(const [], now: t0.add(const Duration(seconds: 13)));
+      expect(m.floorPlanes, isEmpty);
+      // Aging a record never clears the height estimate.
+      expect(m.floorY, closeTo(0, 1e-9));
+    });
+
+    test('a later payload frame records the plane again even when non-fresh',
+        () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3, fresh: false)],
+          now: t0);
+      expect(m.floorPlanes, hasLength(1),
+          reason: 'presence in the payload is liveness — freshness is not '
+              'consulted');
+      expect(m.floorEstablished, isTrue);
+
+      // After an absence long enough to prune, the next frame — fresh or
+      // not — rebuilds the record.
+      m.ingest(const [], now: t0.add(const Duration(seconds: 13)));
+      expect(m.floorPlanes, isEmpty);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3, fresh: false)],
+          now: t0.add(const Duration(seconds: 14)));
+      expect(m.floorPlanes, hasLength(1));
+    });
+
+    test('freshMs in the payload maps to the fresh flag', () {
+      // ≤1 s old = fresh (and a missing key reads as fresh — legacy
+      // native sides keep the pre-flag behavior).
+      expect(ARPlaneInfo.fromJson({'freshMs': 0}).fresh, isTrue);
+      expect(ARPlaneInfo.fromJson({'freshMs': 999}).fresh, isTrue);
+      expect(ARPlaneInfo.fromJson(<String, dynamic>{}).fresh, isTrue);
+      expect(ARPlaneInfo.fromJson({'freshMs': 1001}).fresh, isFalse);
+    });
+
+    test('tracking maps from the payload with a legacy default', () {
+      expect(ARPlaneInfo.fromJson({'tracking': false}).tracking, isFalse);
+      expect(ARPlaneInfo.fromJson({'tracking': true}).tracking, isTrue);
+      expect(ARPlaneInfo.fromJson(<String, dynamic>{}).tracking, isTrue,
+          reason: 'legacy native sides read as tracking');
+    });
+  });
+
+  group('PlaneMemory floorY probe candidate', () {
+    test('never establishes floorY on its own', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorEstablished, isFalse);
+    });
+
+    test('corrects a too-high floorY downward and reclassifies the '
+        'wrong plane', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      // The table top locked in as provisional floor.
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      expect(m.classOf(1), PlaneClass.floor);
+
+      // The probe finds the real floor below → same α 0.85 downward
+      // correction the plane path uses.
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+      // The next 1 Hz tick converges and the two agreeing reclassifications
+      // flip the table off the floor class.
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, lessThan(0.02));
+      expect(m.classOf(1), PlaneClass.elevatedSurface,
+          reason: 'once floorY drops, the floating plane stops '
+              'classifying as floor');
+    });
+
+    test('a deadband stops noise and upward candidates from moving floorY',
+        () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      expect(m.floorY, closeTo(0, 1e-9));
+
+      m.noteFloorYCandidate(-0.02);
+      expect(m.floorY, closeTo(0, 1e-9),
+          reason: 'a low percentile reads slightly low on noise — a few '
+              'centimetres must not drift the floor');
+      m.noteFloorYCandidate(0.3);
+      expect(m.floorY, closeTo(0, 1e-9),
+          reason: 'the probe only ever corrects downward');
+    });
+
+    test('a candidate outside the camera band is ignored', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+
+      // 2.5 m below the phone — outside the [0.5, 2.4] prior the plane
+      // path trusts; garbage points must not drag floorY there.
+      m.noteFloorYCandidate(-1.0);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+    });
+
+    test('a live probe correction survives the next plane ingest', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+
+      m.noteFloorYCandidate(0.0);
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, lessThan(0.02));
+      expect(m.classOf(1), PlaneClass.elevatedSurface);
+
+      // The wrong plane is the establishable one — without the probe hold
+      // its ingest pulls floorY back up within a frame or two and the
+      // refocus zone flip vanishes.
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, lessThan(0.15),
+          reason: 'a probe within the hold window outranks the plane path');
+      expect(m.classOf(1), PlaneClass.elevatedSurface);
+    });
+
+    test('the probe hold lapses so the plane path can repair floorY', () {
+      final m = PlaneMemory();
+      final t0 = DateTime(2026, 1, 1);
+      m.noteCameraY(1.5, now: t0);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)], now: t0);
+      m.noteFloorYCandidate(0.0, now: t0);
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+
+      // Hold still live — the plane path must not pull floorY back up.
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
+          now: t0.add(const Duration(seconds: 3)));
+      expect(m.floorY, lessThan(0.15));
+
+      // Past the 5 s hold the plane path repairs a too-low estimate again.
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
+          now: t0.add(const Duration(seconds: 6)));
+      expect(m.floorY, greaterThan(0.15));
+    });
+  });
+
+  group('PlaneMemory floorY render trust', () {
+    test('a loose table-height establishment is not render-trusted', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      expect(m.floorYRenderTrusted, isFalse,
+          reason: 'painting green at table height is the floating plane');
+    });
+
+    test('a strict-band floor establishment is render-trusted', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      expect(m.floorY, closeTo(0, 1e-9));
+      expect(m.floorYRenderTrusted, isTrue);
+    });
+
+    test('establishment without a camera height is not render-trusted', () {
+      final m = PlaneMemory();
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      expect(m.floorEstablished, isTrue);
+      expect(m.floorYRenderTrusted, isFalse,
+          reason: 'no camera means no strict-band proof, even for a big floor');
+    });
+
+    test('a live probe correction proves the height for rendering', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorYRenderTrusted, isFalse);
+
+      m.noteFloorYCandidate(0.0);
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, lessThan(0.02));
+      expect(m.floorYRenderTrusted, isTrue,
+          reason: 'the point cloud proved the real floor height');
+    });
+
+    test('plane-path drift away from the probe height drops trust', () {
+      final m = PlaneMemory();
+      final t0 = DateTime(2026, 1, 1);
+      m.noteCameraY(1.5, now: t0);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)], now: t0);
+      m.noteFloorYCandidate(0.0, now: t0);
+      m.noteFloorYCandidate(0.0, now: t0);
+      expect(m.floorYRenderTrusted, isTrue);
+
+      // Past the 5 s hold the table drags floorY back up — once
+      // |floorY − probeY| passes 0.25 the overlay must stop painting.
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
+          now: t0.add(const Duration(seconds: 6)));
+      expect(m.floorY, greaterThan(0.25));
+      expect(m.floorYRenderTrusted, isFalse);
+    });
+
+    test('a probe with no floorY never establishes or proves anything', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorEstablished, isFalse);
+      expect(m.floorYRenderTrusted, isFalse);
     });
   });
 }

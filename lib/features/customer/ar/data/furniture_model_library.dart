@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+
+import 'glb_bounds.dart';
 
 enum PlacementType {
   floor,
@@ -17,6 +20,13 @@ class ArFurnitureItem {
     this.placement = PlacementType.floor,
   });
 
+  // Const instances → footprint cache lives here, keyed by model file
+  // (several catalogue entries share a file; null results memoize too).
+  static final Map<
+      String,
+      ({double widthM, double depthM, double centerX, double centerZ})?>
+      _footprintCache = {};
+
   final String name;
 
   final String modelFile;
@@ -28,6 +38,37 @@ class ArFurnitureItem {
   final PlacementType placement;
 
   String get uri => 'assets/models/$modelFile';
+
+  // World-space footprint: the library scales the GLB so its longest edge
+  // equals widthMeters (SceneView scaleToUnits = units / largestEdge), so
+  // every bounds component scales by widthMeters / maxExtent. Null when the
+  // asset can't be parsed → callers fail open.
+  Future<({double widthM, double depthM, double centerX, double centerZ})?>
+      worldFootprint() async {
+    final cached = _footprintCache[modelFile];
+    if (cached != null || _footprintCache.containsKey(modelFile)) return cached;
+    ({double widthM, double depthM, double centerX, double centerZ})? fp;
+    try {
+      final data = await rootBundle.load(uri);
+      final bytes =
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final b = GlbBounds.fromGlbBytes(bytes);
+      final extent = b.maxExtent;
+      if (extent.isFinite && extent > 0) {
+        final s = widthMeters / extent;
+        fp = (
+          widthM: b.widthM * s,
+          depthM: b.depthM * s,
+          centerX: b.centerX * s,
+          centerZ: b.centerZ * s,
+        );
+      }
+    } catch (_) {
+      fp = null;
+    }
+    _footprintCache[modelFile] = fp;
+    return fp;
+  }
 }
 
 class ArFurnitureLibrary {

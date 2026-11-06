@@ -60,6 +60,7 @@ class _PendingFinish {
     required this.scaleMeters,
     required this.footprintWidthM,
     required this.footprintHeightM,
+    this.floorFinish,
   });
 
   final String kindWord;
@@ -75,6 +76,10 @@ class _PendingFinish {
   final double footprintWidthM;
 
   final double footprintHeightM;
+
+  // Floor recipe kept for the placement-time cut bake — the selection may
+  // change between prepare and place.
+  final FloorFinish? floorFinish;
 }
 
 class _BarEntry {
@@ -190,6 +195,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // furniture as floor coverage while floorY is still unknown.
   double? _lastCameraY;
   DateTime? _lastCameraYAt;
+  Vector3? _lastCameraPos;
   double? _lastCameraPitchDeg;
   DateTime? _lastCameraPitchAt;
 
@@ -238,6 +244,18 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   List<PlaneQuad> _overlayMasks = const [];
   final _overlayPolyEma = <int, List<Vector3>>{};
 
+  // Per-id EMA of the reported center height — the polygon idealizer
+  // flattens onto quad.center.y, so raw per-frame Y jitter bobs the whole
+  // green patch up and down ("floating outline").
+  final _overlayCenterY = <int, double>{};
+
+  bool _payloadWasNonEmpty = false;
+
+  // Render-only floor at the probe-corrected height when ARCore has no
+  // floor-zone plane there — kept out of _overlayQuads so placement gates
+  // never see it.
+  PlaneQuad? _syntheticFloor;
+
   int _overlayEpoch = 0;
 
   // Native sends planes+matrices every rendered frame; rebuild the screen
@@ -246,6 +264,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   static const _overlayMinInterval = Duration(milliseconds: 33);
 
   DateTime? _overlayLastBuildAt;
+
+  // Last logged overlay shape — the rebuild log only fires on change.
+  String? _overlayStateKey;
 
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
@@ -293,10 +314,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   void _startWatchdog() {
     _watchdog?.cancel();
-    _watchdog = Timer(const Duration(seconds: 12), () {
+    // Pipeline-silence watchdog: every onPlanesUpdate callback (even an
+    // empty payload — ARCore heartbeats every 2nd frame) re-arms this, so a
+    // healthy session scanning a white floor is never declared dead. Only a
+    // truly silent native pipeline shows the failure overlay (which hides
+    // the reticle and scan coach) after 20s.
+    _watchdog = Timer(const Duration(seconds: 20), () {
       if (!mounted) return;
       if (_planesFound || _arError != null || _placed.isNotEmpty) return;
-      BootTrace.log('ar-screen: watchdog — no planes after 12s');
+      BootTrace.log('ar-screen: watchdog — pipeline silent for 20s');
       setState(() => _arUnresponsive = true);
     });
   }
@@ -454,7 +480,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _session!
         .onInitialize(
       showAnimatedGuide: false,
-      showFeaturePoints: false,
+      // Raw feature dots are the best scanning aid on white surfaces — the
+      // user can see where ARCore actually sees texture and aim/parallax
+      // there. They share the same point cloud the probe already reads.
+      showFeaturePoints: true,
       // SceneView's raw ARCore polygons are replaced by the smoothed,
       // class-colored overlay drawn from the plane memory.
       showPlanes: false,
@@ -482,6 +511,18 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     };
     _session!.onPlanesUpdate = (planes, vp) {
       if (!mounted) return;
+      // Any callback proves the native pipeline is alive — re-arm the
+      // silence watchdog and clear a watchdog tripped earlier.
+      _startWatchdog();
+      if (_arUnresponsive) setState(() => _arUnresponsive = false);
+      // Evidence trail: a non-empty payload followed by empties while the
+      // memory still holds records means planes stopped arriving (resume
+      // wipe, tracking loss) — the presence prune will kill them in 12s.
+      if (planes.isEmpty && _payloadWasNonEmpty && _planeMemory.floorPlanes.isNotEmpty) {
+        BootTrace.log(
+            'ar-screen: payload empty (floorRecords=${_planeMemory.floorPlanes.length} floorY=${_planeMemory.floorY})');
+      }
+      _payloadWasNonEmpty = planes.isNotEmpty;
       _planeMemory.ingest(planes);
       _livePlanes = _planeMemory.smoothedPlanes();
       _livePlanesAt = DateTime.now();
@@ -528,11 +569,25 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       // being mistaken for it.
       try {
         final pose = await _session?.getCameraPose();
-        final y = pose?.getTranslation().y;
+        final t = pose?.getTranslation();
+        final y = t?.y;
         if (y != null && y.isFinite && mounted) {
           _lastCameraY = y;
+          _lastCameraPos = t;
           _lastCameraYAt = DateTime.now();
           _planeMemory.noteCameraY(y);
+          // Refocus signal: the point cloud sees the real floor even when
+          // plane telemetry has gone quiet — a low-percentile probe can
+          // pull a floorY that locked onto a wrong surface back down.
+          final fy = _planeMemory.floorY;
+          if (fy != null) {
+            final candidate = await _session?.probeFloorY(floorY: fy);
+            if (candidate != null && mounted) {
+              _planeMemory.noteFloorYCandidate(candidate);
+              BootTrace.log(
+                  'ar-screen: probe $candidate → floorY=${_planeMemory.floorY}');
+            }
+          }
         }
         // Camera pitch from the pose's Z column: the camera looks along
         // −Z, so forward.y = −zAxis.y and pitch = asin(forward.y) —
@@ -592,18 +647,37 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final masks = <PlaneQuad>[];
     final seenIds = <int>{};
     final floorY = _planeMemory.floorY;
-    final cameraY = _lastCameraY;
+    final trusted = _planeMemory.floorYRenderTrusted;
+    // A stale pose must not drive band decisions (a frozen cameraY from
+    // minutes ago classifies everything wrongly).
+    final cameraAt = _lastCameraYAt;
+    final cameraY = cameraAt != null &&
+            DateTime.now().difference(cameraAt) <= _liveFloorFreshFor
+        ? _lastCameraY
+        : null;
+    // Payload-lowest horizontal plane: the untrusted-floorY reference and
+    // a fail-safe — a plane above it can never paint floor.
+    double? lowestPlaneY;
+    for (final p in planes) {
+      if (p.planeType != 1) continue;
+      if (lowestPlaneY == null || p.centerY < lowestPlaneY) {
+        lowestPlaneY = p.centerY;
+      }
+    }
     for (final p in planes) {
       final zone = overlayZoneOf(
         planeType: p.planeType,
         centerY: p.centerY,
         floorY: floorY,
         cameraY: cameraY,
+        lowestPlaneY: lowestPlaneY,
+        floorYTrusted: trusted,
       );
       if (zone == OverlayZoneKind.drop) continue;
       if (p.id != 0) seenIds.add(p.id);
       final quad = PlaneQuad(
-        center: Vector3(p.centerX, p.centerY, p.centerZ),
+        center: Vector3(p.centerX, _smoothOverlayCenterY(p.id, p.centerY),
+            p.centerZ),
         yaw: p.yaw,
         extentX: p.extentX,
         extentZ: p.extentZ,
@@ -620,11 +694,29 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       }
     }
     _overlayPolyEma.removeWhere((id, _) => !seenIds.contains(id));
+    _overlayCenterY.removeWhere((id, _) => !seenIds.contains(id));
+    // The synthetic stand-in may only paint at a PROVEN height — otherwise
+    // it floats at a wrong floorY next to (or instead of) the real floor.
+    final synthetic = syntheticFloorQuad(
+      floorY: trusted ? floorY : null,
+      cameraPos: _lastCameraPos,
+      existing: quads,
+    );
     setState(() {
       _overlayViewProjection = vp;
       _overlayQuads = quads;
       _overlayMasks = masks;
+      _syntheticFloor = synthetic;
     });
+    // Throttled: only log when the overlay state actually changes shape.
+    final key = '$trusted|${floorY?.toStringAsFixed(2)}|'
+        '${cameraY?.toStringAsFixed(2)}|'
+        '${quads.length}|${masks.length}|${lowestPlaneY?.toStringAsFixed(2)}|'
+        '${synthetic != null}';
+    if (key != _overlayStateKey) {
+      _overlayStateKey = key;
+      BootTrace.log('ar-screen: overlay $key');
+    }
   }
 
   // Id-keyed vertex EMA so plane corners stop wobbling frame to frame.
@@ -634,6 +726,21 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final smoothed = emaPolygon(_overlayPolyEma[id], pts);
     _overlayPolyEma[id] = smoothed;
     return smoothed;
+  }
+
+  // Same idea for the reported height: the idealizer flattens onto this Y,
+  // so smoothing it stops the whole patch from bobbing. Id-less telemetry
+  // passes through raw.
+  double _smoothOverlayCenterY(int id, double y) {
+    if (id == 0 || !y.isFinite) return y;
+    final prev = _overlayCenterY[id];
+    if (prev == null) {
+      _overlayCenterY[id] = y;
+      return y;
+    }
+    final next = prev + (y - prev) * 0.35;
+    _overlayCenterY[id] = next;
+    return next;
   }
 
   ScanCoachState _computeScanCoach() {
@@ -665,6 +772,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       floorCoverageM: fresh ? _planeMemory.floorCoverageExtentM() : null,
       cameraY: cameraY,
       cameraPitchDeg: pitchDeg,
+      wall: _reticleIntent == PlacementType.wall,
     );
   }
 
@@ -758,7 +866,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 
   Future<void> _onPlaneOrPointTap(List<ARHitTestResult> hits) async {
-    if (_busy || hits.isEmpty) return;
+    if (_busy) return;
+    if (hits.isEmpty) {
+      // An empty tap used to return in silence — the user just saw their
+      // tap do nothing. Say why (the hint text depends on the intent).
+      BootTrace.log('ar-screen: tap 0 plane hits intent=$_reticleIntent');
+      _showPlacementHint(_reticleIntent);
+      return;
+    }
+    BootTrace.log('ar-screen: tap hits=${hits.length} intent=$_reticleIntent '
+        'floorY=${_planeMemory.floorY} fresh=${_planeMemory.isFresh} '
+        'trusted=${_planeMemory.floorYRenderTrusted} '
+        'quads=${_overlayQuads.length} masks=${_overlayMasks.length} '
+        'placeable=${_selectedEntry?.placeable}');
 
     if (_arError != null) {
       _showMessage('AR session stopped — close and reopen the viewer.',
@@ -806,7 +926,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
     _busy = true;
     try {
-      final node = _buildNode(entry);
+      final footprintDims = await _footprintFor(entry);
+      final node = _buildNode(entry, footprint: footprintDims);
       final placement = entry.isProduct
           ? PlacementType.floor
           : entry.item!.placement;
@@ -816,6 +937,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         entry.name,
         failureMessage: 'Could not load the 3D model for ${entry.name}.',
         requiredPlacement: placement,
+        footprintDims: footprintDims,
       );
       if (placed == null) return;
       if (!mounted) return;
@@ -886,13 +1008,22 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     String failureMessage = 'Could not place the item.',
     PlacementType requiredPlacement = PlacementType.any,
     FinishFootprint Function(Matrix4 transform)? footprintOf,
+    ({double widthM, double depthM, double centerX, double centerZ})?
+        footprintDims,
+    Future<void> Function(Matrix4 transform)? cutoutBaker,
   }) async {
     final ARHitTestResult? hit;
     final liveFloorY = _currentLiveFloorY;
+    // Only finishes pass footprintOf — they get CUT around objects, never
+    // refused for them (masks) or slid body-first (push).
+    final isFinish = footprintOf != null;
     final candidates = _memoryFiltered(hits, requiredPlacement);
     switch (requiredPlacement) {
       case PlacementType.floor:
         if (liveFloorY == null) {
+          BootTrace.log('ar-screen: refuse floorY-null floorY='
+              '${_planeMemory.floorY} fresh=${_planeMemory.isFresh} '
+              'gatesRelaxed=$_gatesRelaxed');
           _showLiveFloorScanHint();
           return null;
         }
@@ -915,6 +1046,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
 
     if (hit == null) {
+      final firstY = hits.isEmpty
+          ? null
+          : hits.first.worldTransform.getTranslation().y;
+      BootTrace.log('ar-screen: refuse no-hit placement=$requiredPlacement '
+          'raw=${hits.length} candidates=${candidates.length} '
+          'firstY=$firstY liveFloorY=$liveFloorY relaxed=$_gatesRelaxed');
       _showPlacementHint(requiredPlacement, rawHits: hits);
       return null;
     }
@@ -933,9 +1070,39 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               target: seed,
               quad: q,
             ))) {
+      BootTrace.log('ar-screen: refuse behind-furniture masks=${_overlayMasks.length}');
       _showMessage('That spot is behind furniture — tap an open area.',
           color: AppColors.primaryLight);
       return null;
+    }
+
+    // A floor tap grazing a detected object would hug its edge (the item
+    // reads as floating on it) — slide it into the open floor first. The
+    // slide knows the item's body (half extents at the placement yaw), so
+    // a wide sofa moves far enough for its EDGE — not just its center —
+    // to clear the object.
+    final onFloorHit =
+        requiredPlacement == PlacementType.floor || hit.planeType == 1;
+    var landing = seed;
+    if (cameraPos != null && onFloorHit) {
+      landing = pushIntoFloorZone(
+        point: seed,
+        masks: _overlayMasks,
+        floorZones: _floorZoneQuads,
+        cameraPos: cameraPos,
+        clearanceM: 0.3,
+        minDistanceM: ArPlacementPolicy.minPlacementDistanceM,
+        maxDistanceM: ArPlacementPolicy.maxPlacementDistanceM,
+        halfWidthM: isFinish || footprintDims == null
+            ? null
+            : footprintDims.widthM / 2,
+        halfDepthM: isFinish || footprintDims == null
+            ? null
+            : footprintDims.depthM / 2,
+        footprintYaw: isFinish || footprintDims == null
+            ? null
+            : ArPlacementPolicy.faceCameraYaw(seed, cameraPos),
+      );
     }
 
     // Refine the surface from ARCore's raw point cloud (RANSAC). A confident
@@ -943,7 +1110,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     // items drift / float. Fall back to the raw hit when the fit is weak
     // (clutter, too few points) — never worse than before.
     final fit = await _session?.refinePlane(
-      seed: seed,
+      seed: landing,
       radiusM: 0.6,
       wantHorizontal: requiredPlacement != PlacementType.wall,
     );
@@ -956,11 +1123,60 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         ? ArPlacementPolicy.refinedAnchorTransform(
             fit,
             isFloor: requiredPlacement != PlacementType.wall,
-            anchorAt: seed,
+            anchorAt: landing,
             cameraPosition: cameraPos,
           )
         : _anchorTransformFor(hit, requiredPlacement,
             cameraPosition: cameraPos);
+    if (!useRefined) {
+      final t = transform.getTranslation();
+      if ((t.x - landing.x).abs() > 1e-6 || (t.z - landing.z).abs() > 1e-6) {
+        transform.setTranslation(Vector3(landing.x, t.y, landing.z));
+      }
+    }
+
+    // The item's whole body must fit the detected floor — a sofa wider
+    // than the scanned area would sink into (and hide) real furniture.
+    if (footprintDims != null && onFloorHit) {
+      final col2 = transform.getColumn(2);
+      final yaw = math.atan2(col2.x, col2.z);
+      final t = transform.getTranslation();
+      // The anchor is the model's pivot; the footprint rect is centered on
+      // the geometry's bounds center — offset along the item's axes
+      // (FinishFootprint convention: +X = (cos, −sin), +Z = (sin, cos)).
+      final cx = footprintDims.centerX;
+      final cz = footprintDims.centerZ;
+      final center = Vector3(
+        t.x + cx * math.cos(yaw) + cz * math.sin(yaw),
+        t.y,
+        t.z - cx * math.sin(yaw) + cz * math.cos(yaw),
+      );
+      if (!footprintFitsInZones(
+        center: center,
+        yaw: yaw,
+        widthM: footprintDims.widthM,
+        depthM: footprintDims.depthM,
+        floorZones: _floorZoneQuads,
+        // Finishes are cut around objects, not refused by them.
+        masks: isFinish ? const [] : _overlayMasks,
+      )) {
+        BootTrace.log(
+            'ar-screen: refuse footprint zones=${_floorZoneQuads.length} '
+            'masks=${_overlayMasks.length} '
+            'w=${footprintDims.widthM.toStringAsFixed(2)} '
+            'd=${footprintDims.depthM.toStringAsFixed(2)} '
+            'center=(${center.x.toStringAsFixed(2)},'
+            '${center.z.toStringAsFixed(2)}) '
+            'yaw=${yaw.toStringAsFixed(2)}');
+        _showMessage(
+            isFinish
+                ? 'This finish is bigger than the scanned floor — pick a '
+                    'smaller size.'
+                : 'Not enough open floor for $label — try a wider spot.',
+            color: AppColors.primaryLight);
+        return null;
+      }
+    }
 
     // Floor tiles / wall panels may never stack — stacked patches z-fight
     // and read as multiple tiles glued together in AR.
@@ -978,6 +1194,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       }
       footprint = fp;
     }
+
+    // Transform is final here — bake the object cut-outs into a fresh GLB
+    // and swap it in before the node is added.
+    final bake = cutoutBaker;
+    if (bake != null) await bake(transform);
 
     final anchor = ARPlaneAnchor(transformation: transform);
     final anchorOk = await _anchors?.addAnchor(anchor) ?? false;
@@ -1001,6 +1222,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       return;
     }
     _lastPlacementHintAt = now;
+    BootTrace.log('ar-screen: hint floorY-null-scan');
     _showMessage('Move your phone slowly to scan the floor, then tap.',
         color: AppColors.warning, duration: const Duration(seconds: 2));
   }
@@ -1038,13 +1260,40 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     } else {
       text = 'Point your phone at a floor or wall, then tap to place.';
     }
+    BootTrace.log('ar-screen: hint "$text" raw=${raw.length}');
     _showMessage(text,
         color: AppColors.warning, duration: const Duration(seconds: 2));
   }
 
-  ARNode _buildNode(_BarEntry entry) {
+  // World footprint of what's about to be placed — null when the geometry
+  // can't be read (fail open: placement then behaves exactly as before).
+  Future<({double widthM, double depthM, double centerX, double centerZ})?>
+      _footprintFor(_BarEntry entry) async {
+    if (entry.isProduct) return entry.product!.worldFootprint;
+    return entry.item!.worldFootprint();
+  }
+
+  List<PlaneQuad> get _floorZoneQuads => [
+        for (final q in _overlayQuads)
+          if (q.kind == PlaneQuadKind.floor) q,
+      ];
+
+  ARNode _buildNode(_BarEntry entry,
+      {({double widthM, double depthM, double centerX, double centerZ})?
+          footprint}) {
     final position = Vector3(0.0, 0.0, 0.0);
     final rotation = Vector4(1.0, 0.0, 0.0, 0.0);
+    // The footprint rides along in the node's data so the native drag
+    // handler can keep the body inside the detected floor.
+    Map<String, Object> data(bool horizontalOnly) => {
+          'horizontalOnly': horizontalOnly,
+          if (footprint != null) ...{
+            'footprintWidthM': footprint.widthM,
+            'footprintDepthM': footprint.depthM,
+            'footprintCenterX': footprint.centerX,
+            'footprintCenterZ': footprint.centerZ,
+          },
+        };
     if (entry.isProduct) {
       final e = entry.product!;
       return ARNode(
@@ -1053,7 +1302,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         scale: Vector3.all(e.scaleToMeters),
         position: position,
         rotation: rotation,
-        data: {'horizontalOnly': true},
+        data: data(true),
       );
     }
     final item = entry.item!;
@@ -1063,7 +1312,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       scale: Vector3.all(item.widthMeters),
       position: position,
       rotation: rotation,
-      data: {'horizontalOnly': item.placement == PlacementType.floor},
+      data: data(item.placement == PlacementType.floor),
     );
   }
 
@@ -1135,13 +1384,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final selection = _selection;
     setState(() => _arming = true);
     try {
+      final floorFinish = isFloor
+          ? FloorFinish(
+              type: selection.floorType,
+              colorArgb: selection.floorColorArgb,
+              sizeM: selection.floorSizeM,
+            )
+          : null;
       final bytes = isFloor
-          ? generateFloorGlb(
-              finish: FloorFinish(
-                type: selection.floorType,
-                colorArgb: selection.floorColorArgb,
-                sizeM: selection.floorSizeM,
-              ))
+          ? generateFloorGlb(finish: floorFinish!)
           : generateWallGlb(
               finish: WallFinish(
                 type: selection.wallType,
@@ -1190,6 +1441,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           scaleMeters: scaleMeters,
           footprintWidthM: footprintWidthM,
           footprintHeightM: footprintHeightM,
+          floorFinish: floorFinish,
         );
       });
     } catch (e) {
@@ -1224,6 +1476,53 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           ? '${meters.round()}'
           : meters.toStringAsFixed(1);
 
+  // Re-bake the floor GLB with cut-outs around detected objects at the
+  // final transform, then swap the node's uri (unique filename — the model
+  // loader caches by path). Never throws: a failed bake keeps the uncut
+  // prepare-time file.
+  Future<void> _bakeFinishCutouts(
+      ARNode node, FloorFinish finish, Matrix4 transform) async {
+    try {
+      final holes = _finishCutoutHoles(transform);
+      if (holes.isEmpty) return;
+      final bytes = generateFloorGlb(finish: finish, holes: holes);
+      final fileName = 'finish_floor_${finish.type.name}_'
+          '${_hexColor(finish.colorArgb)}_'
+          '${_sizeToken(finish.sizeM)}m_'
+          '${DateTime.now().microsecondsSinceEpoch}.glb';
+      final path = await saveGlbToAppDocuments(bytes, fileName: fileName);
+      node.uri = Uri.file(path).toString();
+    } catch (e) {
+      BootTrace.log('ar-screen: finish cut bake failed: $e');
+    }
+  }
+
+  // Detected-object masks → finish-local XZ outlines. World → local undoes
+  // the anchor's yaw about Y (scale factor is 1: scaleToUnits normalizes
+  // longest edge to the meter bounds the mesh already has).
+  List<List<double>> _finishCutoutHoles(Matrix4 transform) {
+    if (_overlayMasks.isEmpty) return const [];
+    final col2 = transform.getColumn(2);
+    final yaw = math.atan2(col2.x, col2.z);
+    final c = math.cos(yaw);
+    final s = math.sin(yaw);
+    final t = transform.getTranslation();
+    final holes = <List<double>>[];
+    for (final q in _overlayMasks) {
+      final world = planeQuadCorners(q);
+      if (world.length < 3) continue;
+      final flat = <double>[];
+      for (final p in world) {
+        final dx = p.x - t.x;
+        final dz = p.z - t.z;
+        flat.add(dx * c - dz * s);
+        flat.add(dx * s + dz * c);
+      }
+      holes.add(flat);
+    }
+    return holes;
+  }
+
   Future<void> _placePendingFinish(
       _PendingFinish pending, List<ARHitTestResult> hits) async {
     _busy = true;
@@ -1235,21 +1534,36 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         name: pending.nodeName,
         data: {'horizontalOnly': pending.kindWord == 'floor'},
       );
-      final requiredPlacement = pending.kindWord == 'floor'
-          ? PlacementType.floor
-          : PlacementType.wall;
+      final isFloor = pending.kindWord == 'floor';
+      final requiredPlacement =
+          isFloor ? PlacementType.floor : PlacementType.wall;
+      final floorFinish = pending.floorFinish;
       final placed = await _placeNodeAtTap(
         hits,
         node,
         pending.label,
         failureMessage: 'Could not load the ${pending.kindWord} finish.',
         requiredPlacement: requiredPlacement,
+        // Finishes push point-wise (they may sit over a detected table);
+        // only furniture bodies slide whole. The fit gate still sizes the
+        // patch against the scanned floor.
+        footprintDims: isFloor
+            ? (
+                widthM: pending.footprintWidthM,
+                depthM: pending.footprintHeightM,
+                centerX: 0.0,
+                centerZ: 0.0,
+              )
+            : null,
         footprintOf: (t) => FinishFootprint.fromTransform(
-          pending.kindWord == 'floor' ? FinishKind.floor : FinishKind.wall,
+          isFloor ? FinishKind.floor : FinishKind.wall,
           t,
           widthM: pending.footprintWidthM,
           heightM: pending.footprintHeightM,
         ),
+        cutoutBaker: isFloor && floorFinish != null
+            ? (transform) => _bakeFinishCutouts(node, floorFinish, transform)
+            : null,
       );
       if (placed == null) return;
       if (!mounted) return;
@@ -1268,25 +1582,22 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   void _onNodeTap(List<String> nodeNames) {
     if (nodeNames.isEmpty) return;
     _stopRotateHold();
+    final tapped = nodeNames.first;
+    // Native serializes a null anchor name as the string "null" — that is a
+    // non-furniture node (feature point, renderer), never a selectable item.
+    if (tapped.isEmpty || tapped == 'null') {
+      BootTrace.log('ar-screen: nodeTap ignored tapped="$tapped" '
+          'placed=${_placed.length}');
+      return;
+    }
+    BootTrace.log('ar-screen: nodeTap "$tapped" placed=${_placed.length}');
     setState(() {
-      _selectedNodeName = nodeNames.first;
+      _selectedNodeName = tapped;
       _sessionWasLive = true;
-      _rotateSliderValue = 0;
     });
   }
 
-  static const double _rotateStepRad = 15.0 * math.pi / 180.0;
-
-  // Slider thumb position = total yaw applied to the selected item since it
-  // was selected (0 = the face-the-phone orientation it was placed with).
-  double _rotateSliderValue = 0;
-
-  static double _wrapRad(double v) {
-    const twoPi = 2 * math.pi;
-    var x = (v + math.pi) % twoPi;
-    if (x < 0) x += twoPi;
-    return x - math.pi;
-  }
+  static const double _rotateStepRad = 5.0 * math.pi / 180.0;
 
   // Gesture rotations and drags happen natively — resync the finish
   // footprint from the node's world transform so the no-stacking check
@@ -1306,6 +1617,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     }
   }
 
+  // Native owns orientation; Dart only ever sends fixed-size deltas (tap
+  // 5°, hold 3°) — no absolute yaw and no wrap boundary anywhere, so a
+  // 360° inspection is just cumulative deltas with nothing to flick back.
   Future<void> _rotateSelected(double deltaYawRad) async {
     final selected = _selectedNodeName;
     if (selected == null) return;
@@ -1317,7 +1631,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       }
     }
     if (entry == null) return;
-    _rotateSliderValue = _wrapRad(_rotateSliderValue + deltaYawRad);
     try {
       await _objects?.rotateNodeY(entry.node.name, deltaYawRad);
     } catch (_) {
@@ -1330,12 +1643,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   Timer? _rotateHoldTimer;
 
-  static const double _rotateHoldStepRad = 0.75 * math.pi / 180.0;
+  static const double _rotateHoldStepRad = 3.0 * math.pi / 180.0;
 
-  static const Duration _rotateHoldTick = Duration(milliseconds: 50);
+  static const Duration _rotateHoldTick = Duration(milliseconds: 40);
 
   void _beginRotateHold(double dirSign) {
     _rotateHoldTimer?.cancel();
+    _rotateSelected(dirSign * _rotateHoldStepRad);
     _rotateHoldTimer = Timer.periodic(_rotateHoldTick, (_) {
       _rotateSelected(dirSign * _rotateHoldStepRad);
     });
@@ -1670,11 +1984,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           planeDetectionConfig: PlaneDetectionConfig.horizontalAndVertical,
         ),
 
-        if (_overlayViewProjection != null && _overlayQuads.isNotEmpty)
+        if (_overlayViewProjection != null &&
+            (_overlayQuads.isNotEmpty || _syntheticFloor != null))
           Positioned.fill(
             child: PlaneOverlay(
               viewProjection: _overlayViewProjection!,
-              quads: _overlayQuads,
+              quads: [
+                if (_syntheticFloor != null) _syntheticFloor!,
+                ..._overlayQuads,
+              ],
               masks: _overlayMasks,
             ),
           ),
@@ -2269,27 +2587,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         children: [
           _buildRotateButton(
             icon: Icons.rotate_left,
-            tooltip: 'Rotate left — tap for 15°, hold to turn slowly',
+            tooltip: 'Rotate left — tap for 5°, hold to spin',
             dirSign: 1.0,
-          ),
-          SizedBox(
-            width: 148,
-            child: Slider(
-              value: _rotateSliderValue.clamp(-math.pi, math.pi),
-              min: -math.pi,
-              max: math.pi,
-              onChanged: (v) {
-                _rotateSelected(v - _rotateSliderValue);
-                setState(() {});
-              },
-              activeColor: AppColors.accent,
-              inactiveColor: Colors.white24,
-              thumbColor: Colors.white,
-            ),
           ),
           _buildRotateButton(
             icon: Icons.rotate_right,
-            tooltip: 'Rotate right — tap for 15°, hold to turn slowly',
+            tooltip: 'Rotate right — tap for 5°, hold to spin',
             dirSign: -1.0,
           ),
         ],
@@ -2311,7 +2614,6 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           behavior: HitTestBehavior.opaque,
           onTap: () {
             _rotateSelected(dirSign * _rotateStepRad);
-            setState(() {});
           },
           onLongPressStart: (_) => _beginRotateHold(dirSign),
           onLongPressEnd: (_) => _stopRotateHold(),

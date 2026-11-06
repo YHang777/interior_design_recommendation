@@ -11,7 +11,7 @@ class ArProductEntry {
     this.productError,
   });
 
-  double? _cachedScaleToMeters;
+  GlbBounds? _cachedBounds;
 
   final Product product;
 
@@ -35,8 +35,8 @@ class ArProductEntry {
     return math.max(d.widthM, math.max(d.heightM, d.depthM));
   }
 
-  double get scaleToMeters {
-    final cached = _cachedScaleToMeters;
+  GlbBounds get _bounds {
+    final cached = _cachedBounds;
     if (cached != null) return cached;
     final file = resolvedFile;
     if (file == null) {
@@ -59,7 +59,28 @@ class ArProductEntry {
           'has degenerate bounds (${bounds.widthM} × ${bounds.heightM} × '
           '${bounds.depthM} m).');
     }
-    return _cachedScaleToMeters = extent;
+    return _cachedBounds = bounds;
+  }
+
+  // Resolved products render at GlbBounds scale (the pipeline bakes real
+  // meters into the GLB), so world footprint == raw geometry bounds.
+  double get scaleToMeters => _bounds.maxExtent;
+
+  ({double widthM, double depthM, double centerX, double centerZ})?
+      get worldFootprint {
+    try {
+      final b = _bounds;
+      return (
+        widthM: b.widthM,
+        depthM: b.depthM,
+        centerX: b.centerX,
+        centerZ: b.centerZ,
+      );
+    } catch (_) {
+      // No parseable geometry → no footprint → placement fails open (the
+      // scale pipeline would refuse anyway before anything renders).
+      return null;
+    }
   }
 
   String get badgeText => 'AI';

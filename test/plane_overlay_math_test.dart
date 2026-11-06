@@ -316,6 +316,115 @@ void main() {
         OverlayZoneKind.drop,
       );
     });
+
+    test('an untrusted floorY never paints a table green', () {
+      // floorY locked on the table at 0.75 with no corroborating lowest
+      // plane — the classic floating detection plane must mask.
+      expect(
+        overlayZoneOf(
+            planeType: 1, centerY: 0.75, floorY: 0.75, cameraY: 1.4),
+        OverlayZoneKind.mask,
+      );
+    });
+
+    test('an untrusted floorY with a real lowest plane recovers', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: -0.02,
+            floorY: 0.75,
+            cameraY: 1.5,
+            lowestPlaneY: -0.02),
+        OverlayZoneKind.floor,
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0.75,
+            floorY: 0.75,
+            cameraY: 1.5,
+            lowestPlaneY: -0.02),
+        OverlayZoneKind.mask,
+        reason: 'the table stays masked once the ref is the real floor',
+      );
+    });
+
+    test('an untrusted lowest plane outside the strict band masks', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0.75,
+            floorY: 0.75,
+            cameraY: 1.4,
+            lowestPlaneY: 0.75),
+        OverlayZoneKind.mask,
+        reason: '0.65 m below the phone is too close to be a floor',
+      );
+    });
+
+    test('an untrusted floor with no camera height drops', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0,
+            floorY: 0.75,
+            cameraY: null,
+            lowestPlaneY: 0),
+        OverlayZoneKind.drop,
+      );
+    });
+
+    test('a trusted floorY keeps painting while the camera crouches', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0,
+            floorY: 0,
+            cameraY: 0.5,
+            floorYTrusted: true),
+        OverlayZoneKind.floor,
+        reason: 'trust was earned at proof time — no live band check',
+      );
+    });
+
+    test('a trusted floorY yields to a plane 0.45 m below', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: -0.45,
+            floorY: 0,
+            cameraY: 1.5,
+            lowestPlaneY: -0.45,
+            floorYTrusted: true),
+        OverlayZoneKind.floor,
+        reason: 'the reappeared real floor pulls the ref down',
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0,
+            floorY: 0,
+            cameraY: 1.5,
+            lowestPlaneY: -0.45,
+            floorYTrusted: true),
+        OverlayZoneKind.mask,
+        reason: 'the stale anchor height masks once the ref moved down',
+      );
+    });
+
+    test('a trusted floorY ignores noise far below', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0,
+            floorY: 0,
+            cameraY: 1.5,
+            lowestPlaneY: -2.0,
+            floorYTrusted: true),
+        OverlayZoneKind.floor,
+        reason: 'a 2 m gap is noise — the anchor wins',
+      );
+    });
   });
 
   group('emaPolygon', () {
@@ -326,12 +435,14 @@ void main() {
     });
 
     test('later sightings blend toward the new vertices', () {
+      // Sub-threshold jitter only — a jump past the reset shift snaps
+      // (covered in the re-fit reset group).
       final prev = [Vector3.zero(), Vector3.zero(), Vector3.zero()];
-      final next = [Vector3(10, 0, 0), Vector3(0, 4, 0), Vector3(0, 0, 2)];
+      final next = [Vector3(0.1, 0, 0), Vector3(0, 0.1, 0), Vector3(0, 0, 0.1)];
       final out = emaPolygon(prev, next, alpha: 0.35);
-      expect(out[0].x, closeTo(3.5, 1e-9));
-      expect(out[1].y, closeTo(1.4, 1e-9));
-      expect(out[2].z, closeTo(0.7, 1e-9));
+      expect(out[0].x, closeTo(0.035, 1e-9));
+      expect(out[1].y, closeTo(0.035, 1e-9));
+      expect(out[2].z, closeTo(0.035, 1e-9));
     });
 
     test('a re-fitted outline of a different length resets', () {
@@ -667,6 +778,522 @@ void main() {
         viewport: const Size(200, 200),
       );
       expect(pts, isNull);
+    });
+  });
+
+  group('emaPolygon re-fit reset', () {
+    test('a vertex jump past the reset shift snaps to the fresh ring', () {
+      final prev = [
+        Vector3(0, 0, 0),
+        Vector3(1, 0, 0),
+        Vector3(1, 0, 1),
+      ];
+      final next = [
+        Vector3(0.4, 0, 0),
+        Vector3(1, 0, 0),
+        Vector3(1, 0, 1),
+      ];
+      expect(emaPolygon(prev, next, alpha: 0.35), same(next));
+    });
+
+    test('jitter under the reset shift still blends', () {
+      final prev = [Vector3.zero(), Vector3(1, 0, 0), Vector3(1, 0, 1)];
+      final next = [Vector3(0.05, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1)];
+      final out = emaPolygon(prev, next, alpha: 0.5);
+      expect(out, isNot(same(next)));
+      expect(out[0].x, closeTo(0.025, 1e-9));
+    });
+  });
+
+  group('pushIntoFloorZone', () {
+    final camera = Vector3(0, 1.5, 3);
+
+    PlaneQuad openFloor() => PlaneQuad(
+          center: Vector3.zero(),
+          yaw: 0,
+          extentX: 6,
+          extentZ: 6,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    // Detected object: 1 m × 1 m top at 0.75 m height, x ∈ [0.5, 1.5],
+    // z ∈ [-0.5, 0.5].
+    PlaneQuad objectTop() => PlaneQuad(
+          center: Vector3(1, 0.75, 0),
+          yaw: 0,
+          extentX: 1,
+          extentZ: 1,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    test('a tap grazing the object slides out to the clearance', () {
+      final out = pushIntoFloorZone(
+        point: Vector3(0.35, 0, 0),
+        masks: [objectTop()],
+        floorZones: [openFloor()],
+        cameraPos: camera,
+        clearanceM: 0.3,
+      );
+      expect(out.x, closeTo(0.2, 1e-9));
+      expect(out.y, 0);
+      expect(out.z, closeTo(0, 1e-9));
+    });
+
+    test('a tap in open floor is untouched', () {
+      final point = Vector3(-1, 0, 0);
+      expect(
+        pushIntoFloorZone(
+          point: point,
+          masks: [objectTop()],
+          floorZones: [openFloor()],
+          cameraPos: camera,
+        ),
+        same(point),
+      );
+    });
+
+    test('a tap inside the object slides out past its edge', () {
+      final out = pushIntoFloorZone(
+        point: Vector3(1, 0, 0),
+        masks: [objectTop()],
+        floorZones: [openFloor()],
+        cameraPos: camera,
+        clearanceM: 0.3,
+      );
+      // Out through the nearest edge (x = 1.5) plus the clearance.
+      expect(out.x, closeTo(1.8, 1e-9));
+      expect(out.z, closeTo(0, 1e-9));
+    });
+
+    test('a push that would leave the floor zone is refused', () {
+      final point = Vector3(0, 0, 0);
+      final out = pushIntoFloorZone(
+        point: point,
+        masks: [
+          PlaneQuad(
+            center: Vector3(0, 0.75, 0),
+            yaw: 0,
+            extentX: 1,
+            extentZ: 1,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        floorZones: [
+          PlaneQuad(
+            center: Vector3(2, 0, 0),
+            yaw: 0,
+            extentX: 2,
+            extentZ: 2,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        cameraPos: camera,
+      );
+      expect(out, same(point),
+          reason: 'never trade a bad landing for one off the detected floor');
+    });
+
+    test('no masks or no floor zones leaves the point alone', () {
+      final point = Vector3(0.1, 0, 0);
+      expect(
+        pushIntoFloorZone(
+          point: point,
+          masks: const [],
+          floorZones: [openFloor()],
+          cameraPos: camera,
+        ),
+        same(point),
+      );
+      expect(
+        pushIntoFloorZone(
+          point: point,
+          masks: [objectTop()],
+          floorZones: const [],
+          cameraPos: camera,
+        ),
+        same(point),
+      );
+    });
+  });
+
+  group('footprintFitsInZones', () {
+    PlaneQuad floor(double ex, double ez,
+            {Vector3? at, double yaw = 0}) =>
+        PlaneQuad(
+          center: at ?? Vector3.zero(),
+          yaw: yaw,
+          extentX: ex,
+          extentZ: ez,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    // Detected object: 1 m × 1 m top at 0.75 m height, x ∈ [0.5, 1.5],
+    // z ∈ [-0.5, 0.5].
+    PlaneQuad objectTop() => PlaneQuad(
+          center: Vector3(1, 0.75, 0),
+          yaw: 0,
+          extentX: 1,
+          extentZ: 1,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    test('a sofa well inside a big floor fits', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: 0,
+          widthM: 2.2,
+          depthM: 0.9,
+          floorZones: [floor(6, 6)],
+        ),
+        isTrue,
+      );
+    });
+
+    test('a footprint wider than the detected floor is refused', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0.5, 0, 0),
+          yaw: 0,
+          widthM: 2.2,
+          depthM: 0.9,
+          floorZones: [floor(2, 2)],
+        ),
+        isFalse,
+        reason: 'right edge reaches 1.6 m — off the 2 m floor zone; '
+            'a big sofa must not hide furniture outside the scan',
+      );
+    });
+
+    test('rotation decides the fit: a long table fits diagonal, not '
+        'parallel to the edge', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: 0,
+          widthM: 7,
+          depthM: 1,
+          floorZones: [floor(6, 6)],
+        ),
+        isFalse,
+      );
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: math.pi / 4,
+          widthM: 7,
+          depthM: 1,
+          floorZones: [floor(6, 6)],
+        ),
+        isTrue,
+        reason: 'diagonal footprint spans ~5.7 m on both axes — inside '
+            'the 6 m floor',
+      );
+    });
+
+    test('a footprint overlapping a mask is refused', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(1, 0, 0),
+          yaw: 0,
+          widthM: 1,
+          depthM: 1,
+          floorZones: [floor(6, 6)],
+          masks: [objectTop()],
+        ),
+        isFalse,
+      );
+    });
+
+    test('mask clearance keeps the body off the object, not just '
+        'non-overlapping', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0.15, 0, 0),
+          yaw: 0,
+          widthM: 0.4,
+          depthM: 0.4,
+          floorZones: [floor(6, 6)],
+          masks: [objectTop()],
+        ),
+        isTrue,
+        reason: 'edge at 0.35 — 0.15 m from the object outline',
+      );
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0.27, 0, 0),
+          yaw: 0,
+          widthM: 0.4,
+          depthM: 0.4,
+          floorZones: [floor(6, 6)],
+          masks: [objectTop()],
+        ),
+        isFalse,
+        reason: 'edge at 0.47 — only 0.03 m from the object outline',
+      );
+    });
+
+    test('no detected floor zones fails open', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: 0,
+          widthM: 3,
+          depthM: 3,
+          floorZones: const [],
+        ),
+        isTrue,
+      );
+    });
+
+    test('zero-sized footprint fails open', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: 0,
+          widthM: 0,
+          depthM: 0,
+          floorZones: [floor(6, 6)],
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('pushIntoFloorZone with footprint', () {
+    final camera = Vector3(0, 1.5, 3);
+
+    PlaneQuad openFloor() => PlaneQuad(
+          center: Vector3.zero(),
+          yaw: 0,
+          extentX: 6,
+          extentZ: 6,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    PlaneQuad objectTop() => PlaneQuad(
+          center: Vector3(1, 0.75, 0),
+          yaw: 0,
+          extentX: 1,
+          extentZ: 1,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    test('a wide body slides further than a point would', () {
+      // Tap 0.05 m from the object outline. A point-only push stops 0.3 m
+      // out (x = 0.2); a 1 m-wide sofa needs its half-width (0.5) plus the
+      // clearance along the push direction → x = -0.3.
+      final out = pushIntoFloorZone(
+        point: Vector3(0.45, 0, 0),
+        masks: [objectTop()],
+        floorZones: [openFloor()],
+        cameraPos: camera,
+        clearanceM: 0.3,
+        halfWidthM: 0.5,
+        halfDepthM: 0.3,
+        footprintYaw: 0.0,
+      );
+      expect(out.x, closeTo(-0.3, 1e-9));
+      expect(out.z, closeTo(0, 1e-9));
+    });
+
+    test('support extent follows the footprint yaw', () {
+      // Same 3 m × 0.6 m body yawed 90°: the long axis now runs along Z,
+      // so sliding along X only needs depth/2 + clearance = 0.6 total.
+      final out = pushIntoFloorZone(
+        point: Vector3(0.45, 0, 0),
+        masks: [objectTop()],
+        floorZones: [openFloor()],
+        cameraPos: camera,
+        clearanceM: 0.3,
+        halfWidthM: 1.5,
+        halfDepthM: 0.3,
+        footprintYaw: math.pi / 2,
+      );
+      expect(out.x, closeTo(-0.1, 1e-9));
+    });
+
+    test('a pushed body that still cannot fit the floor is refused', () {
+      // The body-aware push would land the 3 m sofa at x = -1.3 — its left
+      // edge (-2.8) falls off a 2 m floor → keep the raw tap.
+      final point = Vector3(0.45, 0, 0);
+      final out = pushIntoFloorZone(
+        point: point,
+        masks: [objectTop()],
+        floorZones: [
+          PlaneQuad(
+            center: Vector3.zero(),
+            yaw: 0,
+            extentX: 2,
+            extentZ: 4,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        cameraPos: camera,
+        clearanceM: 0.3,
+        halfWidthM: 1.5,
+        halfDepthM: 0.3,
+        footprintYaw: 0.0,
+      );
+      expect(out, same(point));
+    });
+  });
+
+  group('syntheticFloorQuad', () {
+    PlaneQuad floorQuadAt(double y) => PlaneQuad(
+          center: Vector3(1, y, 2),
+          yaw: 0,
+          extentX: 3,
+          extentZ: 3,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    test('null without floorY', () {
+      expect(
+        syntheticFloorQuad(
+            floorY: null, cameraPos: Vector3(0, 1.5, 0), existing: const []),
+        isNull,
+      );
+    });
+
+    test('null without a camera position', () {
+      expect(
+        syntheticFloorQuad(floorY: 0, cameraPos: null, existing: const []),
+        isNull,
+      );
+    });
+
+    test('paints under the camera when no floor quad is near floorY', () {
+      final quad = syntheticFloorQuad(
+        floorY: 0.1,
+        cameraPos: Vector3(2, 1.5, -3),
+        existing: [floorQuadAt(0.8)],
+      );
+      expect(quad, isNotNull);
+      expect(quad!.kind, PlaneQuadKind.floor);
+      expect(quad.center.x, closeTo(2, 1e-9));
+      expect(quad.center.y, closeTo(0.1, 1e-9));
+      expect(quad.center.z, closeTo(-3, 1e-9));
+    });
+
+    test('stays null when ARCore already paints a floor at that height', () {
+      expect(
+        syntheticFloorQuad(
+            floorY: 0.1,
+            cameraPos: Vector3(0, 1.5, 0),
+            existing: [floorQuadAt(0.12)]),
+        isNull,
+      );
+    });
+
+    test('a floating plane far above floorY does not suppress it', () {
+      expect(
+        syntheticFloorQuad(
+            floorY: 0.1,
+            cameraPos: Vector3(0, 1.5, 0),
+            existing: [floorQuadAt(0.75)]),
+        isNotNull,
+      );
+    });
+  });
+
+  group('rectHitsPolygons', () {
+    List<Vector3> square(double cx, double cz, double half) => [
+          Vector3(cx - half, 0, cz - half),
+          Vector3(cx + half, 0, cz - half),
+          Vector3(cx + half, 0, cz + half),
+          Vector3(cx - half, 0, cz + half),
+        ];
+
+    bool hit({
+      required Vector3 center,
+      double yaw = 0,
+      double widthM = 0.5,
+      double depthM = 0.5,
+      required List<List<Vector3>> polygons,
+      double clearanceM = 0.05,
+    }) =>
+        rectHitsPolygons(
+          center: center,
+          yaw: yaw,
+          widthM: widthM,
+          depthM: depthM,
+          polygons: polygons,
+          clearanceM: clearanceM,
+        );
+
+    test('empty polygons never hit', () {
+      expect(
+        hit(center: Vector3.zero(), polygons: const []),
+        isFalse,
+      );
+    });
+
+    test('a rect inside the polygon hits', () {
+      expect(
+        hit(center: Vector3.zero(), polygons: [square(0, 0, 0.5)]),
+        isTrue,
+      );
+    });
+
+    test('a rect far from every polygon is clear', () {
+      expect(
+        hit(center: Vector3(3, 0, 3), polygons: [square(0, 0, 0.5)]),
+        isFalse,
+      );
+    });
+
+    test('a rect within clearance of the outline hits', () {
+      // Rect spans x ∈ [0.43, 0.93] — fully outside the hole (edge 0.4)
+      // but its near sample is 0.03 from the outline (< 0.05 clearance).
+      expect(
+        hit(center: Vector3(0.68, 0, 0), polygons: [square(0, 0, 0.4)]),
+        isTrue,
+      );
+      expect(
+        hit(center: Vector3(0.72, 0, 0), polygons: [square(0, 0, 0.4)]),
+        isFalse,
+        reason: 'nearest sample is 0.07 out — past the 0.05 clearance',
+      );
+    });
+
+    test('a small polygon fully inside the rect hits (vertex containment)',
+        () {
+      expect(
+        hit(
+          center: Vector3.zero(),
+          widthM: 0.5,
+          depthM: 0.5,
+          polygons: [square(0.02, 0.02, 0.03)],
+        ),
+        isTrue,
+      );
+    });
+
+    test('a yawed rect still detects the polygon', () {
+      // Same geometry rotated 45° — samples land on the polygon either way.
+      expect(
+        hit(center: Vector3.zero(), yaw: math.pi / 4, polygons: [
+          square(0, 0, 0.5)
+        ]),
+        isTrue,
+      );
+      expect(
+        hit(center: Vector3(3, 0, 0), yaw: math.pi / 4, polygons: [
+          square(0, 0, 0.5)
+        ]),
+        isFalse,
+      );
     });
   });
 }

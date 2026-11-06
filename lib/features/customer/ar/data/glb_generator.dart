@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:vector_math/vector_math_64.dart' show Vector3;
+
+import 'plane_overlay_math.dart' show rectHitsPolygons;
 import 'room_finishes.dart' show RoomFinishCatalog;
 
 const int _kGlbMagic = 0x46546C67;
@@ -219,7 +222,10 @@ int _nameSeed(String text) {
 
 // ─── Floor / wall generators ─────────────────────────────────────────────────
 
-Uint8List generateFloorGlb({required FloorFinish finish}) {
+Uint8List generateFloorGlb({
+  required FloorFinish finish,
+  List<List<double>> holes = const [],
+}) {
   final size = finish.sizeM;
   if (size <= 0) {
     throw ArgumentError.value(size, 'finish.sizeM', 'must be positive');
@@ -228,23 +234,63 @@ Uint8List generateFloorGlb({required FloorFinish finish}) {
   final mesh = _Mesh();
   final lo = -size / 2;
   final rng = _Rand(_nameSeed('floor:${finish.type.name}:$base'));
-  mesh.box(lo, -0.01, lo, -lo, 0, -lo, _tone(base, 0.72));
+  // Flat [x0, z0, …] outlines (finish-local XZ) → polygons for the cut test.
+  final polys = <List<Vector3>>[];
+  for (final flat in holes) {
+    if (flat.length < 6 || flat.length.isOdd) continue;
+    polys.add([
+      for (var i = 0; i < flat.length; i += 2) Vector3(flat[i], 0, flat[i + 1]),
+    ]);
+  }
+  var cuts = 0;
+  bool blocked(double x0, double z0, double x1, double z1) {
+    final hit = rectHitsPolygons(
+      center: Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2),
+      yaw: 0,
+      widthM: x1 - x0,
+      depthM: z1 - z0,
+      polygons: polys,
+      clearanceM: 0.05,
+    );
+    if (hit) cuts++;
+    return hit;
+  }
+
   switch (finish.type) {
     case FloorFinishType.woodPlanks:
-      _floorWoodPlanks(mesh, base, lo, size, rng);
+      _floorWoodPlanks(mesh, base, lo, size, rng, blocked);
     case FloorFinishType.cement:
-      _floorCement(mesh, base, lo, size, rng);
+      _floorCement(mesh, base, lo, size, rng, blocked);
     case FloorFinishType.ceramicTiles:
-      _floorTiles(mesh, base, lo, size, rng);
+      _floorTiles(mesh, base, lo, size, rng, blocked);
     case FloorFinishType.parquet:
-      _floorParquet(mesh, base, lo, size, rng);
+      _floorParquet(mesh, base, lo, size, rng, blocked);
+  }
+  final slab = _tone(base, 0.72);
+  if (cuts == 0) {
+    mesh.box(lo, -0.01, lo, -lo, 0, -lo, slab);
+  } else {
+    // Sides only — a top/bottom face would show through the cut-outs
+    // instead of the real floor.
+    mesh.quad(_Vec3(lo, -0.01, lo), _Vec3(-lo, -0.01, lo), _Vec3(-lo, 0, lo),
+        _Vec3(lo, 0, lo), const _Vec3(0, 0, 1), slab);
+    mesh.quad(_Vec3(-lo, -0.01, -lo), _Vec3(lo, -0.01, -lo), _Vec3(lo, 0, -lo),
+        _Vec3(-lo, 0, -lo), const _Vec3(0, 0, -1), slab);
+    mesh.quad(_Vec3(lo, -0.01, -lo), _Vec3(lo, -0.01, lo), _Vec3(lo, 0, lo),
+        _Vec3(lo, 0, -lo), const _Vec3(-1, 0, 0), slab);
+    mesh.quad(_Vec3(-lo, -0.01, lo), _Vec3(-lo, -0.01, -lo), _Vec3(-lo, 0, -lo),
+        _Vec3(-lo, 0, lo), const _Vec3(1, 0, 0), slab);
   }
   return mesh.buildGlb('floor_${finish.type.name}');
 }
 
-void _floorQuad(_Mesh m, double x0, double z0, double x1, double z1, int color) {
-  m.quad(_Vec3(x0, 0, z0), _Vec3(x1, 0, z0), _Vec3(x1, 0, z1),
-      _Vec3(x0, 0, z1), const _Vec3(0, 1, 0), color);
+// Pattern quads float 1 mm above the slab top (y=0) and detail quads 2 mm —
+// coplanar layers at the exact same y z-fight in the depth buffer and the
+// finish flickers ("pixel shaking") as the camera moves.
+void _floorQuad(_Mesh m, double x0, double z0, double x1, double z1, int color,
+    [double y = 0.001]) {
+  m.quad(_Vec3(x0, y, z0), _Vec3(x1, y, z0), _Vec3(x1, y, z1),
+      _Vec3(x0, y, z1), const _Vec3(0, 1, 0), color);
 }
 
 void _walkGrid(
@@ -259,7 +305,8 @@ void _walkGrid(
   }
 }
 
-void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng) {
+void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng,
+    bool Function(double, double, double, double) blocked) {
   const plankW = 0.12;
   const grainLine = 0.003;
   final darkGrain = _tone(base, 0.82);
@@ -272,7 +319,7 @@ void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng) {
     while (x < -lo - 1e-9) {
       final len = first ? rng.range(0.4, 1.0) : rng.range(0.9, 1.5);
       final x1 = math.min(x + len, -lo);
-      if (x1 > x + 1e-6) {
+      if (x1 > x + 1e-6 && !blocked(x, z, x1, z1)) {
         final plankBase = _tone(base, 1 + rng.range(-0.08, 0.08));
         _floorQuad(m, x, z, x1, z1, plankBase);
         final grainCount = (plankW / 0.025).floor();
@@ -280,42 +327,48 @@ void _floorWoodPlanks(_Mesh m, int base, double lo, double size, _Rand rng) {
           final gz = z + g * 0.025 + rng.range(0.002, 0.008);
           if (gz + grainLine < z1) {
             final gc = g.isEven ? darkGrain : lightGrain;
-            _floorQuad(m, x, gz, x1, gz + grainLine, gc);
+            _floorQuad(m, x, gz, x1, gz + grainLine, gc, 0.002);
           }
         }
         if (x1 < -lo - 0.01) {
-          _floorQuad(m, x1 - grainLine, z, x1, z1, _tone(base, 0.6));
+          _floorQuad(m, x1 - grainLine, z, x1, z1, _tone(base, 0.6), 0.002);
         }
+        // Row seam drawn per plank so a cut cell leaves the seam open too.
+        _floorQuad(m, x, z1 - grainLine, x1, z1, _tone(base, 0.55), 0.002);
       }
       if (x1 >= -lo - 1e-9) break;
       x = x1;
       first = false;
     }
-    _floorQuad(m, lo, z1 - grainLine, -lo, z1, _tone(base, 0.55));
     z = z1;
   }
 }
 
-void _floorCement(_Mesh m, int base, double lo, double size, _Rand rng) {
+void _floorCement(_Mesh m, int base, double lo, double size, _Rand rng,
+    bool Function(double, double, double, double) blocked) {
   final crackColor = _tone(base, 0.75);
   _walkGrid(size, 0.4, (x0, z0, x1, z1) {
+    if (blocked(x0, z0, x1, z1)) return;
     _floorQuad(m, x0, z0, x1, z1, _tone(base, 1 + rng.range(-0.04, 0.04)));
     if (rng.nextDouble() < 0.3) {
       final cx = x0 + rng.range(0.05, 0.35);
       final cz = z0 + rng.range(0.05, 0.35);
       final dx = rng.range(-0.15, 0.15);
       final dz = rng.range(-0.15, 0.15);
-      _floorQuad(m, cx - 0.002, cz, cx + dx + 0.002, cz + dz, crackColor);
+      _floorQuad(m, cx - 0.002, cz, cx + dx + 0.002, cz + dz, crackColor,
+          0.002);
     }
   });
 }
 
-void _floorTiles(_Mesh m, int base, double lo, double size, _Rand rng) {
+void _floorTiles(_Mesh m, int base, double lo, double size, _Rand rng,
+    bool Function(double, double, double, double) blocked) {
   const tile = 0.5;
   const inset = 0.015;
   final grout = _mix(base, _kGrey, 0.6);
   final groutDark = _mix(base, _kGrey, 0.7);
   _walkGrid(size, tile, (x0, z0, x1, z1) {
+    if (blocked(x0, z0, x1, z1)) return;
     final tileColor = _tone(base, 1 + rng.range(-0.05, 0.05));
     _floorQuad(m, x0 + inset, z0 + inset, x1 - inset, z1 - inset, tileColor);
     final cx = (x0 + x1) / 2;
@@ -323,20 +376,21 @@ void _floorTiles(_Mesh m, int base, double lo, double size, _Rand rng) {
     final hs = (x1 - x0 - inset * 2) * 0.3;
     if (hs > 0.01) {
       _floorQuad(m, cx - hs, cz - hs, cx + hs, cz + hs,
-          _tone(tileColor, 1.04));
+          _tone(tileColor, 1.04), 0.002);
     }
     _floorQuad(m, x0, z0, x0 + inset, z1, groutDark);
     _floorQuad(m, x1 - inset, z0, x1, z1, groutDark);
     _floorQuad(m, x0 + inset, z0, x1 - inset, z0 + inset, grout);
     _floorQuad(m, x0 + inset, z1 - inset, x1 - inset, z1, grout);
-    _floorQuad(m, x0, z0, x0 + inset, z0 + inset, groutDark);
-    _floorQuad(m, x1 - inset, z0, x1, z0 + inset, groutDark);
-    _floorQuad(m, x0, z1 - inset, x0 + inset, z1, groutDark);
-    _floorQuad(m, x1 - inset, z1 - inset, x1, z1, groutDark);
+    _floorQuad(m, x0, z0, x0 + inset, z0 + inset, groutDark, 0.002);
+    _floorQuad(m, x1 - inset, z0, x1, z0 + inset, groutDark, 0.002);
+    _floorQuad(m, x0, z1 - inset, x0 + inset, z1, groutDark, 0.002);
+    _floorQuad(m, x1 - inset, z1 - inset, x1, z1, groutDark, 0.002);
   });
 }
 
-void _floorParquet(_Mesh m, int base, double lo, double size, _Rand rng) {
+void _floorParquet(_Mesh m, int base, double lo, double size, _Rand rng,
+    bool Function(double, double, double, double) blocked) {
   const blockW = 0.06;
   const blockH = 0.18;
   const gap = 0.002;
@@ -347,21 +401,30 @@ void _floorParquet(_Mesh m, int base, double lo, double size, _Rand rng) {
     final offset = (row % 2 == 0) ? 0.0 : blockH / 2;
     for (var x = lo + offset; x < -lo - 1e-9; x += blockH + gap) {
       final x1 = math.min(x + blockH, -lo);
-      if (x1 > x + 1e-6 && z1 > z + 1e-6) {
+      if (x1 > x + 1e-6 && z1 > z + 1e-6 && !blocked(x, z, x1, z1)) {
         final even = ((x - lo) / (blockH + gap)).floor().isEven;
         final p = 1 + rng.range(-0.06, 0.06);
         _floorQuad(m, x, z, x1, z1, _tone(base, p));
         if (even) {
           final midZ = (z + z1) / 2;
-          _floorQuad(m, x, midZ - 0.001, x1, midZ + 0.001, _tone(base, 0.85));
+          _floorQuad(m, x, midZ - 0.001, x1, midZ + 0.001, _tone(base, 0.85),
+              0.002);
         } else {
           final midX = (x + x1) / 2;
-          _floorQuad(m, midX - 0.001, z, midX + 0.001, z1, _tone(base, 0.85));
+          _floorQuad(m, midX - 0.001, z, midX + 0.001, z1, _tone(base, 0.85),
+              0.002);
         }
       }
     }
     if (z1 < -lo - 0.01) {
-      _floorQuad(m, lo, z1 - gap, -lo, z1, darkJoint);
+      // Row joint segmented across the full width so cut cells (and the
+      // odd-row offset head) stay open.
+      for (var jx = lo; jx < -lo - 1e-9; jx += blockH + gap) {
+        final jx1 = math.min(jx + blockH + gap, -lo);
+        if (jx1 <= jx + 1e-6) break;
+        if (blocked(jx, z, jx1, z1)) continue;
+        _floorQuad(m, jx, z1 - gap, jx1, z1, darkJoint, 0.002);
+      }
     }
     row++;
   }
@@ -391,12 +454,16 @@ Uint8List generateWallGlb({
     WallFinishType.brick => _mix(_tone(base, 0.5), _kGrey, 0.45),
   };
   mesh.box(loX, 0, -halfD, -loX, heightM, halfD, underC);
-  const frontZ = halfD;
+  // Pattern floats 1 mm in front of the box face, detail quads 2 mm —
+  // coplanar layers z-fight and the finish flickers as the camera moves.
+  final frontZ = halfD + 0.001;
 
-  void wallQuad(double x0, double y0, double x1, double y1, int color) {
+  void wallQuad(double x0, double y0, double x1, double y1, int color,
+      [double? z]) {
     if (x1 <= x0 || y1 <= y0) return;
-    mesh.quad(_Vec3(x0, y0, frontZ), _Vec3(x1, y0, frontZ),
-        _Vec3(x1, y1, frontZ), _Vec3(x0, y1, frontZ),
+    final zz = z ?? frontZ;
+    mesh.quad(_Vec3(x0, y0, zz), _Vec3(x1, y0, zz),
+        _Vec3(x1, y1, zz), _Vec3(x0, y1, zz),
         const _Vec3(0, 0, 1), color);
   }
 
@@ -420,20 +487,22 @@ Uint8List generateWallGlb({
         if (x1 <= x + 1e-6) continue;
         final panelColor = _tone(base, 1 + rng.range(-0.08, 0.08));
         wallQuad(x + seam / 2, 0, x1 - seam / 2, heightM, panelColor);
-        wallQuad(x, 0, x + seam, heightM, darkSeam);
+        wallQuad(x, 0, x + seam, heightM, darkSeam, halfD + 0.002);
         final grainCount = (heightM / 0.04).floor();
         for (var g = 0; g < grainCount; g++) {
           final gy = g * 0.04 + rng.range(0.005, 0.015);
           if (gy + 0.002 < heightM) {
             final gc = g.isEven ? grainDark : grainLight;
-            wallQuad(x + seam / 2, gy, x1 - seam / 2, gy + 0.002, gc);
+            wallQuad(x + seam / 2, gy, x1 - seam / 2, gy + 0.002, gc,
+                halfD + 0.002);
           }
         }
         if (rng.nextDouble() < 0.2) {
           final ky = rng.range(0.3, heightM - 0.3);
           final kx = (x + x1) / 2;
           final kr = 0.02;
-          wallQuad(kx - kr, ky - kr, kx + kr, ky + kr, _tone(base, 0.7));
+          wallQuad(kx - kr, ky - kr, kx + kr, ky + kr, _tone(base, 0.7),
+              halfD + 0.002);
         }
       }
       break;
