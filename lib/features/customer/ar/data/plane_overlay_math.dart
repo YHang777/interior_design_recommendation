@@ -284,6 +284,26 @@ List<Vector3> polygonFromFlat(List<double> flat) {
   ];
 }
 
+// Inside any zone, or within [gapM] of an outline — adjacent ARCore floor
+// fragments rarely abut, and a footprint sample landing in the 5–10 cm
+// seam between two real floor pieces must not fail placement ("too much
+// fragment, can't place").
+bool _pointOnZones(Vector3 p, List<PlaneQuad> zones, {double gapM = 0.06}) {
+  var best2 = double.infinity;
+  for (final zone in zones) {
+    final pts = planeQuadCorners(zone);
+    if (pts.length < 3) continue;
+    final n = _polygonNormal(pts);
+    if (n != null && _pointInPolygon(p, pts, n)) return true;
+    final np = _nearestOnOutlineXZ(p, pts);
+    final dx = p.x - np.x;
+    final dz = p.z - np.z;
+    final d2 = dx * dx + dz * dz;
+    if (d2 < best2) best2 = d2;
+  }
+  return best2 <= gapM * gapM;
+}
+
 Vector3? _polygonNormal(List<Vector3> pts) {
   for (var i = 1; i + 1 < pts.length; i++) {
     final n = (pts[i] - pts[0]).cross(pts[i + 1] - pts[0]);
@@ -508,17 +528,7 @@ Vector3 pushIntoFloorZone({
       return point;
     }
   } else {
-    var onFloor = false;
-    for (final zone in floorZones) {
-      final pts = planeQuadCorners(zone);
-      if (pts.length < 3) continue;
-      final n = _polygonNormal(pts);
-      if (n != null && _pointInPolygon(candidate, pts, n)) {
-        onFloor = true;
-        break;
-      }
-    }
-    if (!onFloor) return point;
+    if (!_pointOnZones(candidate, floorZones)) return point;
     for (final m in masks) {
       final pts = planeQuadCorners(m);
       if (pts.length < 3) continue;
@@ -569,17 +579,7 @@ bool footprintFitsInZones({
           inflateM: -floorMarginM)
       : full;
   for (final s in inset) {
-    var onFloor = false;
-    for (final zone in floorZones) {
-      final pts = planeQuadCorners(zone);
-      if (pts.length < 3) continue;
-      final n = _polygonNormal(pts);
-      if (n != null && _pointInPolygon(s, pts, n)) {
-        onFloor = true;
-        break;
-      }
-    }
-    if (!onFloor) return false;
+    if (!_pointOnZones(s, floorZones)) return false;
   }
   for (final m in masks) {
     final pts = planeQuadCorners(m);

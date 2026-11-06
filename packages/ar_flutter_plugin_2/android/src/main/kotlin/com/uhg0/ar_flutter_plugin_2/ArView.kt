@@ -151,9 +151,10 @@ class ArView(
     private var lastAccumCloudTimestamp = -1L
     private var accumFrameCounter = 0
 
-    // onPlanesUpdate goes out every 2nd rendered frame (~30 Hz): the Dart
-    // overlay rebuild is capped at 33 ms anyway, so per-frame sends only
-    // doubled codec/gc pressure for no visible gain.
+    // onPlanesUpdate goes out every 3rd rendered frame (10–20 Hz): the
+    // Dart overlay rebuild is capped at 66 ms anyway, and decoding the
+    // full plane payload at 30 Hz was measurable codec/gc pressure for
+    // no visible gain.
     private var planesFrameCounter = 0
     private var firstFrameTraced = false
     private var frameErrorTraced = false
@@ -950,12 +951,12 @@ class ArView(
 
                                 // Stream the snapshot with THIS frame's render
                                 // matrices (planes and pose stay same-frame, so
-                                // the overlay never trails), every 2nd rendered
+                                // the overlay never trails), every 3rd rendered
                                 // frame — the Dart overlay rebuild is capped at
-                                // 30 Hz anyway, so per-frame sends only doubled
+                                // 66 ms anyway, so faster sends only burn
                                 // codec/gc pressure for no visible gain.
                                 planesFrameCounter++
-                                if (planesFrameCounter % 2 == 0) {
+                                if (planesFrameCounter % 3 == 0) {
                                     // freshMs = time since ARCore last genuinely
                                     // updated this plane; stable ones would
                                     // otherwise look fresh forever.

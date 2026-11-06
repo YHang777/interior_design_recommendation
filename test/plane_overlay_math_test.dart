@@ -1231,6 +1231,38 @@ void main() {
           reason: 'never trade a bad landing for one off the detected floor');
     });
 
+    test('a landing 4 cm past the zone edge is still accepted', () {
+      // Push from inside the object lands at x = 0.04 while the floor
+      // outline ends at x = 0 — cm-scale edge noise must not refuse it.
+      final out = pushIntoFloorZone(
+        point: Vector3(0.4, 0, 0),
+        masks: [
+          PlaneQuad(
+            center: Vector3(0.84, 0.75, 0),
+            yaw: 0,
+            extentX: 1,
+            extentZ: 1,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        floorZones: [
+          PlaneQuad(
+            center: Vector3(-1.5, 0, 0),
+            yaw: 0,
+            extentX: 3,
+            extentZ: 6,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        cameraPos: camera,
+        clearanceM: 0.3,
+      );
+      expect(out.x, closeTo(0.04, 1e-9));
+      expect(out.z, closeTo(0, 1e-9));
+    });
+
     test('no masks or no floor zones leaves the point alone', () {
       final point = Vector3(0.1, 0, 0);
       expect(
@@ -1396,6 +1428,42 @@ void main() {
           floorZones: [floor(6, 6)],
         ),
         isTrue,
+      );
+    });
+
+    test('a 5 cm seam between floor fragments does not block placement', () {
+      // ARCore splits one floor into fragments with cm-scale gaps; a
+      // sample 2.5 cm past an outline still counts as floor.
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0.025, 0, 0),
+          yaw: 0,
+          widthM: 1,
+          depthM: 1,
+          floorZones: [
+            floor(3, 6, at: Vector3(-1.5, 0, 0)),
+            floor(2.95, 6, at: Vector3(1.525, 0, 0)),
+          ],
+        ),
+        isTrue,
+      );
+    });
+
+    test('a real hole in the floor still blocks placement', () {
+      // Fragments 1 m apart: samples mid-hole sit 0.5 m from any outline,
+      // far beyond the seam tolerance.
+      expect(
+        footprintFitsInZones(
+          center: Vector3.zero(),
+          yaw: 0,
+          widthM: 1,
+          depthM: 1,
+          floorZones: [
+            floor(2.5, 6, at: Vector3(-1.75, 0, 0)),
+            floor(2.5, 6, at: Vector3(1.75, 0, 0)),
+          ],
+        ),
+        isFalse,
       );
     });
   });

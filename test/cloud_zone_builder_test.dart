@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math_64.dart';
 
 import 'package:interior_design_recommendation/features/customer/ar/data/cloud_zone_builder.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/plane_overlay_math.dart';
@@ -11,6 +12,36 @@ List<double> _flat(List<List<double>> pts) =>
 
 bool _hasHullCorner(PlaneQuad q, double x, double z) => q.polygon.any(
     (v) => (v.x - x).abs() < 1e-9 && (v.z - z).abs() < 1e-9);
+
+PlaneQuad _maskQuad({double x = 0, double z = 1, double size = 0.3}) =>
+    PlaneQuad(
+      center: Vector3(x, 1.0, z),
+      yaw: 0,
+      extentX: size,
+      extentZ: size,
+      vertical: false,
+      kind: PlaneQuadKind.floor,
+    );
+
+ARPlaneInfo _wall({
+  int id = 900001,
+  double cx = 0,
+  double cy = 1,
+  double cz = 2,
+  double ex = 1.4,
+  double ez = 1.2,
+  double yaw = 0,
+}) =>
+    ARPlaneInfo(
+      id: id,
+      planeType: 2,
+      centerX: cx,
+      centerY: cy,
+      centerZ: cz,
+      extentX: ex,
+      extentZ: ez,
+      yaw: yaw,
+    );
 
 List<List<double>> _grid({
   required List<double> xs,
@@ -275,6 +306,51 @@ void main() {
         reason: 'the highest-ix cluster is the one capped off',
       );
     });
+
+    test('open-floor noise cell (5 elevated + 200 floor) is rejected', () {
+      final pts = <double>[];
+      for (var i = 0; i < 5; i++) {
+        pts.addAll([0.1, 0.30, 0.1]);
+      }
+      for (var i = 0; i < 200; i++) {
+        pts.addAll([0.1, 0.0, 0.1]);
+      }
+      expect(obstacleMaskQuads(points: pts, refY: 0), isEmpty,
+          reason: 'floor-dominant evidence is a noise tail, not an object');
+    });
+
+    test('object cell (50 elevated, 0 floor) is kept', () {
+      final pts = <double>[];
+      for (var i = 0; i < 50; i++) {
+        pts.addAll([0.1, 0.5, 0.1]);
+      }
+      expect(obstacleMaskQuads(points: pts, refY: 0), hasLength(1));
+    });
+
+    test('mixed edge cell (50 elevated, 40 floor) is kept', () {
+      // 40 ≤ 3×50, so the floor is not dominant — an object edge with some
+      // floor visible underneath still masks.
+      final pts = <double>[];
+      for (var i = 0; i < 50; i++) {
+        pts.addAll([0.1, 0.5, 0.1]);
+      }
+      for (var i = 0; i < 40; i++) {
+        pts.addAll([0.1, 0.05, 0.1]);
+      }
+      expect(obstacleMaskQuads(points: pts, refY: 0), hasLength(1));
+    });
+
+    test('floor-evidence points do not count toward the dense ≥3 gate', () {
+      final pts = <double>[];
+      for (var i = 0; i < 2; i++) {
+        pts.addAll([0.1, 0.5, 0.1]);
+      }
+      for (var i = 0; i < 100; i++) {
+        pts.addAll([0.1, 0.0, 0.1]);
+      }
+      expect(obstacleMaskQuads(points: pts, refY: 0), isEmpty,
+          reason: 'floor points must never make a cell look like an object');
+    });
   });
 
   group('floorProbeCandidate', () {
@@ -393,6 +469,199 @@ void main() {
         fitWallPlanes(points: _flat(wallA), refY: 0, maxPlanes: 0),
         isEmpty,
       );
+    });
+  });
+
+  group('MaskTrack temporal stabilization', () {
+    test('first sighting hidden, second tick emitted', () {
+      final q = _maskQuad();
+      var tracks = updateMaskTracks(tracks: const [], curr: [q]);
+      expect(emitMaskTracks(tracks), isEmpty,
+          reason: 'a real object is seen two ticks running');
+      tracks = updateMaskTracks(tracks: tracks, curr: [q]);
+      expect(emitMaskTracks(tracks), hasLength(1));
+    });
+
+    test('vanished cluster emitted once (hold) then dropped', () {
+      final q = _maskQuad();
+      var tracks = updateMaskTracks(tracks: const [], curr: [q]);
+      tracks = updateMaskTracks(tracks: tracks, curr: [q]);
+      expect(emitMaskTracks(tracks), hasLength(1));
+
+      tracks = updateMaskTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 1);
+      expect(emitMaskTracks(tracks), hasLength(1),
+          reason: 'one missed tick keeps the held geometry alive');
+
+      tracks = updateMaskTracks(tracks: tracks, curr: const []);
+      expect(tracks, isEmpty, reason: 'holds > maxHold drops the track');
+      expect(emitMaskTracks(tracks), isEmpty);
+    });
+
+    test('alternating appear/disappear noise NEVER emits', () {
+      // Depth-noise cells flicker AND jump — each reappearance lands in a
+      // fresh spot beyond matchDist, so no track ever reaches streak 2.
+      var tracks = const <MaskTrack>[];
+      for (var i = 0; i < 6; i++) {
+        tracks =
+            updateMaskTracks(tracks: tracks, curr: [_maskQuad(x: i * 1.5)]);
+        expect(emitMaskTracks(tracks), isEmpty, reason: 'appearance $i');
+        tracks = updateMaskTracks(tracks: tracks, curr: const []);
+        expect(emitMaskTracks(tracks), isEmpty, reason: 'gap after $i');
+      }
+    });
+
+    test('id inherited across jitter within matchDist', () {
+      final q0 = _maskQuad(x: 0, z: 1);
+      final q1 = _maskQuad(x: 0.2, z: 1);
+      var tracks = updateMaskTracks(tracks: const [], curr: [q0]);
+      final id0 = tracks.single.id;
+      tracks = updateMaskTracks(tracks: tracks, curr: [q1]);
+      expect(tracks.single.id, id0);
+      expect(tracks.single.streak, 2);
+      expect(emitMaskTracks(tracks), hasLength(1));
+    });
+
+    test('cap by area at maxEmit', () {
+      final quads = [
+        for (var i = 0; i < 16; i++)
+          _maskQuad(x: i * 2.0, z: 1, size: 0.3 + i * 0.1),
+      ];
+      var tracks = updateMaskTracks(tracks: const [], curr: quads);
+      tracks = updateMaskTracks(tracks: tracks, curr: quads);
+      final emitted = emitMaskTracks(tracks);
+      expect(emitted, hasLength(14));
+      expect(emitted.first.extentX, closeTo(0.3 + 15 * 0.1, 1e-9),
+          reason: 'biggest area first');
+      expect(emitted.last.extentX, closeTo(0.3 + 2 * 0.1, 1e-9),
+          reason: 'the two smallest clusters are capped off');
+      expect(
+        emitted.any(
+            (q) => (q.extentX - 0.3).abs() < 1e-9 || (q.extentX - 0.4).abs() < 1e-9),
+        isFalse,
+      );
+    });
+
+    test('identical input → identical output, inputs never mutated', () {
+      final quads = [_maskQuad(x: 0), _maskQuad(x: 3, size: 0.9)];
+      var a = updateMaskTracks(tracks: const [], curr: quads);
+      a = updateMaskTracks(tracks: a, curr: quads);
+      final snapshot = List<MaskTrack>.of(a);
+      updateMaskTracks(tracks: a, curr: const []);
+      expect(a.length, snapshot.length);
+      expect(identical(a[0], snapshot[0]), isTrue,
+          reason: 'updateMaskTracks must not mutate its input list');
+
+      var b = updateMaskTracks(tracks: const [], curr: quads);
+      b = updateMaskTracks(tracks: b, curr: quads);
+      expect([for (final t in a) t.id], [for (final t in b) t.id]);
+      expect([for (final t in a) t.streak], [for (final t in b) t.streak]);
+      final ea = emitMaskTracks(a);
+      final eb = emitMaskTracks(b);
+      expect([for (final q in ea) q.center.x],
+          [for (final q in eb) q.center.x]);
+    });
+  });
+
+  group('WallTrack temporal stabilization', () {
+    test('two consecutive fits → one track, same id, damped geometry', () {
+      final fit0 = _wall(id: 900001, cx: 0);
+      final fit1 = _wall(id: 900001, cx: 0.4);
+      var tracks = updateWallTracks(tracks: const [], curr: [fit0]);
+      expect(tracks, hasLength(1));
+      expect(tracks.single.streak, 1);
+
+      tracks = updateWallTracks(tracks: tracks, curr: [fit1]);
+      expect(tracks, hasLength(1));
+      expect(tracks.single.streak, 2);
+      expect(tracks.single.plane.id, 900001);
+      final jump = fit1.centerX - fit0.centerX;
+      final moved = tracks.single.plane.centerX - fit0.centerX;
+      expect(moved, closeTo(0.35 * jump, 1e-9),
+          reason: 'geometry blends toward the new fit at α 0.35');
+      expect(moved.abs(), lessThanOrEqualTo(0.35 * jump.abs() + 1e-12));
+      expect(emitWallTracks(tracks), hasLength(1));
+    });
+
+    test('held wall keeps emitting during misses (holds ≤ maxHold) then '
+        'drops', () {
+      final fit = _wall(id: 900001, cx: 0);
+      var tracks = updateWallTracks(tracks: const [], curr: [fit]);
+      tracks = updateWallTracks(tracks: tracks, curr: [fit]);
+      expect(emitWallTracks(tracks), hasLength(1));
+
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 1);
+      expect(emitWallTracks(tracks), hasLength(1),
+          reason: 'held tracks keep their old streak');
+
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 2);
+      expect(emitWallTracks(tracks), hasLength(1));
+
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks, isEmpty, reason: 'holds > maxHold (2) drops the track');
+      expect(emitWallTracks(tracks), isEmpty);
+    });
+
+    test('a fit 0.6 m away (unmatched) stays hidden until its second tick',
+        () {
+      var tracks =
+          updateWallTracks(tracks: const [], curr: [_wall(id: 900001, cx: 0)]);
+      final far = _wall(id: 900001, cx: 0.6);
+      tracks = updateWallTracks(tracks: tracks, curr: [far]);
+      expect(tracks, hasLength(2), reason: '0.6 m > matchDistM starts a new '
+          'track while the old one holds');
+      expect(emitWallTracks(tracks), isEmpty);
+
+      tracks = updateWallTracks(tracks: tracks, curr: [far]);
+      final emitted = emitWallTracks(tracks);
+      expect(emitted, hasLength(1));
+      expect(emitted.single.centerX, closeTo(0.6, 1e-9));
+    });
+
+    test('yaw beyond maxYawDelta starts a new track', () {
+      final a = _wall(id: 900001, cx: 0, yaw: 0);
+      final b = _wall(id: 900002, cx: 0, yaw: 0.5);
+      var tracks = updateWallTracks(tracks: const [], curr: [a]);
+      tracks = updateWallTracks(tracks: tracks, curr: [b]);
+      expect(tracks, hasLength(2), reason: 'yaw jump breaks the match');
+      expect(emitWallTracks(tracks), isEmpty,
+          reason: 'both tracks are still at streak 1');
+    });
+
+    test('id collision on a held wall is reminted', () {
+      var tracks =
+          updateWallTracks(tracks: const [], curr: [_wall(id: 900001, cx: 0)]);
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 1);
+
+      // RANSAC ids are positional: a different wall can re-fit under the
+      // held wall's id.
+      tracks = updateWallTracks(
+          tracks: tracks, curr: [_wall(id: 900001, cx: 3)]);
+      expect(tracks, hasLength(2));
+      final ids = [for (final t in tracks) t.plane.id];
+      expect(ids.toSet(), hasLength(2), reason: 'the held id must be kept '
+          'by the held track');
+      final fresh = tracks.firstWhere((t) => t.plane.centerX == 3);
+      expect(fresh.streak, 1);
+      expect(fresh.plane.id, isNot(900001));
+      expect(fresh.plane.id, greaterThan(900001));
+    });
+
+    test('identical input → identical output', () {
+      final fits = [_wall(id: 900001, cx: 0), _wall(id: 900002, cx: 5)];
+      var a = updateWallTracks(tracks: const [], curr: fits);
+      a = updateWallTracks(tracks: a, curr: fits);
+      var b = updateWallTracks(tracks: const [], curr: fits);
+      b = updateWallTracks(tracks: b, curr: fits);
+      expect([for (final t in a) t.plane.toJson()],
+          [for (final t in b) t.plane.toJson()]);
+      expect([for (final t in a) (t.streak, t.holds)],
+          [for (final t in b) (t.streak, t.holds)]);
+      expect([for (final p in emitWallTracks(a)) p.toJson()],
+          [for (final p in emitWallTracks(b)) p.toJson()]);
     });
   });
 }

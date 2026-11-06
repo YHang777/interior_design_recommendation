@@ -238,6 +238,8 @@ class SavedDesignsScreen extends ConsumerWidget {
                 onSelected: (value) async {
                   if (value == 'edit') {
                     context.push('/design-editor', extra: design);
+                  } else if (value == 'walk') {
+                    context.push('/walkthrough', extra: design);
                   } else if (value == 'ar') {
                     context.push(
                       '/ar-viewer',
@@ -279,6 +281,16 @@ class SavedDesignsScreen extends ConsumerWidget {
                               size: 18, color: AppColors.textSecondary),
                           const SizedBox(width: 10),
                           const Text('Edit'),
+                        ],
+                      )),
+                  PopupMenuItem(
+                      value: 'walk',
+                      child: Row(
+                        children: [
+                          Icon(Icons.directions_walk,
+                              size: 18, color: AppColors.textSecondary),
+                          const SizedBox(width: 10),
+                          const Text('Walk Through'),
                         ],
                       )),
                   PopupMenuItem(

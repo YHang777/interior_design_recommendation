@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../../core/utils/boot_trace.dart';
 import '../../data/plane_overlay_math.dart';
 
 // Class-colored placement zones projected from the plane memory — true
@@ -42,8 +43,13 @@ class _PlaneOverlayPainter extends CustomPainter {
 
   final List<PlaneQuad> masks;
 
+  // Path-boolean painting over 12 ms drains frames even on flagships —
+  // log it (once per 2 s across all painter instances) so traces show it.
+  static DateTime? _lastSlowPaintAt;
+
   @override
   void paint(Canvas canvas, Size size) {
+    final slowWatch = Stopwatch()..start();
     final floors = <List<Offset>>[];
     final walls = <List<Offset>>[];
     final holes = <List<Offset>>[];
@@ -114,6 +120,16 @@ class _PlaneOverlayPainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.round
           ..color = const Color(0xCC42A5F5),
       );
+    }
+    final ms = slowWatch.elapsedMilliseconds;
+    if (ms >= 12) {
+      final now = DateTime.now();
+      final last = _lastSlowPaintAt;
+      if (last == null || now.difference(last) > const Duration(seconds: 2)) {
+        _lastSlowPaintAt = now;
+        BootTrace.log('ar-screen: slow paint ${ms}ms '
+            'quads=${quads.length} masks=${masks.length}');
+      }
     }
   }
 

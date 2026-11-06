@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/product.dart';
+import '../../models/room_design.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -36,6 +37,7 @@ import '../../features/customer/marketplace/presentation/screens/wishlist_screen
 import '../../features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/customer/ar/data/furniture_model_library.dart';
 import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
+import '../../features/customer/walkthrough/presentation/walkthrough_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
 import '../../shared/screens/order_invoice_screen.dart';
 import '../../shared/screens/order_receipt_screen.dart';
@@ -122,6 +124,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: RouteNames.homeownerDesignEditor,
         pageBuilder: (_, state) => _buildPage(
           RoomScannerScreen(existingDesign: state.extra as dynamic),
+        ),
+      ),
+
+      // ── Walkthrough (2D walk of a plan; extra: RoomDesign?) ──
+      GoRoute(
+        path: '/walkthrough',
+        name: RouteNames.homeownerWalkthrough,
+        pageBuilder: (_, state) => _buildPage(
+          WalkthroughScreen(design: state.extra as RoomDesign?),
         ),
       ),
 

@@ -24,6 +24,7 @@ class RouteNames {
   static const homeownerOrderDetail = 'homeowner-order-detail';
   static const homeownerWishlist = 'homeowner-wishlist';
   static const homeownerDesignEditor = 'homeowner-design-editor';
+  static const homeownerWalkthrough = 'homeowner-walkthrough';
   static const arViewer = 'ar-viewer';
   static const designReport = 'design-report';
 

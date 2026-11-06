@@ -267,6 +267,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // tick, merged into every overlay build and into the memory ingest.
   List<PlaneQuad> _cloudMasks = const [];
   List<ARPlaneInfo> _syntheticWalls = const [];
+  // Temporal tracks: 1 Hz depth masks/ RANSAC fits flicker tick to tick —
+  // a real cluster is seen twice running, a noise cell never is, and a
+  // briefly-missing wall holds instead of teleporting the overlay.
+  List<MaskTrack> _maskTracks = const [];
+  List<WallTrack> _wallTracks = const [];
+  // ARCore drops planes from the payload on movement beats — once seen, a
+  // plane keeps its geometry for the whole page (this map dies with the
+  // State), so the detected plane holds until the page closes. Live payload
+  // entries always overwrite, so tracking updates win over held geometry.
+  final _payloadPlaneHold = <int, ({ARPlaneInfo plane, DateTime at})>{};
   final _overlayPolyEma = <int, List<Vector3>>{};
 
   // Per-id EMA of the reported center height — the polygon idealizer
@@ -278,15 +288,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   int _overlayEpoch = 0;
 
-  // Native sends planes+matrices every rendered frame; rebuild the screen
-  // at most ~30 Hz so the fresh pose is never older than one window (the
-  // old 300 ms timer is what made the overlay float).
-  static const _overlayMinInterval = Duration(milliseconds: 33);
+  // Native sends planes+matrices every 3rd rendered frame; rebuild at most
+  // every 66 ms (15 Hz). Path-boolean painting at 30 Hz was a constant
+  // frame drain even on flagships — a translucent tint follows fine at 15.
+  static const _overlayMinInterval = Duration(milliseconds: 66);
 
   DateTime? _overlayLastBuildAt;
 
   // Last logged overlay shape — the rebuild log only fires on change.
   String? _overlayStateKey;
+
+  // Slow-path timing: rebuild/paint over 12 ms logged at most every 2 s,
+  // so device traces show WHERE frames go when the user reports lag.
+  DateTime? _lastSlowRebuildAt;
 
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
@@ -631,13 +645,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                 for (final p in [..._livePlanes, ..._syntheticWalls])
                   if (p.planeType == 2) p.id: p,
               }.values.toList();
-              _cloudMasks = obstacleMaskQuads(
+              final rawMasks = obstacleMaskQuads(
                   points: pts, refY: fy, walls: wallPlanes);
+              _maskTracks =
+                  updateMaskTracks(tracks: _maskTracks, curr: rawMasks);
+              _cloudMasks = emitMaskTracks(_maskTracks);
               final probe = floorProbeCandidate(points: pts, refY: fy);
               if (probe != null) {
                 _planeMemory.noteFloorYCandidate(probe);
               }
-              _syntheticWalls = fitWallPlanes(points: pts, refY: fy);
+              final fits = fitWallPlanes(points: pts, refY: fy);
+              _wallTracks =
+                  updateWallTracks(tracks: _wallTracks, curr: fits);
+              _syntheticWalls = emitWallTracks(_wallTracks);
             }
           }
         }
@@ -673,9 +693,20 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // Rebuilds straight from the planes event — geometry and viewProjection
   // come from the same frame, so the overlay stops lagging behind the camera.
   void _updatePlaneOverlay(List<ARPlaneInfo> planes, Matrix4? vp) {
-    // Synthetic cloud walls ride every rebuild — the async and direct
-    // paths must both see them, not just the raw planes event.
-    final merged = [...planes, ..._syntheticWalls];
+    final now = DateTime.now();
+    for (final p in planes) {
+      _payloadPlaneHold[p.id] = (plane: p, at: now);
+    }
+    // Held entries are never expired: a plane absent from the payload keeps
+    // its last geometry until this page closes, and the live payload always
+    // overwrites — so tracking updates win over held geometry. Synthetic
+    // cloud walls ride every rebuild (async and direct paths alike).
+    final merged = [
+      ...planes,
+      for (final e in _payloadPlaneHold.values)
+        if (!planes.any((p) => p.id == e.plane.id)) e.plane,
+      ..._syntheticWalls,
+    ];
     if (vp == null) {
       // Stale native side still sends the bare list — fetch matrices the
       // old way so the overlay keeps tracking during the transition.
@@ -698,6 +729,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   void _rebuildPlaneOverlay(List<ARPlaneInfo> planes, Matrix4 vp) {
     _overlayEpoch++;
     _overlayLastBuildAt = DateTime.now();
+    final slowWatch = Stopwatch()..start();
     final quads = <PlaneQuad>[];
     final masks = <PlaneQuad>[];
     final seenIds = <int>{};
@@ -806,6 +838,17 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     if (key != _overlayStateKey) {
       _overlayStateKey = key;
       BootTrace.log('ar-screen: overlay $key');
+    }
+    final ms = slowWatch.elapsedMilliseconds;
+    if (ms >= 12) {
+      final now = DateTime.now();
+      final last = _lastSlowRebuildAt;
+      if (last == null || now.difference(last) > const Duration(seconds: 2)) {
+        _lastSlowRebuildAt = now;
+        BootTrace.log(
+            'ar-screen: slow rebuild ${ms}ms quads=${quads.length} '
+            'masks=${masks.length}');
+      }
     }
   }
 

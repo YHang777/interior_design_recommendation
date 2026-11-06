@@ -21,23 +21,31 @@ List<PlaneQuad> obstacleMaskQuads({
 }) {
   if (cellM <= 0) return const [];
   final cells = <String, _Cell>{};
+  final floorEvidence = <String, int>{};
   for (var i = 0; i + 2 < points.length; i += 3) {
     final x = points[i];
     final y = points[i + 1];
     final z = points[i + 2];
     if (!x.isFinite || !y.isFinite || !z.isFinite) continue;
     final dy = y - refY;
+    final ix = (x / cellM).floor();
+    final iz = (z / cellM).floor();
+    final key = '$ix:$iz';
+    // Depth noise puts a handful of points 0.25–0.35 m above the floor on
+    // open floor; those cells must be recognisable as floor-with-a-tail
+    // below, or they punch phantom holes and fragment the placement area.
+    if (dy > -0.10 && dy <= 0.15) {
+      floorEvidence[key] = (floorEvidence[key] ?? 0) + 1;
+    }
     // Obstacle band only: floor-band points and anything at/above2.2 m
     // (door frames, ceilings) never mask the floor.
     if (dy <= 0.25 || dy >= 2.2) continue;
-    final ix = (x / cellM).floor();
-    final iz = (z / cellM).floor();
-    final cell = cells.putIfAbsent('$ix:$iz', () => _Cell(ix, iz));
+    final cell = cells.putIfAbsent(key, () => _Cell(ix, iz));
     cell.add(y);
   }
   final dense = <_Cell>[
     for (final c in cells.values)
-      if (c.count >= 3) c,
+      if (c.count >= 3 && !_dominatedByFloor(c, floorEvidence)) c,
   ];
   if (dense.isEmpty) return const [];
   final clusters = <_MaskCluster>[];
@@ -55,6 +63,15 @@ List<PlaneQuad> obstacleMaskQuads({
   return [
     for (final c in clusters.take(14)) _clusterToQuad(c, cellM),
   ];
+}
+
+// A cell whose floor evidence is both absolute (≥3 points) and dominant
+// (more than 3× the elevated count) is open floor with a noise tail, not
+// an object — object cells (seat tops) have hundreds of elevated points
+// and little or no floor evidence under them.
+bool _dominatedByFloor(_Cell c, Map<String, int> floorEvidence) {
+  final floorCount = floorEvidence['${c.ix}:${c.iz}'] ?? 0;
+  return floorCount >= 3 && floorCount > c.count * 3;
 }
 
 // 8-connected components over the dense cells: diagonal neighbours merge,
@@ -426,4 +443,234 @@ class _MaskCluster {
   final int minIx;
 
   final int minIz;
+}
+
+// A real object is seen two ticks running; a noise cell flickers once and
+// must never punch a hole — the screen owns these track lists as state and
+// feeds them through update/emit every tick. Pure functions: inputs are
+// never mutated.
+class MaskTrack {
+  MaskTrack(
+      {required this.id,
+      required this.quad,
+      required this.streak,
+      this.holds = 0});
+
+  final int id;
+
+  // Last emitted geometry for this cluster.
+  final PlaneQuad quad;
+
+  // Consecutive ticks seen.
+  final int streak;
+
+  // Consecutive ticks missed while held.
+  final int holds;
+}
+
+List<MaskTrack> updateMaskTracks({
+  required List<MaskTrack> tracks,
+  required List<PlaneQuad> curr,
+  double matchDistM = 0.3,
+  int maxHold = 1,
+}) {
+  final matched = List<bool>.filled(tracks.length, false);
+  final out = <MaskTrack>[];
+  var nextId = 0;
+  for (final t in tracks) {
+    if (t.id >= nextId) nextId = t.id + 1;
+  }
+  for (final q in curr) {
+    var bestIdx = -1;
+    var bestDist = double.infinity;
+    for (var i = 0; i < tracks.length; i++) {
+      if (matched[i]) continue;
+      final t = tracks[i];
+      final dx = t.quad.center.x - q.center.x;
+      final dz = t.quad.center.z - q.center.z;
+      final d = math.sqrt(dx * dx + dz * dz);
+      if (d > matchDistM) continue;
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      matched[bestIdx] = true;
+      final t = tracks[bestIdx];
+      out.add(MaskTrack(id: t.id, quad: q, streak: t.streak + 1, holds: 0));
+    } else {
+      out.add(MaskTrack(id: nextId++, quad: q, streak: 1, holds: 0));
+    }
+  }
+  for (var i = 0; i < tracks.length; i++) {
+    if (matched[i]) continue;
+    final t = tracks[i];
+    final holds = t.holds + 1;
+    if (holds > maxHold) continue;
+    out.add(MaskTrack(id: t.id, quad: t.quad, streak: t.streak, holds: holds));
+  }
+  return out;
+}
+
+List<PlaneQuad> emitMaskTracks(List<MaskTrack> tracks,
+    {int emitStreak = 2, int maxEmit = 14}) {
+  final kept = [
+    for (final t in tracks)
+      if (t.streak >= emitStreak) t,
+  ];
+  kept.sort((a, b) {
+    final areaA = a.quad.extentX * a.quad.extentZ;
+    final areaB = b.quad.extentX * b.quad.extentZ;
+    if (areaA != areaB) return areaB.compareTo(areaA);
+    final cx = a.quad.center.x.compareTo(b.quad.center.x);
+    if (cx != 0) return cx;
+    return a.quad.center.z.compareTo(b.quad.center.z);
+  });
+  return [for (final t in kept.take(maxEmit)) t.quad];
+}
+
+// RANSAC re-fits teleport every tick; tracks keep one stable wall id for
+// memory ingest and smooth slow growth (α 0.35) while damping jitter.
+// Same pure-function contract as the mask tracks — the screen keeps the
+// list as state.
+class WallTrack {
+  WallTrack({required this.plane, required this.streak, this.holds = 0});
+
+  final ARPlaneInfo plane;
+
+  final int streak;
+
+  final int holds;
+}
+
+List<WallTrack> updateWallTracks({
+  required List<WallTrack> tracks,
+  required List<ARPlaneInfo> curr,
+  double matchDistM = 0.5,
+  double maxYawDelta = 0.35,
+  int maxHold = 2,
+}) {
+  final matched = List<bool>.filled(tracks.length, false);
+  final matchOf = List<int>.filled(curr.length, -1);
+  for (var q = 0; q < curr.length; q++) {
+    final p = curr[q];
+    var bestIdx = -1;
+    var bestDist = double.infinity;
+    for (var i = 0; i < tracks.length; i++) {
+      if (matched[i]) continue;
+      final t = tracks[i];
+      final dx = t.plane.centerX - p.centerX;
+      final dz = t.plane.centerZ - p.centerZ;
+      final d = math.sqrt(dx * dx + dz * dz);
+      if (d > matchDistM) continue;
+      if (_wrapPi(t.plane.yaw - p.yaw).abs() > maxYawDelta) continue;
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      matched[bestIdx] = true;
+      matchOf[q] = bestIdx;
+    }
+  }
+  // Ids that survive into the output from existing tracks: matched ones
+  // (inherited) plus held ones that won't be dropped this tick.
+  final usedIds = <int>{};
+  var maxId = -1;
+  for (var i = 0; i < tracks.length; i++) {
+    final id = tracks[i].plane.id;
+    if (id > maxId) maxId = id;
+    if (matched[i] || tracks[i].holds + 1 <= maxHold) usedIds.add(id);
+  }
+  final out = <WallTrack>[];
+  for (var q = 0; q < curr.length; q++) {
+    final p = curr[q];
+    final mi = matchOf[q];
+    if (mi >= 0) {
+      out.add(WallTrack(
+        plane: _blendWall(tracks[mi].plane, p),
+        streak: tracks[mi].streak + 1,
+        holds: 0,
+      ));
+      continue;
+    }
+    var id = p.id;
+    if (usedIds.contains(id)) {
+      id = ++maxId;
+    } else if (id > maxId) {
+      maxId = id;
+    }
+    usedIds.add(id);
+    out.add(WallTrack(
+      plane: id == p.id ? p : _withId(p, id),
+      streak: 1,
+      holds: 0,
+    ));
+  }
+  for (var i = 0; i < tracks.length; i++) {
+    if (matched[i]) continue;
+    final t = tracks[i];
+    final holds = t.holds + 1;
+    if (holds > maxHold) continue;
+    out.add(WallTrack(plane: t.plane, streak: t.streak, holds: holds));
+  }
+  return out;
+}
+
+List<ARPlaneInfo> emitWallTracks(List<WallTrack> tracks,
+    {int emitStreak = 2, int maxEmit = 3}) {
+  final kept = [
+    for (final t in tracks)
+      if (t.streak >= emitStreak) t,
+  ];
+  kept.sort((a, b) {
+    final s = b.streak.compareTo(a.streak);
+    if (s != 0) return s;
+    return b.plane.extentX.compareTo(a.plane.extentX);
+  });
+  return [for (final t in kept.take(maxEmit)) t.plane];
+}
+
+// Geometry glides toward the fresh fit at α 0.35 so a re-fit's jump is
+// damped; the id never changes (memory ingest keys on it).
+ARPlaneInfo _blendWall(ARPlaneInfo old, ARPlaneInfo fresh) {
+  const a = 0.35;
+  return ARPlaneInfo(
+    id: old.id,
+    planeType: fresh.planeType,
+    centerX: old.centerX + (fresh.centerX - old.centerX) * a,
+    centerY: old.centerY + (fresh.centerY - old.centerY) * a,
+    centerZ: old.centerZ + (fresh.centerZ - old.centerZ) * a,
+    extentX: old.extentX + (fresh.extentX - old.extentX) * a,
+    extentZ: old.extentZ + (fresh.extentZ - old.extentZ) * a,
+    yaw: old.yaw + _wrapPi(fresh.yaw - old.yaw) * a,
+    polygon: fresh.polygon,
+    fresh: fresh.fresh,
+    tracking: fresh.tracking,
+    subsumed: fresh.subsumed,
+  );
+}
+
+ARPlaneInfo _withId(ARPlaneInfo p, int id) => ARPlaneInfo(
+      id: id,
+      planeType: p.planeType,
+      centerX: p.centerX,
+      centerY: p.centerY,
+      centerZ: p.centerZ,
+      extentX: p.extentX,
+      extentZ: p.extentZ,
+      yaw: p.yaw,
+      polygon: p.polygon,
+      fresh: p.fresh,
+      tracking: p.tracking,
+      subsumed: p.subsumed,
+    );
+
+double _wrapPi(double angle) {
+  var a = angle % (2 * math.pi);
+  if (a > math.pi) a -= 2 * math.pi;
+  if (a < -math.pi) a += 2 * math.pi;
+  return a;
 }

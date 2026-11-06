@@ -488,12 +488,22 @@ void main() {
       expect(m.floorY, closeTo(0.75, 1e-9));
       expect(m.classOf(1), PlaneClass.floor);
 
-      // The probe finds the real floor below → same α 0.85 downward
-      // correction the plane path uses.
+      // The probe finds the real floor below → ten agreeing readings
+      // accept with the same α 0.85 downward correction the plane path uses.
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9),
+          reason: 'nine agreeing readings must not move floorY');
       m.noteFloorYCandidate(0.0);
       expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
-      // The next 1 Hz tick converges and the two agreeing reclassifications
-      // flip the table off the floor class.
+      // The next ten agreeing 1 Hz ticks converge and the two agreeing
+      // reclassifications flip the table off the floor class.
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9),
+          reason: 'the streak restarts after an acceptance');
       m.noteFloorYCandidate(0.0);
       expect(m.floorY, lessThan(0.02));
       expect(m.classOf(1), PlaneClass.elevatedSurface,
@@ -535,37 +545,171 @@ void main() {
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
       expect(m.floorY, closeTo(0.75, 1e-9));
 
-      m.noteFloorYCandidate(0.0);
-      m.noteFloorYCandidate(0.0);
+      // Ten agreeing readings accept, ten more converge — the streak
+      // gate restarts after every acceptance.
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
       expect(m.floorY, lessThan(0.02));
       expect(m.classOf(1), PlaneClass.elevatedSurface);
 
-      // The wrong plane is the establishable one — without the probe hold
-      // its ingest pulls floorY back up within a frame or two and the
-      // refocus zone flip vanishes.
+      // The wrong plane is the establishable one — after a probe correction
+      // its ingest must never pull floorY back up or the refocus zone flip
+      // vanishes.
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
       expect(m.floorY, lessThan(0.15),
-          reason: 'a probe within the hold window outranks the plane path');
+          reason: 'a corrected floorY holds against the plane path');
       expect(m.classOf(1), PlaneClass.elevatedSurface);
     });
 
-    test('the probe hold lapses so the plane path can repair floorY', () {
+    test('a probe correction holds for the whole session', () {
       final m = PlaneMemory();
       final t0 = DateTime(2026, 1, 1);
       m.noteCameraY(1.5, now: t0);
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)], now: t0);
-      m.noteFloorYCandidate(0.0, now: t0);
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0, now: t0);
+      }
       expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
 
-      // Hold still live — the plane path must not pull floorY back up.
+      // The wrong plane IS the establishable one — the plane path must
+      // never raise a corrected floorY, not seconds later…
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
           now: t0.add(const Duration(seconds: 3)));
-      expect(m.floorY, lessThan(0.15));
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
 
-      // Past the 5 s hold the plane path repairs a too-low estimate again.
+      // …and not an hour into the session either.
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
-          now: t0.add(const Duration(seconds: 6)));
-      expect(m.floorY, greaterThan(0.15));
+          now: t0.add(const Duration(hours: 1)));
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9),
+          reason: 'the corrected floorY holds until the page closes');
+    });
+
+    test('a single low reading does not move floorY', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75, 1e-9),
+          reason: 'one noisy depth median must not slam floorY down');
+    });
+
+    test('two agreeing low readings still do not move floorY', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+
+      m.noteFloorYCandidate(0.0);
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+    });
+
+    test('nine agreeing readings hold — the tenth applies the 0.85 jump',
+        () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9),
+          reason: 'nine agreeing readings are not yet confirmation');
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9),
+          reason: 'same final value the old single-accept path produced');
+    });
+
+    test('an interrupted streak restarts — ten fresh agreeing readings '
+        'needed', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+
+      m.noteFloorYCandidate(0.0);
+      m.noteFloorYCandidate(0.0);
+      // A higher (still sub-floor) reading disagrees past the 0.05 window
+      // and restarts the streak…
+      m.noteFloorYCandidate(0.6);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9),
+          reason: 'the restarted streak needs ten fresh readings');
+
+      // …and an in-deadband reading resets the streak outright.
+      m.noteFloorYCandidate(0.72);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+    });
+
+    test('an interruption after nine restarts the count', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      // One in-deadband reading wipes the nine accumulated votes…
+      m.noteFloorYCandidate(0.72);
+      expect(m.floorY, closeTo(0.75, 1e-9));
+      // …so nine more agreeing readings still leave floorY put.
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75, 1e-9),
+          reason: 'the count restarted from zero after the interruption');
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+    });
+
+    test('a downward plane-path correction still applies after a probe', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+
+      // The real floor finally enters view — a lower establishable target
+      // must still correct downward (detection power is unchanged).
+      m.ingest([
+        plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2),
+        plane(id: 2, type: 1, cy: 0.0, ex: 3, ez: 3),
+      ]);
+      expect(m.floorY, closeTo(0.75 * 0.15 * 0.15, 1e-9));
+    });
+
+    test('a second refocus correction lands after the first', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
+
+      // Ten more agreeing readings below the corrected floorY move it
+      // again at the same 0.85 jump.
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15 * 0.15, 1e-9));
     });
   });
 
@@ -601,27 +745,32 @@ void main() {
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)]);
       expect(m.floorYRenderTrusted, isFalse);
 
-      m.noteFloorYCandidate(0.0);
-      m.noteFloorYCandidate(0.0);
+      for (var i = 0; i < 20; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
       expect(m.floorY, lessThan(0.02));
       expect(m.floorYRenderTrusted, isTrue,
           reason: 'the point cloud proved the real floor height');
     });
 
-    test('plane-path drift away from the probe height drops trust', () {
+    test('a plane-path correction past the probe height drops trust', () {
       final m = PlaneMemory();
       final t0 = DateTime(2026, 1, 1);
       m.noteCameraY(1.5, now: t0);
       m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)], now: t0);
-      m.noteFloorYCandidate(0.0, now: t0);
-      m.noteFloorYCandidate(0.0, now: t0);
+      for (var i = 0; i < 10; i++) {
+        m.noteFloorYCandidate(0.0, now: t0);
+      }
+      expect(m.floorY, closeTo(0.75 * 0.15, 1e-9));
       expect(m.floorYRenderTrusted, isTrue);
 
-      // Past the 5 s hold the table drags floorY back up — once
-      // |floorY − probeY| passes 0.25 the overlay must stop painting.
-      m.ingest([plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2)],
-          now: t0.add(const Duration(seconds: 6)));
-      expect(m.floorY, greaterThan(0.25));
+      // A genuinely lower establishable surface pulls floorY further down;
+      // once |floorY − probeY| passes 0.25 the overlay must stop painting.
+      m.ingest([
+        plane(id: 1, type: 1, cy: 0.75, ex: 1.5, ez: 1.2),
+        plane(id: 2, type: 1, cy: -0.4, ex: 3, ez: 3),
+      ], now: t0.add(const Duration(seconds: 2)));
+      expect(m.floorY, lessThan(-0.25));
       expect(m.floorYRenderTrusted, isFalse);
     });
 

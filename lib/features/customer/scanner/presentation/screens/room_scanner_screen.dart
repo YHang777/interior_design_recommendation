@@ -17,6 +17,8 @@ import '../../../../../shared/widgets/float_button.dart';
 import '../../../ar/data/furniture_model_library.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
+import '../../data/furniture_catalog.dart';
+import '../../data/room_fit.dart';
 
 class RoomScannerScreen extends ConsumerStatefulWidget {
   const RoomScannerScreen({super.key, this.existingDesign});
@@ -27,6 +29,8 @@ class RoomScannerScreen extends ConsumerStatefulWidget {
 }
 
 enum _Stage { init, scanning, plan }
+
+typedef _Cat = RoomCatalogItem;
 
 class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   CameraController? _cam;
@@ -39,6 +43,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   int _frames = 0;
   Timer? _timer;
   String _roomType = 'living_room';
+  // Design identity — separate from widget.existingDesign so a walkthrough
+  // round-trip can adopt a plan that was saved while walking (the widget
+  // arg is final, so a create would otherwise mint a second design id).
+  String? _designId;
+  String? _designName;
+  DateTime? _designCreatedAt;
 
   late List<FurniturePlacement> _furniture;
   double _roomW = 400;
@@ -122,30 +132,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   };
 
   // ─── Furniture catalog with image assets ───
-  static const _catalog = [
-    _Cat('Sofa', 'sofa', Icons.weekend, 'seating', 180, 90,
-        'assets/images/furniture_sofa_modern.png'),
-    _Cat('Armchair', 'armchair', Icons.chair, 'seating', 70, 70,
-        'assets/images/furniture_chair_modern.png'),
-    _Cat('Coffee Table', 'coffee_table', Icons.table_bar, 'tables', 100, 50,
-        'assets/images/furniture_table_coffee.png'),
-    _Cat('Dining Table', 'dining_table', Icons.table_restaurant, 'tables', 140, 100,
-        'assets/images/furniture_table_dining.png'),
-    _Cat('Bed', 'bed', Icons.bed, 'bedroom', 200, 160,
-        'assets/images/furniture_bed_modern.png'),
-    _Cat('Cabinet', 'cabinet', Icons.inventory_2, 'storage', 90, 50,
-        'assets/images/furniture_cabinet_modern.png'),
-    _Cat('Desk', 'desk', Icons.desk, 'office', 120, 60,
-        'assets/images/furniture_desk_modern.png'),
-    _Cat('Floor Lamp', 'floor_lamp', Icons.lightbulb, 'lighting', 25, 25,
-        'assets/images/furniture_lamp_floor.png'),
-    _Cat('Plant', 'plant', Icons.eco, 'decor', 30, 30,
-        'assets/images/plant.jpg'),
-    _Cat('TV Stand', 'tv_stand', Icons.tv, 'media', 140, 45, null),
-    _Cat('Rug', 'rug', Icons.view_agenda, 'decor', 160, 120,
-        'assets/images/furniture_rug_modern.png'),
-    _Cat('Bookshelf', 'bookshelf', Icons.menu_book, 'storage', 90, 30, null),
-  ];
+  // Shared with the walkthrough so both pickers never drift apart.
+  static const _catalog = roomCatalog;
 
   // ─── Room types ───
   static const _roomTypes = [
@@ -166,6 +154,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _roomW = widget.existingDesign!.widthCm;
       _roomH = widget.existingDesign!.heightCm;
       _roomType = widget.existingDesign!.roomType;
+      _designId = widget.existingDesign!.id;
+      _designName = widget.existingDesign!.name;
+      _designCreatedAt = widget.existingDesign!.createdAt;
       _found.addAll(widget.existingDesign!.detectedItems
           .map((l) => _Found(label: l, confidence: 0.9)));
       _stage = _Stage.plan;
@@ -394,8 +385,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     _timer?.cancel();
     final frames = _frames;
     final added = _autoPlaceFound();
-    final guessed =
-        widget.existingDesign == null ? _guessRoomType() : null;
+    final guessed = _designId == null ? _guessRoomType() : null;
     if (guessed != null) _roomType = guessed;
     if (mounted) setState(() => _stage = _Stage.plan);
     if (mounted) {
@@ -514,111 +504,17 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   // ─── Wall (room shape) geometry helpers ───
+  // Thin wrappers over the shared implementation — the walkthrough walks
+  // the same rules, so the truth lives in room_fit.dart.
 
-  double _footprintW(FurniturePlacement f) =>
-      f.rotation % 180 == 90 ? f.height : f.width;
-  double _footprintH(FurniturePlacement f) =>
-      f.rotation % 180 == 90 ? f.width : f.height;
+  double _footprintW(FurniturePlacement f) => footprintW(f);
+  double _footprintH(FurniturePlacement f) => footprintH(f);
 
-  bool _pointInPolygon(Offset p) {
-    if (_walls.length < 3) return true;
-    // Boundary counts as inside — pure ray-casting reports points
-    // exactly on a wall as outside, which would ban flush placement.
-    for (int i = 0, j = _walls.length - 1; i < _walls.length; j = i++) {
-      if (_distToSegment(p, _walls[i], _walls[j]) < 0.5) return true;
-    }
-    var inside = false;
-    for (int i = 0, j = _walls.length - 1; i < _walls.length; j = i++) {
-      final a = _walls[i];
-      final b = _walls[j];
-      if ((a.dy > p.dy) != (b.dy > p.dy) &&
-          p.dx < (b.dx - a.dx) * (p.dy - a.dy) / (b.dy - a.dy) + a.dx) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  }
+  double _distToSegment(Offset p, Offset a, Offset b) =>
+      distToSegment(p, a, b);
 
-  double _distToSegment(Offset p, Offset a, Offset b) {
-    final ab = b - a;
-    final len2 = ab.dx * ab.dx + ab.dy * ab.dy;
-    if (len2 == 0) return (p - a).distance;
-    final t = (((p.dx - a.dx) * ab.dx + (p.dy - a.dy) * ab.dy) / len2)
-        .clamp(0.0, 1.0);
-    final proj = Offset(a.dx + t * ab.dx, a.dy + t * ab.dy);
-    return (p - proj).distance;
-  }
-
-  // ─── Drop resolution ───
-  // A drop is valid when the footprint sits inside the room rectangle and,
-  // if walls outline a polygon, fully inside it (all four corners in the
-  // polygon AND no wall edge slicing through the footprint — the corner
-  // test alone fails for concave outlines).
-
-  bool _fitsAt(FurniturePlacement f, Offset tl) {
-    final fw = _footprintW(f);
-    final fh = _footprintH(f);
-    if (tl.dx < 0 || tl.dy < 0) return false;
-    if (tl.dx + fw > _roomW || tl.dy + fh > _roomH) return false;
-    if (_walls.length < 3) return true;
-
-    final corners = [
-      tl,
-      tl + Offset(fw, 0),
-      tl + Offset(0, fh),
-      tl + Offset(fw, fh),
-    ];
-    for (final c in corners) {
-      if (!_pointInPolygon(c)) return false;
-    }
-    for (var i = 0; i < _walls.length; i++) {
-      final a1 = _walls[i];
-      final a2 = _walls[(i + 1) % _walls.length];
-      if (_segmentsCross(a1, a2, corners[0], corners[1]) ||
-          _segmentsCross(a1, a2, corners[1], corners[3]) ||
-          _segmentsCross(a1, a2, corners[3], corners[2]) ||
-          _segmentsCross(a1, a2, corners[2], corners[0])) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  bool _segmentsCross(Offset p1, Offset p2, Offset q1, Offset q2) {
-    double cross(Offset a, Offset b, Offset c) =>
-        (b.dx - a.dx) * (c.dy - a.dy) - (b.dy - a.dy) * (c.dx - a.dx);
-    final d1 = cross(q1, q2, p1);
-    final d2 = cross(q1, q2, p2);
-    final d3 = cross(p1, p2, q1);
-    final d4 = cross(p1, p2, q2);
-    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-  }
-
-  FurniturePlacement _resolveDrop(FurniturePlacement f) {
-    if (_fitsAt(f, Offset(f.x, f.y))) return f;
-    final fw = _footprintW(f);
-    final fh = _footprintH(f);
-    final maxX = max(0.0, _roomW - fw);
-    final maxY = max(0.0, _roomH - fh);
-
-    // Walk rings outward from the drop point (5 cm steps, 16 angles)
-    // and take the first spot that fits — the piece settles next to
-    // where the finger left it, never teleports to the room center.
-    final maxR = sqrt(_roomW * _roomW + _roomH * _roomH);
-    for (var r = 5.0; r <= maxR; r += 5.0) {
-      final steps = 16;
-      for (var i = 0; i < steps; i++) {
-        final a = 2 * pi * i / steps;
-        final cand = Offset(
-          (f.x + cos(a) * r).clamp(0.0, maxX).toDouble(),
-          (f.y + sin(a) * r).clamp(0.0, maxY).toDouble(),
-        );
-        if (_fitsAt(f, cand)) return f.copyWith(x: cand.dx, y: cand.dy);
-      }
-    }
-    return f;
-  }
+  FurniturePlacement _resolveDrop(FurniturePlacement f) => resolveDrop(f,
+      roomW: _roomW, roomH: _roomH, walls: _walls);
 
   // ─── Raw pointer interactions (canvas pixels → room cm) ───
 
@@ -909,6 +805,41 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     _addFromCatalog(picked);
   }
 
+  // In-memory copy of the current plan for the walkthrough; id stays empty
+  // until something has been saved, so its Save knows create vs update.
+  RoomDesign _snapshotDesign() => RoomDesign(
+        id: _designId ?? '',
+        name: _designName ?? 'My $_roomTypeLabel Design',
+        roomType: _roomType,
+        widthCm: _roomW,
+        heightCm: _roomH,
+        furniture: List.of(_furniture),
+        walls: List.of(_walls),
+        detectedItems: _found.map((f) => f.label).toList(),
+        createdAt: _designCreatedAt ?? DateTime.now(),
+        updatedAt: DateTime.now(),
+        userId: widget.existingDesign?.userId ?? '',
+      );
+
+  // Pull a walkthrough result back into the editor — adopted fields make
+  // the next save update the same design instead of minting a duplicate.
+  void _adoptDesign(RoomDesign d) {
+    setState(() {
+      _designId = d.id;
+      _designName = d.name;
+      _designCreatedAt = d.createdAt;
+      _furniture = List.of(d.furniture);
+      _walls
+        ..clear()
+        ..addAll(d.walls);
+      _roomW = d.widthCm;
+      _roomH = d.heightCm;
+      _roomType = d.roomType;
+      _selectedIdx = -1;
+    });
+    if (_walls.isNotEmpty) _touchWalls();
+  }
+
   Future<void> _saveDesign() async {
     final user = ref.read(currentUserProvider);
     if (user == null) {
@@ -920,7 +851,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     }
 
     final nameCtrl = TextEditingController(
-        text: widget.existingDesign?.name ?? 'My $_roomTypeLabel Design');
+        text: _designName ?? 'My $_roomTypeLabel Design');
 
     final name = await showDialog<String>(
       context: context,
@@ -951,8 +882,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
     final ds = ref.read(roomDesignDatasourceProvider);
     final now = DateTime.now();
-    final designId = widget.existingDesign?.id ??
-        'design-${now.millisecondsSinceEpoch}';
+    final designId =
+        _designId ?? 'design-${now.millisecondsSinceEpoch}';
 
     final design = RoomDesign(
       id: designId,
@@ -964,17 +895,20 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       walls: List.of(_walls),
       detectedItems: _found.map((f) => f.label).toList(),
       userId: user.uid,
-      createdAt: widget.existingDesign?.createdAt ?? now,
+      createdAt: _designCreatedAt ?? now,
       updatedAt: now,
     );
 
     try {
-      if (widget.existingDesign != null) {
+      if (_designId != null) {
         await ds.updateDesign(designId, design.toJson());
       } else {
         await ds.createDesign(
             designId: designId, data: design.toJson());
       }
+      _designId = designId;
+      _designName = name;
+      _designCreatedAt = design.createdAt;
       if (mounted) {
         showAppSnackbar(
           context,
@@ -1074,8 +1008,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       child: Text(
                         switch (_stage) {
                           _Stage.init || _Stage.scanning => 'Room Scanner',
-                          _Stage.plan => widget.existingDesign != null
-                              ? 'Edit: ${widget.existingDesign!.name}'
+                          _Stage.plan => _designId != null
+                              ? 'Edit: ${_designName ?? 'Design'}'
                               : 'Room Planner',
                         },
                         style: isDark
@@ -1116,6 +1050,17 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                           extra: ArFurnitureLibrary.fromIconNames(
                               _furniture.map((f) => f.iconName).toList()),
                         ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.directions_walk, color: fgColor),
+                        tooltip: 'Walk Through',
+                        onPressed: () async {
+                          final saved = await context.push<RoomDesign>(
+                            '/walkthrough',
+                            extra: _snapshotDesign(),
+                          );
+                          if (saved != null && mounted) _adoptDesign(saved);
+                        },
                       ),
                       IconButton(
                         icon: Icon(Icons.save, color: fgColor),
@@ -1966,19 +1911,6 @@ class _FurnitureTileState extends State<_FurnitureTile> {
 }
 
 // ─── Catalog item ───
-class _Cat {
-  final String name;
-  final String iconName;
-  final IconData icon;
-  final String category;
-  final double defaultWidth;
-  final double defaultHeight;
-  final String? imageAsset;
-
-  const _Cat(this.name, this.iconName, this.icon, this.category,
-      this.defaultWidth, this.defaultHeight, this.imageAsset);
-}
-
 class _CatalogThumb extends StatelessWidget {
   const _CatalogThumb({required this.cat});
 

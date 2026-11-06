@@ -231,13 +231,11 @@ class PlaneMemory {
 
   double? _cameraY;
 
-  // Last time a probe candidate lowered floorY. A live probe outranks the
-  // plane path's upward pull — without this the wrong plane's establishable
-  // record drags every correction back up within ~2 ingests and the refocus
-  // zone flip lasts 1–2 frames.
-  DateTime? _floorYProbeAt;
-
-  static const _probeHold = Duration(seconds: 5);
+  // Set once any probe correction has landed. From then on the plane path
+  // may never raise floorY: the corrected height holds for the whole
+  // session (this object lives as long as the AR page). Upward drift toward
+  // furniture tops is what destroyed corrected planes.
+  bool _probeCorrected = false;
 
   // Render-trust state — gates PAINTING only, never placement. A loose or
   // camera-unknown establishment can land on a table top, and painting green
@@ -248,6 +246,16 @@ class PlaneMemory {
 
   double? _probeProvenY;
 
+  // Agreeing readings noteFloorYCandidate needs before it may move floorY —
+  // background confirmation so a lone noisy streak can't slam the floor.
+  static const _refocusChecks = 10;
+
+  // Streak gate on noteFloorYCandidate: a single low depth median must not
+  // move floorY.
+  double? _probeStreakY;
+
+  int _probeStreak = 0;
+
   DateTime? _lastIngest;
 
   int _nextSyntheticKey = 1;
@@ -257,9 +265,9 @@ class PlaneMemory {
   bool get floorEstablished => _floorY != null;
 
   // Whether floorY may anchor green rendering (overlayZoneOf floorYTrusted,
-  // synthetic floor). A probe-proven height always decides — after the hold
-  // lapses the plane path can drag floorY back up toward furniture, and
-  // |floorY − probeY| > 0.25 then drops trust automatically.
+  // synthetic floor). A probe-proven height always decides; floorY can no
+  // longer drift up after a correction, but a later correction more than
+  // 0.25 m from probeY still drops trust.
   bool get floorYRenderTrusted {
     final fy = _floorY;
     if (fy == null) return false;
@@ -282,7 +290,7 @@ class PlaneMemory {
   void noteCameraY(double y, {DateTime? now}) {
     if (!y.isFinite) return;
     _cameraY = y;
-    _updateFloorY(now ?? DateTime.now());
+    _updateFloorY();
     _reclassify();
   }
 
@@ -293,22 +301,50 @@ class PlaneMemory {
   // votes and the geometric overlay repaints (overlayZoneOf reads floorY
   // directly). Downward only with a deadband (a low percentile reads
   // slightly low on noise), inside the same camera band the plane path
-  // trusts, and it never ESTABLISHES floorY — planes do that.
+  // trusts, and it never ESTABLISHES floorY — planes do that. Runs as a
+  // background evidence accumulator: _refocusChecks agreeing readings
+  // confirm the detected plane is wrong, then one 0.85 jump lands.
   void noteFloorYCandidate(double y, {DateTime? now}) {
-    if (!y.isFinite || _floorY == null) return;
+    if (!y.isFinite || _floorY == null) {
+      _probeStreak = 0;
+      _probeStreakY = null;
+      return;
+    }
     if (_cameraY != null) {
       final below = _cameraY! - y;
       if (below < loosePhoneAboveFloorM || below > maxPhoneAboveFloorM) {
+        _probeStreak = 0;
+        _probeStreakY = null;
         return;
       }
     }
     final fy = _floorY!;
     const deadbandM = 0.05;
-    if (y >= fy - deadbandM) return;
+    if (y >= fy - deadbandM) {
+      _probeStreak = 0;
+      _probeStreakY = null;
+      return;
+    }
+    // _refocusChecks agreeing readings confirm the plane is wrong; a lone
+    // noisy depth median used to slam floorY under the true floor and flip
+    // the painted plane to a mask ("refocus killed my corrected plane").
+    // FloorY stays put during the streak — a genuine correction lands as
+    // one 0.85 jump; at the true floor the readings fall back inside the
+    // deadband and the streak resets.
+    final streakY = _probeStreakY;
+    if (streakY == null || (y - streakY).abs() > 0.05) {
+      _probeStreakY = y;
+      _probeStreak = 1;
+      return;
+    }
+    _probeStreak++;
+    if (_probeStreak < _refocusChecks) return;
     _floorY = fy + (y - fy) * 0.85;
-    _floorYProbeAt = now ?? DateTime.now();
+    _probeCorrected = true;
     _probeProvenY = y;
     _reclassify();
+    _probeStreak = 0;
+    _probeStreakY = null;
   }
 
   void ingest(List<ARPlaneInfo> planes, {DateTime? now}) {
@@ -331,7 +367,7 @@ class PlaneMemory {
     // absent from the payload for recordMaxAge.
     _floor.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
     _wall.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
-    _updateFloorY(t);
+    _updateFloorY();
     _reclassify();
   }
 
@@ -505,7 +541,7 @@ class PlaneMemory {
     return gapX <= clusterGapM && gapZ <= clusterGapM;
   }
 
-  void _updateFloorY(DateTime t) {
+  void _updateFloorY() {
     // Camera-band buckets only at this stage: the size gate is applied to
     // merged clusters, not per record — a room's floor reported as several
     // sub-gate fragments must still beat one large furniture top.
@@ -538,14 +574,11 @@ class PlaneMemory {
       _floorYStrictEstablished = fromStrict;
       return;
     }
-    // A live probe correction outranks the plane path's upward pull (the
-    // wrong plane IS the establishable one); downward corrections still
-    // apply. The hold lapses after _probeHold so a too-low probe reading
-    // can be repaired.
-    if (target > current) {
-      final probeAt = _floorYProbeAt;
-      if (probeAt != null && t.difference(probeAt) < _probeHold) return;
-    }
+    // After a probe correction the plane path may never raise floorY — the
+    // corrected height holds until the page closes (upward drift toward
+    // furniture tops destroyed corrected planes). Downward corrections and
+    // initial establishment still apply.
+    if (target > current && _probeCorrected) return;
     // Correct a wrong (too-high) estimate faster than drift upward: the
     // floor is the LOWEST confirmed surface, so a lower one is a correction.
     final alpha = target < current ? 0.85 : 0.35;
