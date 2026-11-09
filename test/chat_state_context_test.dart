@@ -241,7 +241,7 @@ void main() {
   });
 
   group('budgetEstimate', () {
-    test('sums category medians and subtracts from the cap', () {
+    test('sums the category lowest prices and subtracts from the cap', () {
       final products = [
         _product(id: 'f', category: 'Furniture', price: 1000),
         _product(id: 'l', category: 'Lighting', price: 200),
@@ -253,14 +253,14 @@ void main() {
       expect(estimate.$2, 500);
     });
 
-    test('eco filter drops non-eco listings from the median', () {
+    test('eco filter drops non-eco listings from the estimate', () {
       final products = [
         _product(id: 'f1', category: 'Furniture', price: 1000),
         _product(
             id: 'f2', category: 'Furniture', price: 200, isEcoFriendly: true),
       ];
       final normal = budgetEstimate(budget: _budget(cap: 0), products: products);
-      expect(normal!.$1, 600);
+      expect(normal!.$1, 200);
       final eco = budgetEstimate(
           budget: _budget(cap: 0, eco: true), products: products);
       expect(eco!.$1, 200);

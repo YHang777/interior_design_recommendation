@@ -81,7 +81,7 @@ class BudgetReportPdf {
   }
 }
 
-const List<int> _lineFlex = [3, 1];
+const List<int> _lineFlex = [3, 4, 3, 2];
 
 List<pw.Widget> _body({
   required String room,
@@ -183,7 +183,9 @@ pw.Widget _linesTable(List<EstimateLine> lines) {
         ),
         child: _tableRow([
           _label('Category'),
-          _label('Price', align: pw.TextAlign.right),
+          _label('Material'),
+          _label('Supplier'),
+          _label('RM', align: pw.TextAlign.right),
         ]),
       ),
       for (final line in lines)
@@ -196,6 +198,10 @@ pw.Widget _linesTable(List<EstimateLine> lines) {
           ),
           child: _tableRow([
             pw.Text(line.label, style: _cell),
+            // Standard PDF fonts are Latin-1 only: '—' draws a missing-glyph
+            // box, so a plain dash marks the empty placeholder.
+            pw.Text(line.material ?? '-', style: _cell),
+            pw.Text(line.supplier ?? '-', style: _cell),
             pw.Text(
               line.hasData ? Formatters.myr(line.price!) : 'No price data yet',
               style: _cell,
@@ -221,7 +227,7 @@ pw.Widget _footnote({required bool ecoFriendly}) {
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     children: [
       pw.Text(
-        'Estimates are median prices of active marketplace listings'
+        'Prices are the lowest active listing per category'
         '${ecoFriendly ? ' (eco-friendly listings only)' : ''}.',
         style: _muted(9),
       ),

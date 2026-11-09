@@ -10,6 +10,7 @@ import '../models/cart_item.dart';
 import '../models/order.dart';
 import '../models/product.dart';
 import '../models/product_category.dart';
+import '../models/quote_request.dart';
 import '../models/review.dart';
 import 'media/media_store.dart';
 import 'model_generation/model_glb_resolver.dart';
@@ -24,6 +25,7 @@ class MarketplaceRepository {
 
   static const String _productsCol = 'products';
   static const String _ordersCol = 'orders';
+  static const String _quoteRequestsCol = 'quote_requests';
   static const String _usersCol = 'users';
 
   // ── Static catalogue data (admin-managed; code constants for now) ───────
@@ -301,6 +303,42 @@ class MarketplaceRepository {
               now.toUtc().toIso8601String(),
       });
       return invoice;
+    });
+  }
+
+  // ── Quote requests (buyer-created; no money involved) ───────────────────
+
+  CollectionReference<Map<String, dynamic>> get _quoteRequests =>
+      _db.collection(_quoteRequestsCol);
+
+  Stream<List<QuoteRequest>> watchCustomerQuoteRequests(String customerId) {
+    return _quoteRequests
+        .where('customerId', isEqualTo: customerId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => QuoteRequest.fromJson(d.data())).toList());
+  }
+
+  Stream<List<QuoteRequest>> watchSupplierQuoteRequests(String supplierId) {
+    return _quoteRequests
+        .where('supplierId', isEqualTo: supplierId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => QuoteRequest.fromJson(d.data())).toList());
+  }
+
+  Future<void> createQuoteRequest(QuoteRequest request) async {
+    await _quoteRequests.doc(request.id).set(request.toJson());
+  }
+
+  Future<void> markQuoteContacted(String id) async {
+    // Field-path update: touches only status + contactedAt so the rules'
+    // affected-keys guard never sees contact/product fields drift.
+    await _quoteRequests.doc(id).update({
+      'status': QuoteRequest.statusContacted,
+      'contactedAt': Timestamp.now(),
     });
   }
 

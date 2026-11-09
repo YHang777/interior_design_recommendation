@@ -143,7 +143,7 @@ class ChatDataCard extends ConsumerWidget {
           '${budget.ecoFriendly ? ' · eco-friendly' : ''}',
           strong: true),
       if (estimate != null) ...[
-        _line('Catalogue median estimate ${Formatters.myr(estimate.$1)}'),
+        _line('Catalogue lowest estimate ${Formatters.myr(estimate.$1)}'),
         _line(estimate.$2 >= 0
             ? 'Under cap by ${Formatters.myr(estimate.$2)}'
             : 'Over cap by ${Formatters.myr(estimate.$2.abs())}'),

@@ -11,8 +11,10 @@ import 'package:interior_design_recommendation/features/customer/budget/data/bud
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_providers.dart';
 import 'package:interior_design_recommendation/features/customer/budget/data/budget_repository.dart';
 import 'package:interior_design_recommendation/features/customer/budget/presentation/screens/budget_planner_screen.dart';
+import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/marketplace/presentation/providers/marketplace_providers.dart';
 import 'package:interior_design_recommendation/models/product.dart';
+import 'package:interior_design_recommendation/models/room_design.dart';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ class _FakeBudgetRepository implements BudgetRepository {
   _FakeBudgetRepository({BudgetPlan? initial}) : _latest = initial;
 
   BudgetPlan? _latest;
-  final _out = StreamController<BudgetPlan?>();
+  final _out = StreamController<BudgetPlan?>.broadcast();
 
   String? watchedUid;
 
@@ -94,9 +96,22 @@ class _FakeBudgetRepository implements BudgetRepository {
   }
 }
 
+RoomDesign _design({String id = 'design-1', String name = 'Bedroom Reno'}) =>
+    RoomDesign(
+      id: id,
+      name: name,
+      roomType: 'bedroom',
+      widthCm: 400,
+      heightCm: 500,
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      userId: 'u1',
+    );
+
 Future<void> _pumpPlanner(
   WidgetTester tester, {
   List<Override> overrides = const [],
+  List<RoomDesign> designs = const [],
 }) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 1.0;
@@ -106,6 +121,10 @@ Future<void> _pumpPlanner(
     ProviderScope(
       overrides: [
         currentUserProvider.overrideWithValue(_user()),
+        // The real designs provider polls Supabase with Stream.periodic —
+        // pending timers would fail every test here.
+        savedDesignsProvider
+            .overrideWith((ref) => Stream.value(designs)),
         ...overrides,
       ],
       child: const MaterialApp(home: BudgetPlannerScreen()),
@@ -127,7 +146,7 @@ int _fieldBudget(WidgetTester tester) {
 
 void main() {
   testWidgets(
-      'renders real catalogue estimates (median per category) — not '
+      'renders real catalogue estimates (lowest price per category) — not '
       'dashes, not fakes', (tester) async {
     await _pumpPlanner(tester, overrides: [
       budgetPlanProvider.overrideWith((ref) => Stream<BudgetPlan?>.value(null)),
@@ -135,13 +154,13 @@ void main() {
           .overrideWith((ref) => Stream.value(_seedCatalogue)),
     ]);
 
-    expect(find.text('RM 90'), findsOneWidget);
-    expect(find.text('RM 1,050'), findsOneWidget);
+    expect(find.text('RM 85'), findsOneWidget);
+    expect(find.text('RM 900'), findsOneWidget);
     expect(find.text('RM 150'), findsOneWidget);
     expect(find.text('RM 250'), findsOneWidget);
     expect(find.text('—'), findsOneWidget);
 
-    expect(find.text('RM 1,540'), findsNWidgets(3));
+    expect(find.text('RM 1,385'), findsNWidgets(3));
     expect(find.text('Over Budget'), findsOneWidget);
     expect(
       find.text('Total covers categories with price data only.'),
@@ -150,7 +169,8 @@ void main() {
 
     expect(_fieldBudget(tester), 0);
     expect(find.text('RM 0'), findsOneWidget);
-    expect(find.text('Plan your Kitchen renovation'), findsOneWidget);
+    expect(find.text('Plan your total budget'), findsOneWidget);
+    expect(find.text('Whole home (total budget)'), findsOneWidget);
   });
 
   testWidgets('typing a budget saves it through the real provider chain '
@@ -172,37 +192,43 @@ void main() {
     expect(fake.saves, hasLength(1));
     expect(fake.saves.single.budgetRm, 5000);
     expect(fake.saves.single.room, defaultBudgetRoom);
+    expect(fake.saves.single.designId, '');
     expect(fake.saves.single.ecoFriendly, isFalse);
 
     expect(find.text('RM 5,000'), findsOneWidget);
-    expect(find.text('RM 3,460'), findsOneWidget);
+    expect(find.text('RM 3,615'), findsOneWidget);
     expect(find.text('Remaining'), findsOneWidget);
   });
 
-  testWidgets('a stored plan prefills budget, room and heading on return',
-      (tester) async {
+  testWidgets('a stored design-scoped plan prefills budget, design and '
+      'heading on return', (tester) async {
     final fake = _FakeBudgetRepository(
       initial: BudgetPlan(
         budgetRm: 7000,
-        room: 'Bedroom',
+        room: 'Bedroom Reno',
         ecoFriendly: false,
         updatedAt: DateTime.utc(2026, 9, 28),
+        designId: 'design-1',
       ),
     );
     addTearDown(fake.dispose);
 
-    await _pumpPlanner(tester, overrides: [
-      budgetRepositoryProvider.overrideWithValue(fake),
-      marketplaceProductsProvider
-          .overrideWith((ref) => Stream.value(_seedCatalogue)),
-    ]);
+    await _pumpPlanner(
+      tester,
+      overrides: [
+        budgetRepositoryProvider.overrideWithValue(fake),
+        marketplaceProductsProvider
+            .overrideWith((ref) => Stream.value(_seedCatalogue)),
+      ],
+      designs: [_design()],
+    );
 
     expect(find.text('7000'), findsOneWidget);
     expect(_fieldBudget(tester), 7000);
-    expect(find.text('Bedroom'), findsOneWidget);
-    expect(find.text('Plan your Bedroom renovation'), findsOneWidget);
+    expect(find.text('Bedroom Reno'), findsOneWidget);
+    expect(find.text('Budget for Bedroom Reno'), findsOneWidget);
     expect(find.text('RM 7,000'), findsOneWidget);
-    expect(find.text('RM 5,460'), findsOneWidget);
+    expect(find.text('RM 5,615'), findsOneWidget);
     expect(fake.watchedUid, 'u1');
     expect(fake.saves, isEmpty);
   });
@@ -243,25 +269,40 @@ void main() {
     expect(find.text('RM 9,999'), findsNothing);
   });
 
-  testWidgets('room dropdown change persists and updates the heading',
-      (tester) async {
+  testWidgets('design selector persists the chosen design and updates the '
+      'heading', (tester) async {
     final fake = _FakeBudgetRepository();
     addTearDown(fake.dispose);
 
-    await _pumpPlanner(tester, overrides: [
-      budgetRepositoryProvider.overrideWithValue(fake),
-      marketplaceProductsProvider
-          .overrideWith((ref) => Stream.value(_seedCatalogue)),
-    ]);
+    await _pumpPlanner(
+      tester,
+      overrides: [
+        budgetRepositoryProvider.overrideWithValue(fake),
+        marketplaceProductsProvider
+            .overrideWith((ref) => Stream.value(_seedCatalogue)),
+      ],
+      designs: [_design(id: 'design-7', name: 'Kitchen Refresh')],
+    );
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Living Room').last);
+    await tester.tap(find.text('Kitchen Refresh').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Plan your Living Room renovation'), findsOneWidget);
+    expect(find.text('Budget for Kitchen Refresh'), findsOneWidget);
     expect(fake.saves, isNotEmpty);
-    expect(fake.saves.last.room, 'Living Room');
+    expect(fake.saves.last.designId, 'design-7');
+    expect(fake.saves.last.room, 'Kitchen Refresh');
+
+    // Back to the whole-home total.
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Whole home (total budget)').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Plan your total budget'), findsOneWidget);
+    expect(fake.saves.last.designId, '');
+    expect(fake.saves.last.room, defaultBudgetRoom);
   });
 
   testWidgets('eco toggle recomputes estimates from eco listings only '
@@ -278,13 +319,13 @@ void main() {
       ])),
     ]);
 
-    expect(find.text('RM 1,050'), findsOneWidget);
+    expect(find.text('RM 900'), findsOneWidget);
 
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
 
     expect(find.text('RM 1,200'), findsNWidgets(4));
-    expect(find.text('RM 1,050'), findsNothing);
+    expect(find.text('RM 900'), findsNothing);
     expect(
       find.text('Estimating from eco-friendly listings only'),
       findsOneWidget,
@@ -347,7 +388,7 @@ void main() {
     expect(find.text('Check your connection and try again.'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
 
-    expect(find.text('RM 90'), findsOneWidget);
+    expect(find.text('RM 85'), findsOneWidget);
   });
 
   testWidgets('DEFECT: an empty catalogue shows a loud, helpful banner '
@@ -378,5 +419,65 @@ void main() {
     expect(find.text('Could not load product prices'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
     expect(find.text('RM 0'), findsNWidgets(4));
+  });
+
+  // ── Material comparison (supplier, range, swap sheet, custom badge) ──────
+
+  testWidgets('breakdown rows show supplier, price range and the '
+      'lowest-price footnote', (tester) async {
+    await _pumpPlanner(tester, overrides: [
+      budgetPlanProvider.overrideWith((ref) => Stream<BudgetPlan?>.value(null)),
+      marketplaceProductsProvider
+          .overrideWith((ref) => Stream.value(_seedCatalogue)),
+    ]);
+
+    expect(find.text('Seller · RM 85'), findsOneWidget);
+    expect(find.text('RM 85 – RM 95 · 2 listings'), findsOneWidget);
+    expect(find.text('RM 150 · 1 listing'), findsOneWidget);
+    expect(find.text('above lowest'), findsNothing);
+    expect(
+      find.text(
+          'Lowest price across 6 active listings · tap a row to compare '
+          'materials'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('picking a pricier material updates the total, badges the row '
+      'and the choice survives a reload', (tester) async {
+    final fake = _FakeBudgetRepository();
+    addTearDown(fake.dispose);
+    final overrides = <Override>[
+      budgetRepositoryProvider.overrideWithValue(fake),
+      marketplaceProductsProvider
+          .overrideWith((ref) => Stream.value(_seedCatalogue)),
+    ];
+
+    await _pumpPlanner(tester, overrides: overrides);
+    expect(find.text('above lowest'), findsNothing);
+
+    await tester.ensureVisible(find.text('Furniture'));
+    await tester.tap(find.text('Furniture'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Choose Furniture material'), findsOneWidget);
+    expect(find.text('Seller'), findsWidgets);
+    expect(find.text('Out of stock'), findsNothing);
+
+    await tester.tap(find.text('Furniture 1200'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Furniture 1200'), findsOneWidget);
+    expect(find.text('above lowest'), findsOneWidget);
+    expect(find.text('RM 1,685'), findsNWidgets(3));
+    expect(fake.saves, isNotEmpty);
+    expect(fake.saves.last.choices['Furniture'], 'p-Furniture-1200');
+
+    await _pumpPlanner(tester, overrides: overrides);
+
+    expect(find.text('Furniture 1200'), findsOneWidget);
+    expect(find.text('above lowest'), findsOneWidget);
+    expect(find.text('RM 1,685'), findsNWidgets(3));
+    expect(find.text('RM 1,385'), findsNothing);
   });
 }

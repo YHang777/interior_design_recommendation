@@ -7,6 +7,7 @@ import '../../../../../models/product_category.dart';
 import '../../../../../models/cart_item.dart';
 import '../../../../../models/order.dart';
 import '../../../../../models/app_config_data.dart';
+import '../../../../../models/quote_request.dart';
 import '../../../../../models/review.dart';
 import '../../../../../services/marketplace_repository.dart';
 import '../../../../../services/recent_searches_store.dart';
@@ -806,6 +807,22 @@ final supplierOrdersProvider =
   final repo = ref.watch(marketplaceRepositoryProvider);
   if (supplierId.isEmpty) return Stream.value(const []);
   return repo.watchSupplierOrders(supplierId);
+});
+
+// ─── Bulk quote requests (customer asks → supplier contacts off-app) ─────────
+
+final customerQuoteRequestsProvider = StreamProvider<List<QuoteRequest>>((ref) {
+  final repo = ref.watch(marketplaceRepositoryProvider);
+  final uid = ref.watch(currentUserProvider)?.uid ?? '';
+  if (uid.isEmpty) return Stream.value(const []);
+  return repo.watchCustomerQuoteRequests(uid);
+});
+
+final supplierQuoteRequestsProvider =
+    StreamProvider.family<List<QuoteRequest>, String>((ref, supplierId) {
+  final repo = ref.watch(marketplaceRepositoryProvider);
+  if (supplierId.isEmpty) return Stream.value(const []);
+  return repo.watchSupplierQuoteRequests(supplierId);
 });
 
 // ─── Single-order detail + per-order reviews ─────────────────────────────────

@@ -38,6 +38,8 @@ class RouteNames {
   static const supplierProductEdit = 'supplier-product-edit';
   static const supplierOrders = 'supplier-orders';
   static const supplierOrderDetail = 'supplier-order-detail';
+  static const supplierQuoteRequests = 'supplier-quote-requests';
+  static const supplierQuoteRequestDetail = 'supplier-quote-request-detail';
   static const supplierAnalytics = 'supplier-analytics';
   static const supplierProfile = 'supplier-profile';
   static const supplierVerification = 'supplier-verification';

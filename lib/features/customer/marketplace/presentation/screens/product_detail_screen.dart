@@ -7,8 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
+import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
+import '../../../../../models/quote_request.dart';
 import '../../../../../models/review.dart';
+import '../../../../../services/marketplace_repository.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/product_card.dart';
@@ -17,6 +20,8 @@ import '../../../../../shared/widgets/quantity_stepper.dart';
 import '../../../../../shared/widgets/rating_stars.dart';
 import '../../../../../shared/widgets/section_header.dart';
 import '../../../../../shared/widgets/verified_badge.dart';
+import '../../../../auth/data/models/app_user.dart';
+import '../../../../auth/presentation/providers/auth_providers.dart';
 
 import '../providers/marketplace_providers.dart';
 import '../widgets/robot_assistant/robot_assistant_host.dart';
@@ -67,6 +72,36 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       context,
       message,
       onViewCart: () => context.pushNamed(RouteNames.homeownerCart),
+    );
+  }
+
+  Future<void> _openQuoteDialog(Product product) async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      if (mounted) {
+        showAppSnackbar(context, 'Sign in to request a bulk quote',
+            isError: true);
+      }
+      return;
+    }
+    final request = await showDialog<QuoteRequest>(
+      context: context,
+      builder: (_) => _BulkQuoteDialog(
+        product: product,
+        initialQty: _clampedQty(product),
+        user: user,
+        onSubmit: (q) =>
+            ref.read(marketplaceRepositoryProvider).createQuoteRequest(q),
+      ),
+    );
+    if (!mounted || request == null) return;
+    showAppSnackbar(
+      context,
+      'Quote request sent — the supplier will contact you directly',
+      color: AppColors.success,
+      duration: const Duration(seconds: 3),
+      actionLabel: 'View my quotes',
+      onAction: () => context.pushNamed(RouteNames.homeownerOrderHistory),
     );
   }
 
@@ -703,6 +738,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _openQuoteDialog(product),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                textStyle: const TextStyle(fontSize: 13),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.request_quote, size: 16),
+              label: const Text('Request bulk quote'),
+            ),
+          ),
         ],
       ),
     );
@@ -857,6 +907,204 @@ class _ChipBadge extends StatelessWidget {
                   color: color)),
         ],
       ),
+    );
+  }
+}
+
+// ── Bulk quote request dialog ─────────────────────────────────────────────────
+
+class _BulkQuoteDialog extends StatefulWidget {
+  const _BulkQuoteDialog({
+    required this.product,
+    required this.initialQty,
+    required this.user,
+    required this.onSubmit,
+  });
+
+  final Product product;
+  final int initialQty;
+  final AppUser user;
+  final Future<void> Function(QuoteRequest) onSubmit;
+
+  @override
+  State<_BulkQuoteDialog> createState() => _BulkQuoteDialogState();
+}
+
+class _BulkQuoteDialogState extends State<_BulkQuoteDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late int _qty;
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _phoneCtrl;
+  final _noteCtrl = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _qty = widget.initialQty;
+    _nameCtrl = TextEditingController(text: widget.user.name);
+    _phoneCtrl = TextEditingController(text: widget.user.phone ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  static String? _nameValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Add your name so the supplier knows who to contact.';
+    }
+    return null;
+  }
+
+  static String? _phoneValidator(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) {
+      return 'Add your phone number so the supplier can reach you.';
+    }
+    final digits = v.replaceAll(RegExp(r'[\s\-+()]'), '');
+    if (digits.length < 9 ||
+        digits.length > 15 ||
+        !RegExp(r'^\d+$').hasMatch(digits)) {
+      return 'Enter a valid phone number (9–15 digits)';
+    }
+    return null;
+  }
+
+  Future<void> _send() async {
+    if (_sending) return;
+    final form = _formKey.currentState;
+    if (form == null || !form.validate()) return;
+    setState(() => _sending = true);
+    final request = QuoteRequest(
+      id: MarketplaceRepository.newOrderId(),
+      productId: widget.product.id,
+      productName: widget.product.name,
+      productImage: widget.product.resolvedImages.firstOrNull,
+      supplierId: widget.product.resolvedSupplierId,
+      customerId: widget.user.uid,
+      customerName: _nameCtrl.text.trim(),
+      customerEmail: widget.user.email,
+      customerPhone: _phoneCtrl.text.trim(),
+      quantity: _qty,
+      note: _noteCtrl.text.trim(),
+      status: QuoteRequest.statusSubmitted,
+      createdAt: DateTime.now(),
+    );
+    try {
+      await widget.onSubmit(request);
+      if (!mounted) return;
+      Navigator.of(context).pop(request);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      showAppSnackbar(
+        context,
+        userMessage(e,
+            fallback: 'Could not send your quote request. Please try again.'),
+        isError: true,
+        duration: const Duration(seconds: 4),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Request bulk quote'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline,
+                      size: 16, color: AppColors.textSecondary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'The supplier will contact you personally by phone or '
+                      'email.',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.4,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Text(
+                    'Quantity',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                  ),
+                  const Spacer(),
+                  QuantityStepper(
+                    value: _qty,
+                    min: 1,
+                    compact: true,
+                    onChanged: (v) => setState(() => _qty = v),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(labelText: 'Name'),
+                validator: _nameValidator,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone'),
+                validator: _phoneValidator,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _noteCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Note',
+                  hintText:
+                      'What do you need? e.g. 20 units, delivery to Johor',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _sending ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _sending ? null : _send,
+          child: _sending
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Send request'),
+        ),
+      ],
     );
   }
 }

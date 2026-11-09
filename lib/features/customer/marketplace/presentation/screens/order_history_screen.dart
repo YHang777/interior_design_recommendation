@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/router/route_names.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/order.dart';
+import '../../../../../models/quote_request.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/float_button.dart';
 import '../../../../../shared/widgets/page_heading.dart';
@@ -19,8 +20,68 @@ class OrderHistoryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ordersAsync = ref.watch(customerOrdersProvider);
 
+    // Order tabs keep their own loading/error handling so a failed orders
+    // stream can't hide the Quotes tab (it reads an independent stream).
+    final orderTabs = ordersAsync.when<List<Widget>>(
+      skipLoadingOnRefresh: true,
+      loading: () => List.filled(4, const _OrdersSkeleton()),
+      error: (_, __) => List.filled(
+        4,
+        EmptyState(
+          icon: Icons.cloud_off_outlined,
+          title: 'Could not load your orders',
+          subtitle: 'Check your connection and try again.',
+          actionLabel: 'Retry',
+          onAction: () => ref.invalidate(customerOrdersProvider),
+        ),
+      ),
+      data: (orders) {
+        final sorted = [...orders]
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return [
+          _OrdersTab(
+            orders: sorted,
+            emptyIcon: Icons.receipt_long_outlined,
+            emptyTitle: 'No orders yet',
+            emptySubtitle:
+                'Your purchases will appear here with live tracking.',
+            emptyAction: 'Browse the store',
+          ),
+          _OrdersTab(
+            orders: sorted
+                .where((o) => !o.status.isTerminal)
+                .toList(),
+            emptyIcon: Icons.inventory_2_outlined,
+            emptyTitle: 'Nothing being processed',
+            emptySubtitle:
+                'Orders awaiting confirmation, being prepared or '
+                'ready for collection will appear here.',
+            emptyAction: 'Browse the store',
+          ),
+          _OrdersTab(
+            orders: sorted
+                .where((o) => o.status == OrderStatus.collected)
+                .toList(),
+            emptyIcon: Icons.handshake_outlined,
+            emptyTitle: 'No collected orders yet',
+            emptySubtitle:
+                'Completed orders land here, ready to be reviewed.',
+            emptyAction: 'Browse the store',
+          ),
+          _OrdersTab(
+            orders: sorted
+                .where((o) => o.status == OrderStatus.cancelled)
+                .toList(),
+            emptyIcon: Icons.cancel_outlined,
+            emptyTitle: 'No cancelled orders',
+            emptySubtitle: 'Cancelled orders will appear here.',
+          ),
+        ];
+      },
+    );
+
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: Stack(
@@ -55,66 +116,16 @@ class OrderHistoryScreen extends ConsumerWidget {
                         Tab(text: 'Processing'),
                         Tab(text: 'Collected'),
                         Tab(text: 'Cancelled'),
+                        Tab(text: 'Quotes'),
                       ],
                     ),
                   ),
                   Expanded(
-                    child: ordersAsync.when(
-                      skipLoadingOnRefresh: true,
-                      loading: () => const _OrdersSkeleton(),
-                      error: (_, __) => EmptyState(
-                        icon: Icons.cloud_off_outlined,
-                        title: 'Could not load your orders',
-                        subtitle: 'Check your connection and try again.',
-                        actionLabel: 'Retry',
-                        onAction: () =>
-                            ref.invalidate(customerOrdersProvider),
-                      ),
-                      data: (orders) {
-                        final sorted = [...orders]
-                          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-                        return TabBarView(
-                          children: [
-                            _OrdersTab(
-                              orders: sorted,
-                              emptyIcon: Icons.receipt_long_outlined,
-                              emptyTitle: 'No orders yet',
-                              emptySubtitle:
-                                  'Your purchases will appear here with live tracking.',
-                              emptyAction: 'Browse the store',
-                            ),
-                            _OrdersTab(
-                              orders: sorted
-                                  .where((o) => !o.status.isTerminal)
-                                  .toList(),
-                              emptyIcon: Icons.inventory_2_outlined,
-                              emptyTitle: 'Nothing being processed',
-                              emptySubtitle:
-                                  'Orders awaiting confirmation, being prepared or '
-                                  'ready for collection will appear here.',
-                              emptyAction: 'Browse the store',
-                            ),
-                            _OrdersTab(
-                              orders: sorted
-                                  .where((o) => o.status == OrderStatus.collected)
-                                  .toList(),
-                              emptyIcon: Icons.handshake_outlined,
-                              emptyTitle: 'No collected orders yet',
-                              emptySubtitle:
-                                  'Completed orders land here, ready to be reviewed.',
-                              emptyAction: 'Browse the store',
-                            ),
-                            _OrdersTab(
-                              orders: sorted
-                                  .where((o) => o.status == OrderStatus.cancelled)
-                                  .toList(),
-                              emptyIcon: Icons.cancel_outlined,
-                              emptyTitle: 'No cancelled orders',
-                              emptySubtitle: 'Cancelled orders will appear here.',
-                            ),
-                          ],
-                        );
-                      },
+                    child: TabBarView(
+                      children: [
+                        ...orderTabs,
+                        const _QuotesTab(),
+                      ],
                     ),
                   ),
                 ],
@@ -171,6 +182,139 @@ class _OrdersTab extends ConsumerWidget {
         itemBuilder: (context, index) {
           return _OrderCard(order: orders[index]);
         },
+      ),
+    );
+  }
+}
+
+class _QuotesTab extends ConsumerWidget {
+  const _QuotesTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final quotesAsync = ref.watch(customerQuoteRequestsProvider);
+
+    return quotesAsync.when(
+      skipLoadingOnRefresh: true,
+      loading: () => const Center(
+        child: CircularProgressIndicator(color: AppColors.accent),
+      ),
+      error: (_, __) => EmptyState(
+        icon: Icons.cloud_off_outlined,
+        title: 'Could not load your quote requests',
+        subtitle: 'Check your connection and try again.',
+        actionLabel: 'Retry',
+        onAction: () => ref.invalidate(customerQuoteRequestsProvider),
+      ),
+      data: (quotes) {
+        if (quotes.isEmpty) {
+          return const EmptyState(
+            icon: Icons.request_quote_outlined,
+            title: 'No quote requests yet',
+            subtitle: 'Tap "Request bulk quote" on any product to ask a '
+                'supplier for bulk pricing.',
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(customerQuoteRequestsProvider),
+          color: AppColors.accent,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: quotes.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) =>
+                _QuoteRequestCard(request: quotes[index]),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _QuoteRequestCard extends StatelessWidget {
+  const _QuoteRequestCard({required this.request});
+
+  final QuoteRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final contacted = request.isContacted;
+    final note = request.note.trim();
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    request.productName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                StatusBadge(
+                  label: contacted ? 'Contacted' : 'Pending',
+                  color: contacted ? AppColors.success : AppColors.warning,
+                  compact: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Qty ${request.quantity}',
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            if (note.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                note,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textHint,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              contacted
+                  ? 'The supplier has reached out to you'
+                  : 'Supplier will contact you',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

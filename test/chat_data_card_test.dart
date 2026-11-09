@@ -175,7 +175,7 @@ void main() {
 
     expect(find.text('Your budget'), findsOneWidget);
     expect(find.textContaining('Cap RM 2,000'), findsOneWidget);
-    expect(find.textContaining('Catalogue median estimate'), findsOneWidget);
+    expect(find.textContaining('Catalogue lowest estimate'), findsOneWidget);
     expect(find.textContaining('spent'), findsNothing);
   });
 

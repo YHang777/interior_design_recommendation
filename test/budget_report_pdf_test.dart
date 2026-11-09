@@ -3,11 +3,41 @@ import 'package:interior_design_recommendation/features/customer/budget/data/bud
 import 'package:interior_design_recommendation/services/invoice/budget_report_pdf.dart';
 
 List<EstimateLine> _pricedLines() => const [
-      EstimateLine(label: 'Wall Paint', price: 90, matches: 4),
-      EstimateLine(label: 'Flooring', price: 1200, matches: 6),
-      EstimateLine(label: 'Furniture', price: 1050, matches: 12),
-      EstimateLine(label: 'Lighting', price: 150, matches: 3),
-      EstimateLine(label: 'Accessories', price: 50, matches: 7),
+      EstimateLine(
+          label: 'Wall Paint',
+          price: 90,
+          matches: 4,
+          material: 'Matte White 5L',
+          supplier: 'WoodenX Surfaces',
+          productId: 'p1'),
+      EstimateLine(
+          label: 'Flooring',
+          price: 1200,
+          matches: 6,
+          material: 'Oak Vinyl Plank',
+          supplier: 'FloorCraft',
+          productId: 'p2'),
+      EstimateLine(
+          label: 'Furniture',
+          price: 1050,
+          matches: 12,
+          material: 'Nordic Sofa',
+          supplier: 'SeatLab',
+          productId: 'p3'),
+      EstimateLine(
+          label: 'Lighting',
+          price: 150,
+          matches: 3,
+          material: 'Arc Floor Lamp',
+          supplier: 'GlowWorks',
+          productId: 'p4'),
+      EstimateLine(
+          label: 'Accessories',
+          price: 50,
+          matches: 7,
+          material: 'Linen Throw',
+          supplier: 'SoftRoom',
+          productId: 'p5'),
     ];
 
 List<EstimateLine> _unpricedLines() => const [
@@ -46,6 +76,21 @@ void main() {
       );
 
       expectValidPdf(bytes);
+    });
+
+    test('renders a priced line with no material or supplier as a dash',
+        () async {
+      final bytes = await BudgetReportPdf.bytes(
+        room: 'Kitchen',
+        budgetRm: 5000,
+        lines: const [
+          EstimateLine(label: 'Furniture', price: 780, matches: 1),
+        ],
+        generatedAt: DateTime(2026, 10, 5),
+        ecoFriendly: false,
+      );
+
+      expectValidPdf(bytes, minBytes: 400);
     });
 
     test('paginates a long line list without crashing', () async {

@@ -608,6 +608,72 @@ void main() {
       reason: 'errors use the shared red error card',
     );
   });
+
+  testWidgets('placed tile renders the product photo', (tester) async {
+    await pumpPlanner(tester, furniture: [sofa()]);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('sofa-1')),
+        matching: find.byType(Image),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('size dialog applies a precise width', (tester) async {
+    await pumpPlanner(tester, furniture: [sofa()]);
+    await tester.tap(sofaTile());
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(TextButton, 'Size'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final widthField = find
+        .descendant(
+            of: find.byType(AlertDialog), matching: find.byType(TextField))
+        .first;
+    await tester.enterText(widthField, '210');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Apply'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(furnitureOf(tester).single.width, 210);
+  });
+
+  testWidgets('resize handle grows the piece', (tester) async {
+    await pumpPlanner(tester, furniture: [sofa()]);
+    await tester.tap(sofaTile());
+    await tester.pump();
+
+    final handle = find.byKey(const ValueKey('resize-handle'));
+    expect(handle, findsOneWidget);
+
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(furnitureOf(tester).single.width, greaterThan(180));
+  });
+
+  testWidgets('rotation badge appears only after rotate', (tester) async {
+    await pumpPlanner(tester, furniture: [sofa()]);
+    final badge = find.descendant(
+      of: find.byKey(const ValueKey('sofa-1')),
+      matching: find.byIcon(Icons.rotate_90_degrees_cw),
+    );
+    expect(badge, findsNothing);
+
+    await tester.tap(sofaTile());
+    await tester.pump();
+    await tester.tap(find.text('Rotate'));
+    await tester.pump();
+    expect(badge, findsOneWidget);
+  });
 }
 
 Matcher moreOrLessEqualsPoint(Offset expected, [double epsilon = 0.5]) =>

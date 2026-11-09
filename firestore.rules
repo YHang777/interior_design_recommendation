@@ -134,6 +134,32 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Quote requests: buyers create them, suppliers only flip status ──
+    //
+    // A quote request is a buyer asking for bulk pricing. No money or stock
+    // is involved, so the client creates it directly (like reviews), but the
+    // contact fields are frozen after create and only the assigned supplier
+    // may mark it contacted. There is no in-app chat: suppliers reach out
+    // by phone/email outside the app.
+    match /quote_requests/{requestId} {
+      allow read: if signedIn() &&
+          (request.auth.uid == resource.data.customerId ||
+           request.auth.uid == resource.data.supplierId);
+      allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.customerId &&
+          request.resource.data.status == 'submitted';
+      // Suppliers advance the flow with a field-path update that touches
+      // exactly {status, contactedAt} — contact and product data are frozen.
+      allow update: if signedIn() &&
+          request.auth.uid == resource.data.supplierId &&
+          request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'contactedAt']) &&
+          (!request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['status']) ||
+           request.resource.data.status in ['contacted']);
+      allow delete: if false;
+    }
+
     // ── App config: signed-in read; writes only via the admin backend ──
     // `appConfig/marketplace` holds the tax rate the admin console edits.
     // Buyers/sellers read it for checkout pricing; the Admin SDK (backend)

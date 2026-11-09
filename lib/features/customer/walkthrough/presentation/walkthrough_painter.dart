@@ -1,4 +1,6 @@
 import 'dart:math';
+import 'dart:typed_data' show Float64List;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,19 +21,42 @@ typedef _Face = ({
   Offset? labelPos,
   String? label,
   Color labelColor,
+  ui.Image? image,
+  Rect? dst,
+  List<Offset>? tex,
+  IconData? icon,
+  Color? tint,
 });
+
+// Photo asset for a placement: explicit path first, catalog by name second.
+String? _spritePathFor(FurniturePlacement f) {
+  final explicit = f.imageAsset;
+  if (explicit != null && explicit.isNotEmpty) return explicit;
+  for (final c in roomCatalog) {
+    if (c.iconName == f.iconName) return c.imageAsset;
+  }
+  return null;
+}
 
 // Street View style standing renderer: the camera is the walker (eye 150 cm,
 // yaw = controller heading), so you look at the room from inside it. Only
 // this file changes when a real 3D/VR renderer takes over the pose stream.
 class WalkthroughPainter extends CustomPainter {
-  WalkthroughPainter({required this.controller, this.ghost});
+  WalkthroughPainter({
+    required this.controller,
+    this.ghost,
+    this.sprites = const {},
+  });
 
   final WalkthroughController controller;
 
   /// Settled footprint preview shown while placing — green, drawn over
   /// everything so the drop spot always reads.
   final FurniturePlacement? ghost;
+
+  /// imageAsset path → decoded photo, loaded by the screen. Missing entries
+  /// fall back to an icon card (or a box when too close to project).
+  final Map<String, ui.Image> sprites;
 
   static const eyeHeight = 150.0;
   static const wallHeight = 250.0;
@@ -143,6 +168,11 @@ class WalkthroughPainter extends CustomPainter {
         labelPos: labelPos,
         label: label,
         labelColor: labelColor,
+        image: null,
+        dst: null,
+        tex: null,
+        icon: null,
+        tint: null,
       ));
     }
 
@@ -178,6 +208,142 @@ class WalkthroughPainter extends CustomPainter {
         strokeWidth: strokeWidth,
         label: label,
         labelAnchor: label == null ? null : (center, h + 14),
+        labelColor: labelColor,
+      );
+    }
+
+    // One placement → its best drawable: photo floor decal (rug), photo
+    // billboard (most pieces), icon card (no photo), box only when too
+    // close to project. Ghost style tints everything accent.
+    void enqueuePiece(
+      List<_Face> into,
+      FurniturePlacement f, {
+      bool ghostStyle = false,
+    }) {
+      final fw = footprintW(f);
+      final fh = footprintH(f);
+      final h = heightCmForFurniture(f.iconName);
+      final center = Offset(f.x + fw / 2, f.y + fh / 2);
+      final camC = toCam(center, h / 2);
+      final imgPath = _spritePathFor(f);
+      final img = imgPath == null ? null : sprites[imgPath];
+      final labelPos = project(toCam(center, h + 14));
+      final labelColor =
+          ghostStyle ? AppColors.accentDark : AppColors.textPrimary;
+      Paint strokeOf(Color c, double w) => Paint()
+        ..color = c
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w;
+      final clearStroke = Paint()..color = Colors.transparent;
+
+      if (img != null && h <= 8) {
+        // Flat piece (rug): texture laid on the floor, needs the whole
+        // footprint in front of the near plane or the mapping explodes.
+        final corners = [
+          Offset(f.x, f.y),
+          Offset(f.x + fw, f.y),
+          Offset(f.x + fw, f.y + fh),
+          Offset(f.x, f.y + fh),
+        ];
+        final camPts = [for (final c in corners) toCam(c, 0.0)];
+        if (camPts.every((p) => p.z >= nearClip)) {
+          final proj = [for (final p in camPts) project(p)!];
+          final path = polyPath(camPts);
+          if (path != null) {
+            into.add((
+              // +40 bias: floor pieces sort behind standing furniture.
+              depth:
+                  camPts.fold<double>(0, (s, p) => s + p.z) / camPts.length +
+                      40,
+              path: path,
+              fill: Paint()..color = Colors.transparent,
+              stroke: ghostStyle
+                  ? strokeOf(AppColors.accent, 2)
+                  : clearStroke,
+              labelPos: labelPos,
+              label: f.name,
+              labelColor: labelColor,
+              image: img,
+              dst: Rect.fromPoints(proj[0], proj[2]),
+              tex: proj,
+              icon: null,
+              tint: ghostStyle ? AppColors.accent : null,
+            ));
+          }
+        }
+        return;
+      }
+
+      final s = project(camC);
+      if (img != null) {
+        if (s != null && camC.z >= nearClip * 1.5) {
+          final dst = Rect.fromCenter(
+            center: s,
+            width: fw / camC.z * focal,
+            height: h / camC.z * focal,
+          );
+          into.add((
+            depth: camC.z,
+            path: Path()..addRect(dst),
+            fill: Paint()..color = Colors.transparent,
+            stroke: ghostStyle ? strokeOf(AppColors.accent, 2) : clearStroke,
+            labelPos: labelPos,
+            label: f.name,
+            labelColor: labelColor,
+            image: img,
+            dst: dst,
+            tex: null,
+            icon: null,
+            tint: ghostStyle ? AppColors.accent : null,
+          ));
+          return;
+        }
+        // Too close to project as a sprite — geometry below clips correctly.
+      } else if (s != null && camC.z >= nearClip * 1.5) {
+        final dst = Rect.fromCenter(
+          center: s,
+          width: fw / camC.z * focal,
+          height: h / camC.z * focal,
+        );
+        into.add((
+          depth: camC.z,
+          path: Path()..addRect(dst),
+          fill: Paint()..color = Colors.white.withValues(alpha: 0.95),
+          stroke: ghostStyle
+              ? strokeOf(AppColors.accent, 2)
+              : strokeOf(AppColors.border, 1.2),
+          labelPos: labelPos,
+          label: f.name,
+          labelColor: labelColor,
+          image: null,
+          dst: dst,
+          tex: null,
+          icon: iconForFurniture(f.iconName),
+          tint: ghostStyle ? AppColors.accent : null,
+        ));
+        return;
+      }
+
+      enqueueBox(
+        into,
+        [
+          Offset(f.x, f.y),
+          Offset(f.x + fw, f.y),
+          Offset(f.x + fw, f.y + fh),
+          Offset(f.x, f.y + fh),
+        ],
+        h,
+        side: ghostStyle
+            ? AppColors.accent.withValues(alpha: 0.3)
+            : AppColors.primary.withValues(alpha: 0.5),
+        top: ghostStyle
+            ? AppColors.accent.withValues(alpha: 0.5)
+            : AppColors.primary.withValues(alpha: 0.75),
+        stroke: ghostStyle
+            ? AppColors.accent
+            : AppColors.primary.withValues(alpha: 0.85),
+        strokeWidth: ghostStyle ? 2 : 1.2,
+        label: f.name,
         labelColor: labelColor,
       );
     }
@@ -258,65 +424,99 @@ class WalkthroughPainter extends CustomPainter {
       );
     }
 
-    // ── Furniture as extruded boxes ──
+    // ── Furniture ──
     for (final f in ctl.furniture) {
-      final fw = footprintW(f);
-      final fh = footprintH(f);
-      enqueueBox(
-        faces,
-        [
-          Offset(f.x, f.y),
-          Offset(f.x + fw, f.y),
-          Offset(f.x + fw, f.y + fh),
-          Offset(f.x, f.y + fh),
-        ],
-        heightCmForFurniture(f.iconName),
-        side: AppColors.primary.withValues(alpha: 0.5),
-        top: AppColors.primary.withValues(alpha: 0.75),
-        stroke: AppColors.primary.withValues(alpha: 0.85),
-        strokeWidth: 1.2,
-        label: f.name,
-      );
+      enqueuePiece(faces, f);
     }
 
     faces.sort((a, b) => b.depth.compareTo(a.depth));
     for (final face in faces) {
-      canvas.drawPath(face.path, face.fill);
-      canvas.drawPath(face.path, face.stroke);
+      _drawFace(canvas, face);
       _drawLabel(canvas, face, size);
     }
 
-    // ── Ghost last so the drop spot never hides behind a box ──
+    // ── Ghost last so the drop spot never hides behind a piece ──
     final g = ghost;
     if (g != null) {
-      final gw = footprintW(g);
-      final gh = footprintH(g);
       final ghostFaces = <_Face>[];
-      enqueueBox(
-        ghostFaces,
-        [
-          Offset(g.x, g.y),
-          Offset(g.x + gw, g.y),
-          Offset(g.x + gw, g.y + gh),
-          Offset(g.x, g.y + gh),
-        ],
-        heightCmForFurniture(g.iconName),
-        side: AppColors.accent.withValues(alpha: 0.3),
-        top: AppColors.accent.withValues(alpha: 0.5),
-        stroke: AppColors.accent,
-        strokeWidth: 2,
-        label: g.name,
-        labelColor: AppColors.accentDark,
-      );
+      enqueuePiece(ghostFaces, g, ghostStyle: true);
       ghostFaces.sort((a, b) => b.depth.compareTo(a.depth));
       for (final face in ghostFaces) {
-        canvas.drawPath(face.path, face.fill);
-        canvas.drawPath(face.path, face.stroke);
+        _drawFace(canvas, face);
         _drawLabel(canvas, face, size);
       }
     }
 
     _paintCompass(canvas, size, ctl.heading);
+  }
+
+  void _drawFace(Canvas canvas, _Face face) {
+    final img = face.image;
+    final dst = face.dst;
+    if (img != null && dst != null) {
+      final paint = Paint()..filterQuality = FilterQuality.low;
+      final tint = face.tint;
+      if (tint != null) {
+        paint.colorFilter = ColorFilter.mode(tint, BlendMode.modulate);
+      }
+      final tex = face.tex;
+      if (tex != null && tex.length == 4) {
+        // Floor piece: affine-map the photo onto the projected footprint.
+        canvas.save();
+        canvas.clipPath(face.path);
+        final src = Rect.fromLTWH(
+            0, 0, img.width.toDouble(), img.height.toDouble());
+        final t0 = tex[0];
+        final u = tex[1] - t0;
+        final v = tex[3] - t0;
+        canvas.transform(Float64List.fromList([
+          u.dx / src.width, u.dy / src.width, 0, 0,
+          v.dx / src.height, v.dy / src.height, 0, 0,
+          0, 0, 1, 0,
+          t0.dx, t0.dy, 0, 1,
+        ]));
+        canvas.drawImageRect(img, src, Rect.fromLTWH(0, 0, src.width, src.height), paint);
+        canvas.restore();
+        canvas.drawPath(face.path, face.stroke);
+      } else {
+        canvas.drawImageRect(
+            img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), dst, paint);
+        canvas.drawRect(dst, face.stroke);
+      }
+      return;
+    }
+    final icon = face.icon;
+    if (icon != null && dst != null) {
+      final rrect =
+          RRect.fromRectAndRadius(dst, const Radius.circular(10));
+      final tint = face.tint;
+      canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = tint != null
+                ? tint.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.95));
+      canvas.drawRRect(rrect, face.stroke);
+      final glyph = (dst.shortestSide * 0.52).clamp(16.0, 96.0).toDouble();
+      final tp = TextPainter(
+        text: TextSpan(
+          text: String.fromCharCode(icon.codePoint),
+          style: TextStyle(
+            fontSize: glyph,
+            fontFamily: icon.fontFamily,
+            package: icon.fontPackage,
+            color: tint ?? AppColors.primary,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(
+          canvas,
+          Offset(dst.center.dx - tp.width / 2, dst.center.dy - tp.height / 2));
+      return;
+    }
+    canvas.drawPath(face.path, face.fill);
+    canvas.drawPath(face.path, face.stroke);
   }
 
   void _drawLabel(Canvas canvas, _Face face, Size size) {

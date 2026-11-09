@@ -103,7 +103,17 @@ class _OrderManagementScreenState
       padding: EdgeInsets.fromLTRB(
           16, 16, 16, MediaQuery.paddingOf(context).bottom + 24),
       children: [
-        const PageHeading(title: 'Orders'),
+        PageHeading(
+          title: 'Orders',
+          actions: [
+            IconButton(
+              onPressed: () =>
+                  context.pushNamed(RouteNames.supplierQuoteRequests),
+              tooltip: 'Quote requests',
+              icon: const Icon(Icons.request_quote),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         FilterChipBar<_OrderBucket>(
           prefixIcon: const Padding(

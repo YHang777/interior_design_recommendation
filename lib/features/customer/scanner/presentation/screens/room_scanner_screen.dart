@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -739,6 +740,35 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     });
   }
 
+  // Shared by the tile's pan/resize commit and the size dialog.
+  void _commitFurniture(FurniturePlacement moved) {
+    setState(() {
+      final idx = _furniture.indexWhere((e) => e.id == moved.id);
+      if (idx < 0) return;
+      _furniture[idx] = _resolveDrop(moved);
+    });
+  }
+
+  _Cat? _catFor(String iconName) {
+    for (final c in _catalog) {
+      if (c.iconName == iconName) return c;
+    }
+    return null;
+  }
+
+  Future<void> _openSizeDialog() async {
+    if (_selectedIdx < 0 || _selectedIdx >= _furniture.length) return;
+    final item = _furniture[_selectedIdx];
+    final result = await showDialog<({double w, double h})>(
+      context: context,
+      builder: (_) => _SizeDialog(item: item, cat: _catFor(item.iconName)),
+    );
+    if (result == null || !mounted) return;
+    if (_selectedIdx < 0 || _selectedIdx >= _furniture.length) return;
+    _commitFurniture(
+        _furniture[_selectedIdx].copyWith(width: result.w, height: result.h));
+  }
+
   void _openDimensionEdit() {
     _widthCtrl.text = _roomW.toInt().toString();
     _heightCtrl.text = _roomH.toInt().toString();
@@ -1467,14 +1497,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               onTap: () =>
                                   setState(() => _selectedIdx = i),
                               onLongPress: () => _removeFurniture(i),
-                              onCommit: (moved) {
-                                setState(() {
-                                  final idx = _furniture
-                                      .indexWhere((e) => e.id == moved.id);
-                                  if (idx < 0) return;
-                                  _furniture[idx] = _resolveDrop(moved);
-                                });
-                              },
+                              onCommit: _commitFurniture,
                             ),
                           ],
                         ),
@@ -1509,6 +1532,19 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                     style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w600,
                         fontSize: 13),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _openSizeDialog,
+                  icon: const Icon(Icons.aspect_ratio, size: 15),
+                  label: const Text('Size'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8),
+                    minimumSize: Size.zero,
+                    visualDensity:
+                        VisualDensity.compact,
                   ),
                 ),
                 TextButton.icon(
@@ -1744,6 +1780,131 @@ IconData _iconFor(String iconName) {
   return Icons.folder;
 }
 
+String? _imagePathOf(FurniturePlacement item) {
+  final direct = item.imageAsset;
+  if (direct != null && direct.isNotEmpty) return direct;
+  for (final c in _RoomScannerScreenState._catalog) {
+    if (c.iconName == item.iconName && c.imageAsset != null) {
+      return c.imageAsset;
+    }
+  }
+  return null;
+}
+
+// ─── Precise furniture size dialog ───
+// Owns its controllers so the exit animation can still rebuild the fields;
+// disposing them the moment the future completes would crash that rebuild.
+class _SizeDialog extends StatefulWidget {
+  const _SizeDialog({required this.item, required this.cat});
+
+  final FurniturePlacement item;
+  final _Cat? cat;
+
+  @override
+  State<_SizeDialog> createState() => _SizeDialogState();
+}
+
+class _SizeDialogState extends State<_SizeDialog> {
+  late final TextEditingController _wCtrl;
+  late final TextEditingController _hCtrl;
+  String _error = '';
+
+  static String _fmt(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : '$v';
+
+  @override
+  void initState() {
+    super.initState();
+    _wCtrl = TextEditingController(text: _fmt(widget.item.width));
+    _hCtrl = TextEditingController(text: _fmt(widget.item.height));
+  }
+
+  @override
+  void dispose() {
+    _wCtrl.dispose();
+    _hCtrl.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final w = double.tryParse(_wCtrl.text.trim());
+    final h = double.tryParse(_hCtrl.text.trim());
+    if (w == null || h == null || w < 20 || h < 20 || w > 500 || h > 500) {
+      setState(() => _error = 'Must be 20–500 cm');
+      return;
+    }
+    Navigator.pop(context, (w: w, h: h));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Size — ${widget.item.name}'),
+      content: SizedBox(
+        width: 260,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _wCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Width (cm)',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _hCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Height (cm)',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: widget.cat == null
+                    ? null
+                    : () {
+                        setState(() {
+                          _wCtrl.text = _fmt(widget.cat!.defaultWidth);
+                          _hCtrl.text = _fmt(widget.cat!.defaultHeight);
+                          _error = '';
+                        });
+                      },
+                child: const Text('Catalog default'),
+              ),
+            ),
+            if (_error.isNotEmpty)
+              Text(
+                _error,
+                style:
+                    GoogleFonts.poppins(fontSize: 12, color: AppColors.error),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _apply,
+          style: ElevatedButton.styleFrom(minimumSize: Size.zero),
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
+}
+
 // ─── Draggable furniture tile ───
 class _FurnitureTile extends StatefulWidget {
   const _FurnitureTile({
@@ -1774,12 +1935,15 @@ class _FurnitureTile extends StatefulWidget {
 
 class _FurnitureTileState extends State<_FurnitureTile> {
   Offset? _live;
+  Size? _liveSize;
 
   Offset get _pos => _live ?? Offset(widget.item.x, widget.item.y);
+  Size get _size =>
+      _liveSize ?? Size(widget.item.width, widget.item.height);
 
   bool get _swapped => widget.item.rotation % 180 == 90;
-  double get _boxW => _swapped ? widget.item.height : widget.item.width;
-  double get _boxH => _swapped ? widget.item.width : widget.item.height;
+  double get _boxW => _swapped ? _size.height : _size.width;
+  double get _boxH => _swapped ? _size.width : _size.height;
 
   double get _maxX => widget.roomW - _boxW;
   double get _maxY => widget.roomH - _boxH;
@@ -1811,6 +1975,54 @@ class _FurnitureTileState extends State<_FurnitureTile> {
     widget.onCommit(widget.item.copyWith(x: p.dx, y: p.dy));
   }
 
+  void _onResizeStart(DragStartDetails _) {
+    setState(() =>
+        _liveSize = Size(widget.item.width, widget.item.height));
+  }
+
+  void _onResizeUpdate(DragUpdateDetails d) {
+    final s = widget.scale;
+    final item = widget.item;
+    final swapped = item.rotation % 180 == 90;
+    var w = _liveSize?.width ?? item.width;
+    var h = _liveSize?.height ?? item.height;
+    // Screen boxW grows with dx — which underlying dim that is depends
+    // on whether the footprint is swapped by rotation.
+    if (!swapped) {
+      w += d.delta.dx / s;
+      h += d.delta.dy / s;
+    } else {
+      h += d.delta.dx / s;
+      w += d.delta.dy / s;
+    }
+    final maxBoxW = max(20.0, widget.roomW - item.x);
+    final maxBoxH = max(20.0, widget.roomH - item.y);
+    if (!swapped) {
+      w = w.clamp(20.0, min(500.0, maxBoxW)).toDouble();
+      h = h.clamp(20.0, min(500.0, maxBoxH)).toDouble();
+    } else {
+      h = h.clamp(20.0, min(500.0, maxBoxW)).toDouble();
+      w = w.clamp(20.0, min(500.0, maxBoxH)).toDouble();
+    }
+    setState(() => _liveSize = Size(w, h));
+  }
+
+  void _onResizeEnd(DragEndDetails _) => _commitResize();
+
+  void _onResizeCancel() => _commitResize();
+
+  void _commitResize() {
+    final live = _liveSize;
+    setState(() => _liveSize = null);
+    if (live == null) return;
+    final w = (live.width / 5).round() * 5;
+    final h = (live.height / 5).round() * 5;
+    widget.onCommit(widget.item.copyWith(
+      width: w.clamp(20, 500).toDouble(),
+      height: h.clamp(20, 500).toDouble(),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
@@ -1822,6 +2034,7 @@ class _FurnitureTileState extends State<_FurnitureTile> {
     final itemH = item.height * s;
     final isSelected = widget.selected;
     final icon = _iconFor(item.iconName);
+    final imagePath = _imagePathOf(item);
 
     return Positioned(
       left: p.dx * s,
@@ -1838,12 +2051,11 @@ class _FurnitureTileState extends State<_FurnitureTile> {
             onPanUpdate: _onPanUpdate,
             onPanEnd: _onPanEnd,
             onPanCancel: _onPanCancel,
-            child: Center(
-              child: Transform.rotate(
-                angle: item.rotation * pi / 180,
-                child: Container(
-                  width: itemW,
-                  height: itemH,
+            child: Stack(
+              children: [
+                Container(
+                  width: boxW,
+                  height: boxH,
                   clipBehavior: Clip.hardEdge,
                   decoration: BoxDecoration(
                     color: isSelected
@@ -1857,55 +2069,135 @@ class _FurnitureTileState extends State<_FurnitureTile> {
                       width: isSelected ? 2.5 : 1.2,
                     ),
                   ),
-                  child: itemW > 40 && itemH > 30
-                      ? Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              icon,
-                              size: min(itemW * 0.35, 20),
-                              color: isSelected
-                                  ? AppColors.accent
-                                  : AppColors.textSecondary,
-                            ),
-                            if (itemW > 55)
-                              SizedBox(
-                                width: itemW - 4,
-                                child: Text(
-                                  item.name,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: min(itemW * 0.1, 10)
-                                        .clamp(6, 10)
-                                        .toDouble(),
-                                    fontWeight: FontWeight.w600,
-                                    color: isSelected
-                                        ? AppColors.accent
-                                        : AppColors.textPrimary,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        )
-                      : Center(
-                          child: Icon(
-                            icon,
-                            size: min(itemW * 0.5, 14),
-                            color: isSelected
-                                ? AppColors.accent
-                                : AppColors.textSecondary,
-                          ),
-                        ),
+                  child: _tileBody(
+                      item, itemW, itemH, icon, imagePath, isSelected),
                 ),
-              ),
+                if (item.rotation % 360 != 0)
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: Icon(
+                      Icons.rotate_90_degrees_cw,
+                      size: 11,
+                      color: isSelected
+                          ? AppColors.accent
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+                if (isSelected)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: GestureDetector(
+                        key: const ValueKey('resize-handle'),
+                        behavior: HitTestBehavior.opaque,
+                        // down: the pre-slop delta lands as the first update —
+                        // with `start` a 2-move drag only ever accepts and
+                        // never resizes.
+                        dragStartBehavior: DragStartBehavior.down,
+                        onTap: widget.onTap,
+                        onPanStart: _onResizeStart,
+                        onPanUpdate: _onResizeUpdate,
+                        onPanEnd: _onResizeEnd,
+                        onPanCancel: _onResizeCancel,
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                                color: AppColors.accent, width: 1.2),
+                          ),
+                          child: const Icon(Icons.aspect_ratio,
+                              size: 14, color: AppColors.accent),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  // Image stays upright inside the (already orientation-swapped) footprint;
+  // only the name label sits under it when there is room.
+  Widget _tileBody(
+    FurniturePlacement item,
+    double itemW,
+    double itemH,
+    IconData icon,
+    String? imagePath,
+    bool isSelected,
+  ) {
+    final iconColor = isSelected ? AppColors.accent : AppColors.textSecondary;
+    final nameColor = isSelected ? AppColors.accent : AppColors.textPrimary;
+    final showName = itemW > 55 && itemH > 40;
+    final nameStyle = GoogleFonts.poppins(
+      fontSize: min(itemW * 0.1, 10).clamp(6, 10).toDouble(),
+      fontWeight: FontWeight.w600,
+      color: nameColor,
+    );
+
+    if (itemW <= 40 || itemH <= 30) {
+      return Center(
+        child: Icon(icon, size: min(itemW * 0.5, 14), color: iconColor),
+      );
+    }
+
+    if (imagePath != null) {
+      final img = Image.asset(
+        imagePath,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => Center(
+          child: Icon(icon, size: min(itemW * 0.35, 20), color: iconColor),
+        ),
+      );
+      if (!showName) {
+        return Padding(padding: const EdgeInsets.all(4), child: img);
+      }
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 2),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Expanded(child: img),
+            Text(
+              item.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: nameStyle,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: min(itemW * 0.35, 20), color: iconColor),
+        if (showName)
+          SizedBox(
+            width: itemW - 4,
+            child: Text(
+              item.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: nameStyle,
+            ),
+          ),
+      ],
     );
   }
 }

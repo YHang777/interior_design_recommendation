@@ -20,6 +20,8 @@ import '../../features/supplier/presentation/screens/analytics_screen.dart';
 import '../../features/supplier/presentation/screens/order_management_screen.dart';
 import '../../features/supplier/presentation/screens/product_form_screen.dart';
 import '../../features/supplier/presentation/screens/product_management_screen.dart';
+import '../../features/supplier/presentation/screens/quote_request_detail_screen.dart';
+import '../../features/supplier/presentation/screens/quote_requests_screen.dart';
 import '../../features/supplier/presentation/screens/sales_report_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_dashboard_screen.dart';
 import '../../features/supplier/presentation/screens/supplier_profile_screen.dart';
@@ -210,6 +212,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (_, state) => _buildPage(
           SupplierOrderDetailScreen(
             orderId: state.pathParameters['id']!,
+          ),
+        ),
+      ),
+
+      // ── Supplier quote requests (bulk-quote inbox, full-screen) ──
+      GoRoute(
+        path: '/supplier/quotes',
+        name: RouteNames.supplierQuoteRequests,
+        pageBuilder: (_, __) => _buildPage(const QuoteRequestsScreen()),
+      ),
+      GoRoute(
+        path: '/supplier/quotes/:id',
+        name: RouteNames.supplierQuoteRequestDetail,
+        pageBuilder: (_, state) => _buildPage(
+          QuoteRequestDetailScreen(
+            requestId: state.pathParameters['id']!,
           ),
         ),
       ),

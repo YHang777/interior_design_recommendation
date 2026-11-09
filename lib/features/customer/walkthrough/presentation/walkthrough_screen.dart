@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,11 +37,13 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   int _placingRotation = 0;
   bool _showHint = true;
   Timer? _repeat;
+  final Map<String, ui.Image> _sprites = {};
 
   @override
   void initState() {
     super.initState();
     _ctl = WalkthroughController(design: widget.design ?? _emptyDesign());
+    _loadSprites();
   }
 
   @override
@@ -49,6 +52,33 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     _ctl.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  // Decode every catalog photo (plus anything already on the design) so the
+  // painter can stand them up as billboards; failures stay box/icon fallback.
+  void _loadSprites() {
+    final paths = <String>{
+      for (final c in roomCatalog)
+        if (c.imageAsset != null) c.imageAsset!,
+      for (final f in _ctl.furniture)
+        if (f.imageAsset != null && f.imageAsset!.isNotEmpty) f.imageAsset!,
+    };
+    for (final path in paths) {
+      if (_sprites.containsKey(path)) continue;
+      _loadSprite(path);
+    }
+  }
+
+  Future<void> _loadSprite(String path) async {
+    try {
+      final data = await rootBundle.load(path);
+      final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+      final frame = await codec.getNextFrame();
+      if (!mounted) return;
+      setState(() => _sprites[path] = frame.image);
+    } catch (_) {
+      // Missing/broken asset — painter falls back to icon card or box.
+    }
   }
 
   static RoomDesign _emptyDesign() => RoomDesign(
@@ -124,6 +154,7 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
                       ghost: _placing == null
                           ? null
                           : _ctl.resolveGhost(_pending()),
+                      sprites: _sprites,
                     ),
                   ),
                 ),

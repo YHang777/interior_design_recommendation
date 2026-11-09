@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/router/push_once.dart';
 import '../../../../../shared/widgets/empty_state.dart';
 import '../../../../../shared/widgets/page_heading.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
@@ -123,7 +124,8 @@ class DashboardScreen extends ConsumerWidget {
                       icon: Icons.account_balance_wallet,
                       label: 'Budget',
                       value: _budgetValue(stats),
-                      gradientColors: [AppColors.success, AppColors.gradientGreen]),
+                      gradientColors: [AppColors.success, AppColors.gradientGreen],
+                      onTap: () => pushOnce(context, '/budget')),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -341,71 +343,77 @@ class _StatCard extends StatelessWidget {
       {required this.icon,
       required this.label,
       required this.value,
-      required this.gradientColors});
+      required this.gradientColors,
+      this.onTap});
   final IconData icon;
   final String label;
   final String value;
   final List<Color> gradientColors;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            gradientColors[0].withValues(alpha: 0.08),
-            gradientColors[1].withValues(alpha: 0.04),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              gradientColors[0].withValues(alpha: 0.08),
+              gradientColors[1].withValues(alpha: 0.04),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: gradientColors[0].withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+                color: gradientColors[0].withValues(alpha: 0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 3)),
           ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: gradientColors[0].withValues(alpha: 0.12)),
-        boxShadow: [
-          BoxShadow(
-              color: gradientColors[0].withValues(alpha: 0.08),
-              blurRadius: 8,
-              offset: const Offset(0, 3)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: gradientColors,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradientColors,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
               ),
-              borderRadius: BorderRadius.circular(10),
+              child: Icon(icon, color: Colors.white, size: 18),
             ),
-            child: Icon(icon, color: Colors.white, size: 18),
-          ),
-          const SizedBox(height: 10),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(value,
-                maxLines: 1,
-                style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary)),
-          ),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(label,
-                maxLines: 1,
-                style: GoogleFonts.poppins(
-                    fontSize: 11, color: AppColors.textSecondary)),
-          ),
-        ],
+            const SizedBox(height: 10),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(value,
+                  maxLines: 1,
+                  style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary)),
+            ),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(label,
+                  maxLines: 1,
+                  style: GoogleFonts.poppins(
+                      fontSize: 11, color: AppColors.textSecondary)),
+            ),
+          ],
+        ),
       ),
     );
   }
