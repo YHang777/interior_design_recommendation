@@ -402,7 +402,8 @@ void main() {
       // the scan coach) alive no matter how quiet ARCore has gone.
       m.ingest(
           [plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3, fresh: false)],
-          now: t0.add(const Duration(seconds: 20)));
+          now: t0.add(
+              PlaneMemory().recordMaxAge + const Duration(seconds: 1)));
       expect(m.floorPlanes, hasLength(1));
       // Aging a record never clears the height estimate.
       expect(m.floorY, closeTo(0, 1e-9));
@@ -422,7 +423,8 @@ void main() {
     test('payload absence prunes the record after recordMaxAge', () {
       final m = PlaneMemory();
       m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t0);
-      m.ingest(const [], now: t0.add(const Duration(seconds: 13)));
+      m.ingest(const [],
+          now: t0.add(m.recordMaxAge + const Duration(seconds: 1)));
       expect(m.floorPlanes, isEmpty);
       // Aging a record never clears the height estimate.
       expect(m.floorY, closeTo(0, 1e-9));
@@ -440,11 +442,37 @@ void main() {
 
       // After an absence long enough to prune, the next frame — fresh or
       // not — rebuilds the record.
-      m.ingest(const [], now: t0.add(const Duration(seconds: 13)));
+      final gone = t0.add(m.recordMaxAge + const Duration(seconds: 1));
+      m.ingest(const [], now: gone);
       expect(m.floorPlanes, isEmpty);
       m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3, fresh: false)],
-          now: t0.add(const Duration(seconds: 14)));
+          now: gone.add(const Duration(seconds: 1)));
       expect(m.floorPlanes, hasLength(1));
+    });
+
+    test('the floor stream evicts the oldest record past maxRecords', () {
+      final m = PlaneMemory();
+      m.ingest([
+        for (var id = 1; id <= 64; id++)
+          plane(id: id, type: 1, cy: 0, ex: 3, ez: 3),
+      ], now: t0);
+      expect(m.smoothedPlanes(), hasLength(64));
+
+      // A 65th plane at a later time evicts the oldest (all of the first
+      // batch share lastSeen, so the first-inserted goes) and survives.
+      m.ingest([plane(id: 999, type: 1, cy: 0, ex: 3, ez: 3)],
+          now: t0.add(const Duration(seconds: 1)));
+      final ids = m.smoothedPlanes().map((p) => p.id).toSet();
+      expect(ids, hasLength(64));
+      expect(ids, contains(999));
+    });
+
+    test('the smallest legacy-extent wall still classifies as wall', () {
+      // 0.8×1.5 = 1.2 m² is the smallest geometry the extent gates admit;
+      // the shared 1.0 m² area term must never contradict them.
+      final m = PlaneMemory();
+      m.ingest([plane(id: 9, type: 2, ex: 0.8, ez: 1.5)]);
+      expect(m.classOf(9), PlaneClass.wall);
     });
 
     test('freshMs in the payload maps to the fresh flag', () {
@@ -710,6 +738,81 @@ void main() {
         m.noteFloorYCandidate(0.0);
       }
       expect(m.floorY, closeTo(0.75 * 0.15 * 0.15, 1e-9));
+    });
+
+    test('sustained readings above floorY recover a ghost plunge', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      expect(m.floorY, closeTo(0, 1e-9));
+
+      // A reflection drags the plane path down (α 0.85 toward −0.6).
+      m.ingest([plane(id: 1, type: 1, cy: -0.6, ex: 3, ez: 3)]);
+      expect(m.floorY, closeTo(-0.6 * 0.85, 1e-9));
+
+      // The cloud keeps reading the true floor — nine agreeing readings
+      // hold, the tenth jumps back the same way a downward correction does.
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(-0.6 * 0.85, 1e-9),
+          reason: 'nine agreeing readings are not yet confirmation');
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, greaterThan(-0.1),
+          reason: 'the recovery jump must undo most of the plunge');
+    });
+
+    test('a near-floor reading resets the recovery votes', () {
+      final m = PlaneMemory();
+      m.noteCameraY(1.5);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)]);
+      m.ingest([plane(id: 1, type: 1, cy: -0.6, ex: 3, ez: 3)]);
+      final plunged = m.floorY!;
+
+      for (var i = 0; i < 5; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      // Inside the deadband and under the 10 cm gap — true-floor noise,
+      // not a plunge: the accumulated votes wipe.
+      m.noteFloorYCandidate(-0.53);
+      for (var i = 0; i < 9; i++) {
+        m.noteFloorYCandidate(0.0);
+      }
+      expect(m.floorY, closeTo(plunged, 1e-9),
+          reason: 'the reset streak needs ten fresh readings');
+      m.noteFloorYCandidate(0.0);
+      expect(m.floorY, isNot(closeTo(plunged, 1e-9)));
+    });
+
+    test('floorYCorroborated tracks fresh probe evidence', () {
+      final m = PlaneMemory();
+      final t0 = DateTime(2026, 1, 1);
+      expect(m.floorYCorroborated(now: t0), isFalse);
+
+      m.noteCameraY(1.5, now: t0);
+      m.ingest([plane(id: 1, type: 1, cy: 0, ex: 3, ez: 3)], now: t0);
+      expect(m.floorYCorroborated(now: t0), isFalse,
+          reason: 'no probe reading yet');
+
+      m.noteFloorYCandidate(-0.02, now: t0);
+      expect(m.floorYCorroborated(now: t0), isTrue,
+          reason: 'in-band reading within 15 cm of floorY');
+      expect(
+        m.floorYCorroborated(now: t0.add(const Duration(seconds: 6))),
+        isTrue,
+        reason: 'silence alone does not revoke — probes only run while the '
+            'floor is in view, and flapping the ref moved the green sheet '
+            'with the camera pitch',
+      );
+      expect(
+        m.floorYCorroborated(now: t0.add(const Duration(seconds: 31))),
+        isFalse,
+        reason: 'a long evidence-free stretch still decays the agreement',
+      );
+
+      m.noteFloorYCandidate(-0.4, now: t0);
+      expect(m.floorYCorroborated(now: t0), isFalse,
+          reason: 'a reading 40 cm away does not corroborate');
     });
   });
 

@@ -150,7 +150,8 @@ class PlaneMemory {
     this.minPhoneAboveFloorM = 0.85,
     this.maxPhoneAboveFloorM = 2.4,
     this.loosePhoneAboveFloorM = 0.5,
-    this.recordMaxAge = const Duration(seconds: 12),
+    this.recordMaxAge = const Duration(seconds: 60),
+    this.maxRecords = 64,
     this.freshnessWindow = const Duration(seconds: 10),
     this.flipVotes = 2,
     this.matchRadiusM = 0.75,
@@ -189,6 +190,10 @@ class PlaneMemory {
   final double loosePhoneAboveFloorM;
 
   final Duration recordMaxAge;
+
+  // Per-stream cap: oldest lastSeen evicts first, so a live plane (refreshed
+  // every ingest) is never the one dropped and turn-back stays bounded.
+  final int maxRecords;
 
   final Duration freshnessWindow;
 
@@ -256,6 +261,19 @@ class PlaneMemory {
 
   int _probeStreak = 0;
 
+  // Latest in-band probe evidence, stored before the deadband can reject
+  // it — the overlay refuses to pull paint height down to a stray low
+  // plane while the cloud still corroborates floorY at this height.
+  double? _lastProbeY;
+
+  DateTime? _lastProbeAt;
+
+  // Recovery streak: sustained readings well ABOVE floorY confirm a ghost
+  // plunge the downward-only ratchet can never undo on its own.
+  int _upStreak = 0;
+
+  double? _upStreakY;
+
   DateTime? _lastIngest;
 
   int _nextSyntheticKey = 1;
@@ -274,6 +292,22 @@ class PlaneMemory {
     final provenY = _probeProvenY;
     if (provenY != null) return (fy - provenY).abs() <= 0.25;
     return _floorYStrictEstablished;
+  }
+
+  // Cloud corroboration of floorY: the latest in-band probe reading sits
+  // within 15 cm of it. Only DISAGREEING evidence revokes immediately —
+  // probes run only while the floor is in view, so plain silence (panning
+  // up to scan a wall) must not flap the ref between floorY and a low
+  // plane, which moved the green sheet and the wall foot with the pitch.
+  // A long evidence-free stretch still decays the positive evidence.
+  bool floorYCorroborated({DateTime? now}) {
+    final fy = _floorY;
+    final y = _lastProbeY;
+    final at = _lastProbeAt;
+    if (fy == null || y == null || at == null) return false;
+    final t = now ?? DateTime.now();
+    if (t.difference(at) > const Duration(seconds: 30)) return false;
+    return (y - fy).abs() <= 0.15;
   }
 
   bool get isFresh {
@@ -299,15 +333,18 @@ class PlaneMemory {
   // that locked onto a furniture top or floating phantom down to the real
   // floor — then _reclassify flips the wrong plane within a couple of
   // votes and the geometric overlay repaints (overlayZoneOf reads floorY
-  // directly). Downward only with a deadband (a low percentile reads
-  // slightly low on noise), inside the same camera band the plane path
-  // trusts, and it never ESTABLISHES floorY — planes do that. Runs as a
-  // background evidence accumulator: _refocusChecks agreeing readings
-  // confirm the detected plane is wrong, then one 0.85 jump lands.
+  // directly). Downward with a deadband (a low percentile reads slightly
+  // low on noise), inside the same camera band the plane path trusts, and
+  // it never ESTABLISHES floorY — planes do that. Runs as a background
+  // evidence accumulator: _refocusChecks agreeing readings confirm the
+  // detected plane is wrong, then one 0.85 jump lands. The reverse streak
+  // recovers a ghost plunge the plane path may have caused.
   void noteFloorYCandidate(double y, {DateTime? now}) {
     if (!y.isFinite || _floorY == null) {
       _probeStreak = 0;
       _probeStreakY = null;
+      _upStreak = 0;
+      _upStreakY = null;
       return;
     }
     if (_cameraY != null) {
@@ -315,16 +352,47 @@ class PlaneMemory {
       if (below < loosePhoneAboveFloorM || below > maxPhoneAboveFloorM) {
         _probeStreak = 0;
         _probeStreakY = null;
+        _upStreak = 0;
+        _upStreakY = null;
         return;
       }
     }
+    // Evidence for the overlay's ref-pull gate — every in-band reading
+    // counts, even one the deadband below is about to reject.
+    _lastProbeY = y;
+    _lastProbeAt = now ?? DateTime.now();
     final fy = _floorY!;
     const deadbandM = 0.05;
     if (y >= fy - deadbandM) {
       _probeStreak = 0;
       _probeStreakY = null;
+      // A reflection ghost can drag floorY far below the true floor via
+      // the plane path, and the downward-only correction can never undo
+      // that. Sustained readings 10 cm+ above floorY confirm the plunge
+      // and jump back the same 0.85 way; anything nearer the deadband
+      // (true-floor noise, a rug under the phone) resets the votes.
+      if (y - fy > 0.10) {
+        final upY = _upStreakY;
+        if (upY == null || (y - upY).abs() > 0.05) {
+          _upStreakY = y;
+          _upStreak = 1;
+        } else {
+          _upStreak++;
+          if (_upStreak >= _refocusChecks) {
+            _floorY = fy + (y - fy) * 0.85;
+            _upStreak = 0;
+            _upStreakY = null;
+            _reclassify();
+          }
+        }
+      } else {
+        _upStreak = 0;
+        _upStreakY = null;
+      }
       return;
     }
+    _upStreak = 0;
+    _upStreakY = null;
     // _refocusChecks agreeing readings confirm the plane is wrong; a lone
     // noisy depth median used to slam floorY under the true floor and flip
     // the painted plane to a mask ("refocus killed my corrected plane").
@@ -364,11 +432,29 @@ class PlaneMemory {
     }
     // Presence-based liveness: anything in this payload was refreshed above
     // and can never be pruned here, so a prune means the plane has been
-    // absent from the payload for recordMaxAge.
-    _floor.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
-    _wall.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
+    // absent from the payload for recordMaxAge — then the oldest records
+    // go first so each stream stays bounded.
+    _prune(_floor, t);
+    _prune(_wall, t);
     _updateFloorY();
     _reclassify();
+  }
+
+  void _prune(Map<Object, _TrackedPlane> stream, DateTime t) {
+    stream.removeWhere((_, r) => t.difference(r.lastSeen) > recordMaxAge);
+    while (stream.length > maxRecords) {
+      Object? oldestKey;
+      DateTime? oldestAt;
+      for (final e in stream.entries) {
+        final at = e.value.lastSeen;
+        if (oldestAt == null || at.isBefore(oldestAt)) {
+          oldestAt = at;
+          oldestKey = e.key;
+        }
+      }
+      if (oldestKey == null) break;
+      stream.remove(oldestKey);
+    }
   }
 
   PlaneClass? classOf(int id) {
@@ -707,7 +793,9 @@ class PlaneMemory {
     if (r.planeType == 2) {
       final shortSide = math.min(r.extentX, r.extentZ);
       final longSide = math.max(r.extentX, r.extentZ);
-      if (shortSide >= minWallExtentM && longSide >= minWallLongExtentM) {
+      if (shortSide >= minWallExtentM &&
+          longSide >= minWallLongExtentM &&
+          ArPlacementPolicy.wallAreaQualifies(r.extentX, r.extentZ)) {
         return PlaneClass.wall;
       }
       return PlaneClass.smallSurface;

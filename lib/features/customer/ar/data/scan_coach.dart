@@ -148,6 +148,9 @@ class ScanCoach {
     var wallProgress = 0.0;
     for (final p in planes) {
       if (p.planeType != 2) continue;
+      if (!ArPlacementPolicy.wallAreaQualifies(p.extentX, p.extentZ)) {
+        continue;
+      }
       final a =
           math.min(p.extentX, p.extentZ) / ArPlacementPolicy.minWallExtentM;
       final b =

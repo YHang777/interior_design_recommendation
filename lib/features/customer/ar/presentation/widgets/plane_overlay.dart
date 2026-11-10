@@ -10,12 +10,27 @@ import '../../data/plane_overlay_math.dart';
 // furniture placement reads at a glance. Furniture-classified quads pass in
 // as [masks] and are punched out of both zones; the floor is additionally
 // clipped by the wall zone so detection can never run up the wall.
+// Zone paths are expensive (Skia path booleans over every polygon), so a
+// snapshot can hand its cache here: paints of the SAME snapshot at the SAME
+// viewport with the SAME viewProjection reuse the Paths instead of
+// recomputing them. vp is part of the key — a camera move must reproject
+// the world-space quads even when the viewport size is unchanged, or the
+// paint freezes on screen and slides with the preview. The cache belongs to
+// exactly one snapshot's quad/vp/masks set — never share it across sets.
+class OverlayZoneCache {
+  Size? size;
+  Matrix4? vp;
+  Path? floor;
+  Path? wall;
+}
+
 class PlaneOverlay extends StatelessWidget {
   const PlaneOverlay({
     super.key,
     required this.viewProjection,
     required this.quads,
     this.masks = const [],
+    this.zoneCache,
   });
 
   final Matrix4 viewProjection;
@@ -24,18 +39,22 @@ class PlaneOverlay extends StatelessWidget {
 
   final List<PlaneQuad> masks;
 
+  final OverlayZoneCache? zoneCache;
+
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: CustomPaint(
-        painter: _PlaneOverlayPainter(viewProjection, quads, masks),
+        painter: PlaneOverlayPainter(
+            viewProjection, quads, masks, zoneCache),
       ),
     );
   }
 }
 
-class _PlaneOverlayPainter extends CustomPainter {
-  _PlaneOverlayPainter(this.viewProjection, this.quads, this.masks);
+class PlaneOverlayPainter extends CustomPainter {
+  PlaneOverlayPainter(this.viewProjection, this.quads, this.masks,
+      [this.zoneCache]);
 
   final Matrix4 viewProjection;
 
@@ -43,39 +62,63 @@ class _PlaneOverlayPainter extends CustomPainter {
 
   final List<PlaneQuad> masks;
 
-  // Path-boolean painting over 12 ms drains frames even on flagships —
-  // log it (once per 2 s across all painter instances) so traces show it.
+  // Owned by the snapshot; see OverlayZoneCache.
+  final OverlayZoneCache? zoneCache;
+
+  // Path-boolean painting over 6 ms eats into the frame budget — log it
+  // (once per 2 s across all painter instances) so traces show it.
   static DateTime? _lastSlowPaintAt;
 
   @override
   void paint(Canvas canvas, Size size) {
     final slowWatch = Stopwatch()..start();
-    final floors = <List<Offset>>[];
-    final walls = <List<Offset>>[];
-    final holes = <List<Offset>>[];
-    for (final quad in quads) {
-      final pts = projectPlaneQuad(
-        viewProjection: viewProjection,
-        quad: quad,
-        viewport: size,
+    final cache = zoneCache;
+    late final OverlayZones zones;
+    if (cache != null &&
+        cache.size == size &&
+        cache.vp == viewProjection) {
+      // Same snapshot, same viewport, same matrices: reuse the Paths.
+      zones = OverlayZones(floor: cache.floor, wall: cache.wall);
+    } else {
+      final floors = <List<Offset>>[];
+      final walls = <List<Offset>>[];
+      final holes = <List<Offset>>[];
+      for (final quad in quads) {
+        final pts = projectPlaneQuad(
+          viewProjection: viewProjection,
+          quad: quad,
+          viewport: size,
+        );
+        if (pts == null) continue;
+        if (quad.kind == PlaneQuadKind.floor) {
+          floors.add(pts);
+        } else {
+          walls.add(pts);
+        }
+      }
+      for (final mask in masks) {
+        final pts = projectPlaneQuad(
+          viewProjection: viewProjection,
+          quad: mask,
+          viewport: size,
+        );
+        if (pts != null) holes.add(pts);
+      }
+      // Boolean cost scales with polygon count — cull off-screen/dust and
+      // cap each zone so a long scan can't stall the frame on the union.
+      zones = buildOverlayZones(
+        floors: boundZonePolys(floors, size, 14),
+        walls: boundZonePolys(walls, size, 10),
+        masks: boundZonePolys(holes, size, 12),
       );
-      if (pts == null) continue;
-      if (quad.kind == PlaneQuadKind.floor) {
-        floors.add(pts);
-      } else {
-        walls.add(pts);
+      if (cache != null) {
+        cache
+          ..size = size
+          ..vp = viewProjection
+          ..floor = zones.floor
+          ..wall = zones.wall;
       }
     }
-    for (final mask in masks) {
-      final pts = projectPlaneQuad(
-        viewProjection: viewProjection,
-        quad: mask,
-        viewport: size,
-      );
-      if (pts != null) holes.add(pts);
-    }
-    final zones =
-        buildOverlayZones(floors: floors, walls: walls, masks: holes);
 
     final floorPath = zones.floor;
     if (floorPath != null) {
@@ -122,7 +165,7 @@ class _PlaneOverlayPainter extends CustomPainter {
       );
     }
     final ms = slowWatch.elapsedMilliseconds;
-    if (ms >= 12) {
+    if (ms >= 6) {
       final now = DateTime.now();
       final last = _lastSlowPaintAt;
       if (last == null || now.difference(last) > const Duration(seconds: 2)) {
@@ -161,7 +204,7 @@ class _PlaneOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_PlaneOverlayPainter oldDelegate) =>
+  bool shouldRepaint(PlaneOverlayPainter oldDelegate) =>
       oldDelegate.viewProjection != viewProjection ||
       oldDelegate.quads != quads ||
       oldDelegate.masks != masks;

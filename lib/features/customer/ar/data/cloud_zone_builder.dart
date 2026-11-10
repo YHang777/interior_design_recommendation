@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:vector_math/vector_math_64.dart';
 
+import 'placement_policy.dart';
 import 'plane_overlay_math.dart';
 
 // Feature-point cells dense with obstacle-height samples → mask quads.
@@ -137,6 +138,9 @@ bool _cellHugsWall(_Cell cell, List<ARPlaneInfo> walls, double cellM) {
   final cz = (cell.iz + 0.5) * cellM;
   for (final w in walls) {
     if (w.planeType != 2) continue;
+    // No area gate here: this exempts cells from masking (wall feet keep
+    // their floor) — it is not wall classification, and the shared gate
+    // already guards the five sites that paint/score/classify walls.
     final sinY = math.sin(w.yaw);
     final cosY = math.cos(w.yaw);
     // Vertical plane: normal (sin yaw, 0, cos yaw), width along
@@ -235,9 +239,16 @@ List<Vector2> _convexHullXZ(List<Vector2> pts) {
   return [...lower, ...upper];
 }
 
-// Median Y of the floor-band points — the robust refocus signal when
-// plane telemetry is quiet. Null below 8 samples so one stray speck can
-// never steer floorY (PlaneMemory applies its own deadband on top).
+// Low-percentile Y of floor-band points — the robust refocus signal when
+// plane telemetry is quiet. The band reaches well below the current
+// estimate so a too-high floorY can still find the real floor under it,
+// and only a little above it (a table up there is not floor evidence).
+// The p20 matches the native probe: a median in this band sat with the
+// wall-base points, agreed with the wrong estimate forever, and its
+// disagreement with the native reading reset the correction streak on
+// every tick — floorY could never come down. Null below 8 samples so one
+// stray speck can never steer floorY (PlaneMemory applies its own
+// deadband on top).
 double? floorProbeCandidate({
   required List<double> points,
   required double refY,
@@ -246,12 +257,11 @@ double? floorProbeCandidate({
   for (var i = 0; i + 2 < points.length; i += 3) {
     final y = points[i + 1];
     if (!y.isFinite) continue;
-    if ((y - refY).abs() <= 0.15) ys.add(y);
+    if (y >= refY - 0.6 && y <= refY + 0.15) ys.add(y);
   }
   if (ys.length < 8) return null;
   ys.sort();
-  final mid = ys.length ~/ 2;
-  return ys.length.isOdd ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
+  return ys[((ys.length - 1) * 0.2).toInt()];
 }
 
 // RANSAC vertical planes from the feature-point cloud — ARCore reports
@@ -263,6 +273,7 @@ List<ARPlaneInfo> fitWallPlanes({
   required List<double> points,
   required double refY,
   int maxPlanes = 2,
+  List<ARPlaneInfo> existing = const [],
 }) {
   if (maxPlanes <= 0) return const [];
   final cand = <Vector3>[];
@@ -292,10 +303,11 @@ List<ARPlaneInfo> fitWallPlanes({
 
   final out = <ARPlaneInfo>[];
   var pool = cand;
+  var rejects = 0;
   while (out.length < maxPlanes && pool.length >= 30) {
     final fit = _ransacWall(pool, next);
     if (fit == null) break;
-    out.add(ARPlaneInfo(
+    final plane = ARPlaneInfo(
       id: 900001 + out.length,
       planeType: 2,
       centerX: fit.cx,
@@ -304,7 +316,21 @@ List<ARPlaneInfo> fitWallPlanes({
       extentX: fit.width,
       extentZ: fit.height,
       yaw: fit.yaw,
-    ));
+    );
+    if (!wallFitConsistentWith(plane, existing)) {
+      // Grazing-pan phantom: drop its inliers and retry. The budget allows
+      // a few false rejects (noisy corner-yaw references) before giving up
+      // — every reject removes that fit's inliers from the pool, so one
+      // bad verdict used to erase the corner's wall run for the tick.
+      final drop = fit.inliers.toSet();
+      pool = [
+        for (var i = 0; i < pool.length; i++)
+          if (!drop.contains(i)) pool[i],
+      ];
+      if (++rejects > 4) break;
+      continue;
+    }
+    out.add(plane);
     final drop = fit.inliers.toSet();
     pool = [
       for (var i = 0; i < pool.length; i++)
@@ -314,7 +340,42 @@ List<ARPlaneInfo> fitWallPlanes({
   return out;
 }
 
+// A fit claiming an existing wall's surface at a contradictory yaw is the
+// grazing-pan signature: depth noise rotates the fitted normal off the
+// wall while the inlier mean stays on it, so perpendicular distance to
+// the good wall is ~0. Same-place = within 0.30 m of the reference
+// plane; yawDiff ≤0.20 is fit noise (ARCore yaw wobbles hardest near
+// corners, where real fits kept getting rejected) and >1.3 is a true
+// corner — both pass. Orientation is compared UNORIENTED (mod π): fits are
+// hemisphere-canonicalized in _ransacWall while references carry native
+// yaw in (−π, π], so a raw wrap reads a flipped-hemisphere same-surface
+// pair ~π apart — past the corner cap — and the gate fail-opens.
+// Pure; existing=[] is inert.
+bool wallFitConsistentWith(ARPlaneInfo fit, List<ARPlaneInfo> existing) {
+  for (final e in existing) {
+    if (e.planeType != 2 || e.subsumed) continue;
+    final raw = _wrapPi(fit.yaw - e.yaw).abs();
+    final yawDiff = raw <= math.pi / 2 ? raw : math.pi - raw;
+    if (yawDiff <= 0.20 || yawDiff > 1.3) continue;
+    final nx = math.sin(e.yaw);
+    final nz = math.cos(e.yaw);
+    final d1 = ((fit.centerX - e.centerX) * nx +
+            (fit.centerZ - e.centerZ) * nz)
+        .abs();
+    final fnx = math.sin(fit.yaw);
+    final fnz = math.cos(fit.yaw);
+    final d2 = ((e.centerX - fit.centerX) * fnx +
+            (e.centerZ - fit.centerZ) * fnz)
+        .abs();
+    if (math.min(d1, d2) <= 0.30) return false;
+  }
+  return true;
+}
+
 _Fit? _ransacWall(List<Vector3> pool, int Function(int) next) {
+  // 60 rounds: halving to 30 shrank fit quality on sparse white-wall
+  // pools, and a smaller inlier bbox then failed the 1.0 m² admission —
+  // detection recall collapsed exactly where ARCore reports no planes.
   const rounds = 60;
   final n = pool.length;
   _Fit? best;
@@ -348,7 +409,6 @@ _Fit? _ransacWall(List<Vector3> pool, int Function(int) next) {
     var minY = double.infinity;
     var maxY = double.negativeInfinity;
     var sx = 0.0;
-    var sy = 0.0;
     var sz = 0.0;
     for (final i in inliers) {
       final p = pool[i];
@@ -358,12 +418,12 @@ _Fit? _ransacWall(List<Vector3> pool, int Function(int) next) {
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
       sx += p.x;
-      sy += p.y;
       sz += p.z;
     }
     final width = maxH - minH;
     final height = maxY - minY;
     if (width < 0.7 || height < 0.5) continue;
+    if (!ArPlacementPolicy.wallAreaQualifies(width, height)) continue;
     if (best != null && inliers.length <= best.inliers.length) continue;
     // Canonical hemisphere (+z, tie → +x): the cross-product sign depends
     // on which triple won, and the same wall must always report one yaw.
@@ -378,7 +438,10 @@ _Fit? _ransacWall(List<Vector3> pool, int Function(int) next) {
       yaw: math.atan2(nx, nz),
       inliers: inliers,
       cx: sx / count,
-      cy: sy / count,
+      // Y-bbox mid, not the inlier mean: a bottom-heavy cloud's mean sits
+      // below the bbox and would build a rect whose bottom dips under
+      // minY (pre-dipped paint).
+      cy: (minY + maxY) / 2,
       cz: sz / count,
       width: width,
       height: height,
@@ -535,13 +598,27 @@ List<PlaneQuad> emitMaskTracks(List<MaskTrack> tracks,
 // Same pure-function contract as the mask tracks — the screen keeps the
 // list as state.
 class WallTrack {
-  WallTrack({required this.plane, required this.streak, this.holds = 0});
+  WallTrack({
+    required this.plane,
+    required this.streak,
+    this.holds = 0,
+    this.originCamera,
+    this.confirmed = false,
+  });
 
   final ARPlaneInfo plane;
 
   final int streak;
 
   final int holds;
+
+  // Camera XZ at first sighting — the two-view gate's anchor. Null (no
+  // pose yet) keeps legacy emit behavior for that track.
+  final Vector3? originCamera;
+
+  // Set once the camera has moved ≥0.25 m since mint: two views of the
+  // same surface, proof the fit was not a single-view phantom.
+  final bool confirmed;
 }
 
 List<WallTrack> updateWallTracks({
@@ -549,7 +626,8 @@ List<WallTrack> updateWallTracks({
   required List<ARPlaneInfo> curr,
   double matchDistM = 0.5,
   double maxYawDelta = 0.35,
-  int maxHold = 2,
+  int maxHold = 30,
+  Vector3? cameraPos,
 }) {
   final matched = List<bool>.filled(tracks.length, false);
   final matchOf = List<int>.filled(curr.length, -1);
@@ -589,10 +667,20 @@ List<WallTrack> updateWallTracks({
     final p = curr[q];
     final mi = matchOf[q];
     if (mi >= 0) {
+      final prev = tracks[mi];
+      final origin = prev.originCamera;
+      var confirmed = prev.confirmed;
+      if (!confirmed && origin != null && cameraPos != null) {
+        final ox = origin.x - cameraPos.x;
+        final oz = origin.z - cameraPos.z;
+        confirmed = math.sqrt(ox * ox + oz * oz) >= 0.25;
+      }
       out.add(WallTrack(
-        plane: _blendWall(tracks[mi].plane, p),
-        streak: tracks[mi].streak + 1,
+        plane: _blendWall(prev.plane, p),
+        streak: prev.streak + 1,
         holds: 0,
+        originCamera: origin,
+        confirmed: confirmed,
       ));
       continue;
     }
@@ -607,6 +695,7 @@ List<WallTrack> updateWallTracks({
       plane: id == p.id ? p : _withId(p, id),
       streak: 1,
       holds: 0,
+      originCamera: cameraPos,
     ));
   }
   for (var i = 0; i < tracks.length; i++) {
@@ -614,16 +703,41 @@ List<WallTrack> updateWallTracks({
     final t = tracks[i];
     final holds = t.holds + 1;
     if (holds > maxHold) continue;
-    out.add(WallTrack(plane: t.plane, streak: t.streak, holds: holds));
+    out.add(WallTrack(
+      plane: t.plane,
+      streak: t.streak,
+      holds: holds,
+      originCamera: t.originCamera,
+      confirmed: t.confirmed,
+    ));
   }
   return out;
 }
 
-List<ARPlaneInfo> emitWallTracks(List<WallTrack> tracks,
-    {int emitStreak = 2, int maxEmit = 3}) {
+List<ARPlaneInfo> emitWallTracks(
+  List<WallTrack> tracks, {
+  int emitStreak = 2,
+  // A room routinely holds four walls plus corner fragments; with 3 slots
+  // the sort (streak desc) let never-decaying held tracks crowd a fresh
+  // fragment out of paint indefinitely.
+  int maxEmit = 6,
+  // Paint rides the whole retention window (maxHold 30): a wall is static,
+  // so the geometry stays correct while depth points are away — and a
+  // shorter grace read as "fragment vanished, needs a rescan".
+  int maxEmitHolds = 30,
+}) {
   final kept = [
     for (final t in tracks)
-      if (t.streak >= emitStreak) t,
+      if (t.streak >= emitStreak &&
+          t.holds <= maxEmitHolds &&
+          // Two-view gate: a track minted with a pose must confirm (the
+          // camera moved ≥0.25 m since mint) or ride the ≥4 streak
+          // fallback — a single-view phantom never paints. Tracks minted
+          // without a pose keep legacy behavior.
+          (t.originCamera == null || t.confirmed || t.streak >= 4) &&
+          ArPlacementPolicy.wallAreaQualifies(
+              t.plane.extentX, t.plane.extentZ))
+        t,
   ];
   kept.sort((a, b) {
     final s = b.streak.compareTo(a.streak);

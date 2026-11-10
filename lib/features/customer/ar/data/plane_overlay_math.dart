@@ -3,6 +3,8 @@ import 'dart:ui';
 
 import 'package:vector_math/vector_math_64.dart';
 
+import 'placement_policy.dart';
+
 enum PlaneQuadKind { floor, wall }
 
 // One plane outline to draw. For a horizontal quad, extentX spans
@@ -117,8 +119,16 @@ enum OverlayZoneKind { floor, wall, mask, drop }
 // The height floor paint is flattened onto: the trusted anchor, pulled down
 // to a slightly lower payload plane (the real floor re-appearing under a
 // stale estimate). Shared by zone classification and quad building so paint
-// and gates can never disagree about where the floor is.
-double trustedOverlayRefY({required double floorY, double? lowestPlaneY}) {
+// and gates can never disagree about where the floor is. When the cloud
+// freshly corroborates floorY, a plane below it is stray (reflection
+// ghost) and may not pull the height down — that pull masked the real
+// floor planes on device.
+double trustedOverlayRefY({
+  required double floorY,
+  double? lowestPlaneY,
+  bool corroborateFloorY = false,
+}) {
+  if (corroborateFloorY) return floorY;
   return (lowestPlaneY != null &&
           lowestPlaneY < floorY &&
           floorY - lowestPlaneY <= 0.5)
@@ -133,8 +143,19 @@ OverlayZoneKind overlayZoneOf({
   double? cameraY,
   double? lowestPlaneY,
   bool floorYTrusted = false,
+  bool corroborateFloorY = false,
+  double extentX = 0,
+  double extentZ = 0,
 }) {
-  if (planeType == 2) return OverlayZoneKind.wall;
+  if (planeType == 2) {
+    // A vertical plane only paints as wall once it is wall-sized — a
+    // cabinet/shelf side with altitude is an object, not a wall. Defaults
+    // fail closed so a caller that forgets extents drops instead of
+    // painting wrongly.
+    return ArPlacementPolicy.wallAreaQualifies(extentX, extentZ)
+        ? OverlayZoneKind.wall
+        : OverlayZoneKind.drop;
+  }
   if (planeType != 1) return OverlayZoneKind.drop;
   // Above the reference = an object top (furniture mask); below = a lower
   // level that must never paint (flattening it up would float phantom
@@ -146,7 +167,11 @@ OverlayZoneKind overlayZoneOf({
   if (floorY != null && floorYTrusted) {
     // No live camera-band check — the height was proven when trust was
     // earned (keeps a crouching phone painting a proven floor).
-    final ref = trustedOverlayRefY(floorY: floorY, lowestPlaneY: lowestPlaneY);
+    final ref = trustedOverlayRefY(
+      floorY: floorY,
+      lowestPlaneY: lowestPlaneY,
+      corroborateFloorY: corroborateFloorY,
+    );
     if (centerY > ref + elevatedGapM) return OverlayZoneKind.mask;
     if (centerY < ref - elevatedGapM) return OverlayZoneKind.drop;
     return OverlayZoneKind.floor;
@@ -160,7 +185,13 @@ OverlayZoneKind overlayZoneOf({
     // Elevated shapes stay masks even when the camera height is stale —
     // dropping them is how furniture ended up painted over.
     if (centerY > ref + elevatedGapM) return OverlayZoneKind.mask;
-    if (cameraY == null) return OverlayZoneKind.drop;
+    // No camera height: a plane at floor level still paints (the memory
+    // already remembers this floor); anything else drops.
+    if (cameraY == null) {
+      return (floorY != null && (centerY - floorY).abs() <= 0.3)
+          ? OverlayZoneKind.floor
+          : OverlayZoneKind.drop;
+    }
     final below = cameraY - ref;
     if (below < plausibleMinM || below > plausibleMaxM) {
       return OverlayZoneKind.mask;
@@ -637,19 +668,44 @@ List<Vector3> _orientedRectSamples(
 // ARCore wall fragments routinely stop 10–20 cm above the floor, which
 // leaves exactly the green base strip at the wall foot — the floor−wall
 // clip can't cut what the wall doesn't cover. Stretch a short wall down
-// to just below [refY]; a wall already reaching the floor, a fragment
-// floating well above it (a shelf), or a non-vertical quad pass through
-// untouched.
+// to [refY]; geometry that dips BELOW the floor (ARCore polygon
+// overshoot, bottom-heavy RANSAC rects) is raised back onto it instead of
+// passing through to paint as blue-on-green. A fragment floating well
+// above (a shelf), a wall already reaching the floor, or a non-vertical
+// quad pass through untouched.
 PlaneQuad withWallBaseAt(PlaneQuad wall,
     {required double refY, double maxDropM = 0.45}) {
   if (!wall.vertical || !refY.isFinite) return wall;
   if (wall.polygon.length < 3) {
+    final top = wall.center.y + wall.extentZ / 2;
     final bottom = wall.center.y - wall.extentZ / 2;
-    if (bottom <= refY || bottom - refY > maxDropM) return wall;
-    final newBottom = refY - 0.02;
-    final newExtentZ = wall.extentZ + (bottom - newBottom);
+    if (top <= refY) {
+      // Wholly below (extent-swap garbage): lift rigidly, keep height.
+      return PlaneQuad(
+        center: Vector3(wall.center.x, refY + wall.extentZ / 2, wall.center.z),
+        yaw: wall.yaw,
+        extentX: wall.extentX,
+        extentZ: wall.extentZ,
+        vertical: true,
+        kind: wall.kind,
+      );
+    }
+    if (bottom < refY) {
+      // Dip: raise the bottom onto refY, keep the top.
+      final newExtentZ = top - refY;
+      return PlaneQuad(
+        center: Vector3(wall.center.x, refY + newExtentZ / 2, wall.center.z),
+        yaw: wall.yaw,
+        extentX: wall.extentX,
+        extentZ: newExtentZ,
+        vertical: true,
+        kind: wall.kind,
+      );
+    }
+    if (bottom == refY || bottom - refY > maxDropM) return wall;
+    final newExtentZ = wall.extentZ + (bottom - refY);
     return PlaneQuad(
-      center: Vector3(wall.center.x, newBottom + newExtentZ / 2, wall.center.z),
+      center: Vector3(wall.center.x, refY + newExtentZ / 2, wall.center.z),
       yaw: wall.yaw,
       extentX: wall.extentX,
       extentZ: newExtentZ,
@@ -658,13 +714,32 @@ PlaneQuad withWallBaseAt(PlaneQuad wall,
     );
   }
   var minY = double.infinity;
+  var maxY = double.negativeInfinity;
   for (final v in wall.polygon) {
     if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
   }
-  if (!minY.isFinite || minY <= refY || minY - refY > maxDropM) return wall;
+  if (!minY.isFinite || minY == refY) return wall;
+  if (maxY <= refY) {
+    // Wholly below: translate the whole ring up — cutting a wholly-below
+    // ring at refY would collapse it to a line.
+    final delta = refY - minY;
+    return PlaneQuad(
+      center: Vector3(wall.center.x, wall.center.y + delta, wall.center.z),
+      yaw: wall.yaw,
+      extentX: wall.extentX,
+      extentZ: wall.extentZ,
+      vertical: true,
+      kind: wall.kind,
+      polygon: [for (final v in wall.polygon) Vector3(v.x, v.y + delta, v.z)],
+    );
+  }
+  if (minY > refY && minY - refY > maxDropM) return wall;
   // ARCore's bottom edge wobbles a few cm — snap the whole bottom row
-  // (within 10 cm of the lowest vertex) flat onto the floor line.
-  final newBottomY = refY - 0.02;
+  // (within 10 cm of the cut) flat onto the floor line. The clamp branch
+  // cuts at refY+0.10 so every sub-floor vertex is raised.
+  final rowCut = math.max(minY, refY) + 0.10;
+  final newBottomY = refY;
   final delta = newBottomY - minY;
   return PlaneQuad(
     center: Vector3(wall.center.x, wall.center.y + delta, wall.center.z),
@@ -675,7 +750,7 @@ PlaneQuad withWallBaseAt(PlaneQuad wall,
     kind: wall.kind,
     polygon: [
       for (final v in wall.polygon)
-        v.y <= minY + 0.10 ? Vector3(v.x, newBottomY, v.z) : v,
+        v.y <= rowCut ? Vector3(v.x, newBottomY, v.z) : v,
     ],
   );
 }
@@ -714,6 +789,130 @@ List<PlaneQuad> mergeWallQuads(List<PlaneQuad> walls) {
   ];
 }
 
+// Bounds mergeWallQuads' O(groups²·members²) search: a long scan piles up
+// vertical fragments until that loop eats the frame. The biggest [max]
+// footprints carry the silhouette; the painter drops off-screen ones after.
+List<PlaneQuad> capWallQuads(List<PlaneQuad> walls, int max) {
+  if (walls.length <= max) return walls;
+  final sorted = List<PlaneQuad>.of(walls)
+    ..sort((a, b) =>
+        (b.extentX * b.extentZ).compareTo(a.extentX * a.extentZ));
+  return sorted.sublist(0, max);
+}
+
+// Perpendicular runs meeting at a corner: ARCore's patch outlines stop
+// short of the shared edge on at least one side, and the 0.26 rad merge cap
+// can never bridge them, so the silhouette leaves a notch at every corner.
+// Extend each run along its own line to the intersection of the two lines —
+// only when BOTH ends are genuinely near it (within [maxGapM], so distant
+// walls whose infinite lines happen to cross never stretch), the height
+// ranges overlap, and each end joins at most once per pass. Y extents are
+// untouched — withWallBaseAt already owns the vertical stretch. ARCore runs
+// commonly end 0.5–0.8 m short of the corner, so the gap bound sits at 0.8;
+// beyond that a break in the wall (door reveal, pillar) risks bridging.
+List<PlaneQuad> joinWallCorners(List<PlaneQuad> walls,
+    {double maxGapM = 0.8}) {
+  if (walls.length < 2) return List<PlaneQuad>.of(walls);
+  final out = List<PlaneQuad>.of(walls);
+  final yRange = [for (final q in out) _groupYRange([q])];
+  final usedEnds = <int, Set<int>>{};
+  for (var i = 0; i < out.length; i++) {
+    for (var j = i + 1; j < out.length; j++) {
+      final a = out[i];
+      final b = out[j];
+      if (!a.vertical || !b.vertical) continue;
+      // Unoriented dihedral, as in wallFitConsistentWith: a hemisphere-
+      // flipped yaw must still read as a right angle.
+      final raw = wrapYaw(a.yaw - b.yaw).abs();
+      final dihedral = raw <= math.pi / 2 ? raw : math.pi - raw;
+      if ((dihedral - math.pi / 2).abs() > 0.30) continue;
+      final ra = yRange[i];
+      final rb = yRange[j];
+      final overlap = (ra.$2 < rb.$2 ? ra.$2 : rb.$2) -
+          (ra.$1 > rb.$1 ? ra.$1 : rb.$1);
+      if (overlap < 0.05) continue;
+      final uax = math.cos(a.yaw);
+      final uaz = -math.sin(a.yaw);
+      final ubx = math.cos(b.yaw);
+      final ubz = -math.sin(b.yaw);
+      final rcx = b.center.x - a.center.x;
+      final rcz = b.center.z - a.center.z;
+      final cross = uax * ubz - uaz * ubx;
+      // cross = sin(dihedral); the gate above keeps it far from singular.
+      final t = (rcx * ubz - rcz * ubx) / cross; // P = cA + t·uA
+      final s = (rcx * uaz - rcz * uax) / cross; // P = cB + s·uB
+      final gapA = t.abs() - a.extentX / 2;
+      final gapB = s.abs() - b.extentX / 2;
+      final extA = gapA > 0.03 ? gapA : 0.0;
+      final extB = gapB > 0.03 ? gapB : 0.0;
+      if (extA == 0 && extB == 0) continue;
+      if (extA > maxGapM || extB > maxGapM) continue;
+      final endA = t > 0 ? 1 : -1;
+      final endB = s > 0 ? 1 : -1;
+      if (extA > 0 && (usedEnds[i]?.contains(endA) ?? false)) continue;
+      if (extB > 0 && (usedEnds[j]?.contains(endB) ?? false)) continue;
+      if (extA > 0) {
+        out[i] = _extendWallEnd(a, gap: extA, end: endA);
+        (usedEnds[i] ??= <int>{}).add(endA);
+      }
+      if (extB > 0) {
+        out[j] = _extendWallEnd(b, gap: extB, end: endB);
+        (usedEnds[j] ??= <int>{}).add(endB);
+      }
+    }
+  }
+  return out;
+}
+
+// Grow one end of a wall run along its own line by [gap]. A polygon-
+// bearing outline moves only the vertices at that extreme, so the ARCore
+// shape rides along instead of being replaced by the rectangle.
+PlaneQuad _extendWallEnd(PlaneQuad q, {required double gap, required int end}) {
+  final ux = math.cos(q.yaw);
+  final uz = -math.sin(q.yaw);
+  final center = Vector3(
+    q.center.x + ux * gap / 2 * end,
+    q.center.y,
+    q.center.z + uz * gap / 2 * end,
+  );
+  List<Vector3> poly = q.polygon;
+  if (poly.length >= 3) {
+    var minP = double.infinity;
+    var maxP = double.negativeInfinity;
+    for (final v in poly) {
+      final p = (v.x - q.center.x) * ux + (v.z - q.center.z) * uz;
+      if (p < minP) minP = p;
+      if (p > maxP) maxP = p;
+    }
+    final span = maxP - minP;
+    if (span > 0.05) {
+      final tol = math.min(0.25, span * 0.3);
+      final edge = end > 0 ? maxP - tol : minP + tol;
+      poly = [
+        for (final v in poly)
+          if (end > 0
+              ? (v.x - q.center.x) * ux + (v.z - q.center.z) * uz >= edge
+              : (v.x - q.center.x) * ux + (v.z - q.center.z) * uz <= edge)
+            v + Vector3(ux * gap * end, 0, uz * gap * end)
+          else
+            v,
+      ];
+    } else {
+      // Degenerate outline: the grown rectangle is the fitted truth.
+      poly = const [];
+    }
+  }
+  return PlaneQuad(
+    center: center,
+    yaw: q.yaw,
+    extentX: q.extentX + gap,
+    extentZ: q.extentZ,
+    vertical: q.vertical,
+    kind: q.kind,
+    polygon: poly,
+  );
+}
+
 int _wallMergeOrder(PlaneQuad a, PlaneQuad b) {
   final byWidth = b.extentX.compareTo(a.extentX);
   if (byWidth != 0) return byWidth;
@@ -729,7 +928,15 @@ int _wallMergeOrder(PlaneQuad a, PlaneQuad b) {
 bool _wallGroupsCompatible(List<PlaneQuad> a, List<PlaneQuad> b) {
   if (a.isEmpty || b.isEmpty) return false;
   if (!a.every((q) => q.vertical) || !b.every((q) => q.vertical)) return false;
-  if ((_wrapYaw(_groupYaw(a) - _groupYaw(b))).abs() > 0.26) return false;
+  // Exact pairwise spread over a∪b — checking only the two groups' current
+  // yaws lets a widest-led chain (0 → 0.13 → 0.26 → 0.39 …) accumulate
+  // unbounded total drift while every step stays ≤0.26.
+  final all = [...a, ...b];
+  for (var i = 0; i < all.length; i++) {
+    for (var j = i + 1; j < all.length; j++) {
+      if (wrapYaw(all[i].yaw - all[j].yaw).abs() > 0.26) return false;
+    }
+  }
   final ra = _groupYRange(a);
   final rb = _groupYRange(b);
   if (ra.$2 < rb.$1 - 0.05 || rb.$2 < ra.$1 - 0.05) return false;
@@ -741,17 +948,25 @@ bool _wallGroupsCompatible(List<PlaneQuad> a, List<PlaneQuad> b) {
   return false;
 }
 
-// Widest fragment owns the merged frame — its yaw is the most reliable.
+// The widest POLYGON-bearing member owns the merged frame — its yaw is
+// ARCore telemetry, while rect-only synthetics are fits. All-synthetic
+// groups fall back to the median (halves worst-case error vs widest).
 double _groupYaw(List<PlaneQuad> g) {
-  var best = g.first.extentX;
-  var yaw = g.first.yaw;
-  for (var i = 1; i < g.length; i++) {
-    if (g[i].extentX > best) {
-      best = g[i].extentX;
-      yaw = g[i].yaw;
-    }
+  PlaneQuad? bestPoly;
+  for (final q in g) {
+    if (q.polygon.length < 3) continue;
+    if (bestPoly == null || q.extentX > bestPoly.extentX) bestPoly = q;
   }
-  return yaw;
+  if (bestPoly != null) return bestPoly.yaw;
+  final base = g.first.yaw;
+  final deltas = [
+    for (final q in g) wrapYaw(q.yaw - base),
+  ]..sort();
+  final n = deltas.length;
+  final mid = n.isOdd
+      ? deltas[n ~/ 2]
+      : (deltas[n ~/ 2 - 1] + deltas[n ~/ 2]) / 2;
+  return wrapYaw(base + mid);
 }
 
 (double, double) _groupYRange(List<PlaneQuad> g) {
@@ -766,9 +981,12 @@ double _groupYaw(List<PlaneQuad> g) {
   return (lo, hi);
 }
 
-double _wrapYaw(double delta) {
+// Wraps a yaw delta into (−π, π]; public because the lock and the screen
+// both measure rotation against it.
+double wrapYaw(double delta) {
   var w = delta % (2 * math.pi);
   if (w > math.pi) w -= 2 * math.pi;
+  if (w < -math.pi) w += 2 * math.pi;
   return w;
 }
 
@@ -878,6 +1096,47 @@ PlaneQuad _mergeWallGroup(List<PlaneQuad> g) {
     vertical: true,
     kind: PlaneQuadKind.wall,
   );
+}
+
+// Bounds one zone's polygons before the path booleans: anything off the
+// viewport (or a sub-16px dust speck) costs time and draws nothing, and
+// past [cap] only the largest screen-area regions remain — the visual bulk
+// of the zone. Caps only bite when more than [cap] regions share one
+// screen, so a normal room paints exactly as before.
+List<List<Offset>> boundZonePolys(
+  List<List<Offset>> polys,
+  Size viewport,
+  int cap,
+) {
+  const margin = 8.0;
+  const dustArea = 256.0;
+  final kept = <(List<Offset>, double)>[];
+  for (final p in polys) {
+    var x0 = double.infinity;
+    var y0 = double.infinity;
+    var x1 = double.negativeInfinity;
+    var y1 = double.negativeInfinity;
+    for (final o in p) {
+      if (o.dx < x0) x0 = o.dx;
+      if (o.dx > x1) x1 = o.dx;
+      if (o.dy < y0) y0 = o.dy;
+      if (o.dy > y1) y1 = o.dy;
+    }
+    if (x1 < -margin ||
+        x0 > viewport.width + margin ||
+        y1 < -margin ||
+        y0 > viewport.height + margin) {
+      continue;
+    }
+    final area = (x1 - x0) * (y1 - y0);
+    if (area < dustArea) continue;
+    kept.add((p, area));
+  }
+  if (kept.length > cap) {
+    kept.sort((a, b) => b.$2.compareTo(a.$2));
+    kept.length = cap;
+  }
+  return [for (final k in kept) k.$1];
 }
 
 // One merged path per placement zone, assembled from already-projected

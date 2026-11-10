@@ -74,6 +74,24 @@ ARPlaneInfo planeInfo({
 }
 
 void main() {
+  group('ArPlacementPolicy.wallAreaQualifies', () {
+    test('just below the gate fails', () {
+      expect(ArPlacementPolicy.wallAreaQualifies(0.999, 1.0), isFalse);
+    });
+
+    test('exactly at the gate passes (>= semantics)', () {
+      expect(ArPlacementPolicy.wallAreaQualifies(1.0, 1.0), isTrue);
+    });
+
+    test('just above the gate passes', () {
+      expect(ArPlacementPolicy.wallAreaQualifies(1.001, 1.0), isTrue);
+    });
+
+    test('the legacy extent minimum (0.8×1.5) still passes', () {
+      expect(ArPlacementPolicy.wallAreaQualifies(0.8, 1.5), isTrue);
+    });
+  });
+
   group('ArPlacementPolicy.liveFloorYFromPlanes (Bug 2: live floor)', () {
     test('table-top-only plane list → NO live floor', () {
       final planes = [

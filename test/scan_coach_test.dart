@@ -361,7 +361,7 @@ void main() {
 
     test('a partial wall asks to sweep it', () {
       final s = ScanCoach.evaluate(
-        planes: [_wall(x: 1.0, z: 0.5)],
+        planes: [_wall(x: 1.0, z: 1.0)],
         elapsed: Duration.zero,
         wall: true,
       );
@@ -370,6 +370,26 @@ void main() {
       expect(s.progress, greaterThan(0));
       expect(s.progress, lessThan(1));
       expect(s.tip, contains('Move left and right'));
+    });
+
+    test('a sub-m² vertical plane never advances the wall ladder', () {
+      // 0.99 m² fails the shared area gate even though its extents alone
+      // would have scored 0.667 on the ladder.
+      final s = ScanCoach.evaluate(
+        planes: [_wall(x: 1.0, z: 0.99)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(s.step, ScanCoachStep.findWall);
+      expect(s.progress, 0);
+
+      final ok = ScanCoach.evaluate(
+        planes: [_wall(x: 1.0, z: 1.0)],
+        elapsed: Duration.zero,
+        wall: true,
+      );
+      expect(ok.step, ScanCoachStep.sweepWall);
+      expect(ok.progress, closeTo(0.667, 0.01));
     });
 
     test('a wall at both placement gates → ready without any floorY', () {
@@ -408,14 +428,14 @@ void main() {
 
     test('sweepWall tips rotate after the first entry has had its turn', () {
       final early = ScanCoach.evaluate(
-        planes: [_wall(x: 1.0, z: 0.5)],
+        planes: [_wall(x: 1.0, z: 1.0)],
         elapsed: Duration.zero,
         wall: true,
       );
       expect(early.tip, contains('Move left and right'));
 
       final later = ScanCoach.evaluate(
-        planes: [_wall(x: 1.0, z: 0.5)],
+        planes: [_wall(x: 1.0, z: 1.0)],
         elapsed: const Duration(seconds: 6),
         wall: true,
       );

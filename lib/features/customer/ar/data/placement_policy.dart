@@ -31,6 +31,14 @@ class ArPlacementPolicy {
   // (anything under ~1.5 m) never pass as walls.
   static const double minWallLongExtentM = 1.5;
 
+  // Shared wall-area floor: a vertical plane must cover at least a 1×1 m
+  // patch, or a shelf/counter/cabinet side with altitude reads as a wall.
+  // ANDed with the extent gates everywhere — one knob, all six sites.
+  static const double minWallAreaM2 = 1.0;
+
+  static bool wallAreaQualifies(double extentX, double extentZ) =>
+      extentX * extentZ >= minWallAreaM2;
+
   static const double minPlaneExtentM = 0.3;
 
   // Floor placement is only allowed this far above the live floor — a chair
@@ -112,7 +120,8 @@ class ArPlacementPolicy {
     if (ex == null || ez == null) return false;
     final bigEnough = ex >= minWallExtentM &&
         ez >= minWallExtentM &&
-        math.max(ex, ez) >= minWallLongExtentM;
+        math.max(ex, ez) >= minWallLongExtentM &&
+        wallAreaQualifies(ex, ez);
     if (!bigEnough && !(vouchedWall?.call(hit) ?? false)) return false;
     if (!distanceIsPlausible(hit)) return false;
     final normalY = hit.worldTransform.getColumn(1).y;

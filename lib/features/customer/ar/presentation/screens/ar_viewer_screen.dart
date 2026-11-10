@@ -31,6 +31,8 @@ import '../../data/cloud_zone_builder.dart';
 import '../../data/depth_cloud.dart';
 import '../../data/furniture_model_library.dart';
 import '../../data/glb_bounds.dart';
+import '../../data/overlay_lock.dart';
+import '../../data/overlay_merge.dart';
 import '../../data/placement_policy.dart';
 import '../../data/plane_memory.dart';
 import '../../data/finish_footprint.dart';
@@ -48,7 +50,7 @@ import '../widgets/scan_coach_overlay.dart';
 // a ValueNotifier so ~30 Hz plane events repaint only PlaneOverlay instead
 // of rebuilding the whole screen (platform view + chips + reticle).
 class _OverlaySnapshot {
-  const _OverlaySnapshot({
+  _OverlaySnapshot({
     required this.vp,
     required this.quads,
     required this.masks,
@@ -57,6 +59,17 @@ class _OverlaySnapshot {
 
   final Matrix4 vp;
   final List<PlaneQuad> quads;
+
+  // Stable list identity for the snapshot's life — a fresh list per rebuild
+  // made shouldRepaint always true and forced the full boolean paint on
+  // every ancestor setState.
+  late final List<PlaneQuad> renderQuads = [
+    if (synthetic != null) synthetic!,
+    ...quads,
+  ];
+
+  // Reused across paints of this snapshot so zone booleans run once.
+  late final OverlayZoneCache zoneCache = OverlayZoneCache();
 
   // Furniture/object quads: punched out of the overlay and refused by
   // placement when they sit between the camera and the tap.
@@ -206,6 +219,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   static const Duration _liveFloorFreshFor = Duration(seconds: 2);
 
+  // Zone camera-height freshness: longer than the coach window so one
+  // failed getCameraPose tick can't drop/mask every floor quad.
+  static const Duration _zoneCameraYFreshFor = Duration(seconds: 10);
+
   // Persistent per-plane state: smoothing + reclassification, and a room
   // floor estimate that survives the floor leaving view and self-corrects
   // when new frames confirm a surface is furniture or a wall.
@@ -263,9 +280,21 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // Only PlaneOverlay listens; placement gates read .value on demand.
   final ValueNotifier<_OverlaySnapshot?> _overlay = ValueNotifier(null);
 
+  // Freshest camera matrices from the 50 ms poll — PlaneOverlay prefers
+  // these over the snapshot's same-frame pair so painted polygons
+  // reproject at camera cadence between plane events instead of freezing
+  // and sliding with the preview.
+  final ValueNotifier<Matrix4?> _overlayVp = ValueNotifier(null);
+
   // Cloud-derived obstacle cells and RANSAC walls — rebuilt each ticker
   // tick, merged into every overlay build and into the memory ingest.
   List<PlaneQuad> _cloudMasks = const [];
+  // World XZ where the render-only synthetic floor first painted, plus the
+  // refY it painted at — the stand-in must hold that spot instead of
+  // re-centering under the moving camera (its pure function follows the
+  // camera by design; this anchor cancels that at the call site).
+  Vector3? _syntheticAnchor;
+  double? _syntheticAnchorY;
   List<ARPlaneInfo> _syntheticWalls = const [];
   // Temporal tracks: 1 Hz depth masks/ RANSAC fits flicker tick to tick —
   // a real cluster is seen twice running, a noise cell never is, and a
@@ -273,9 +302,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   List<MaskTrack> _maskTracks = const [];
   List<WallTrack> _wallTracks = const [];
   // ARCore drops planes from the payload on movement beats — once seen, a
-  // plane keeps its geometry for the whole page (this map dies with the
-  // State), so the detected plane holds until the page closes. Live payload
-  // entries always overwrite, so tracking updates win over held geometry.
+  // plane keeps its geometry for 60 s (bounded at 64 entries) so turning
+  // back to it still paints. Live payload entries always overwrite, so
+  // tracking updates win over held geometry.
   final _payloadPlaneHold = <int, ({ARPlaneInfo plane, DateTime at})>{};
   final _overlayPolyEma = <int, List<Vector3>>{};
 
@@ -284,16 +313,47 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // green patch up and down ("floating outline").
   final _overlayCenterY = <int, double>{};
 
+  // Per-id geometry freeze — once an observation streak confirms the
+  // plane is stable, center/yaw/extents/polygon hold their detected
+  // values so paint never rides live refits or camera-correlated drift.
+  final _overlayLock = <int, OverlayLock>{};
+
   bool _payloadWasNonEmpty = false;
 
   int _overlayEpoch = 0;
 
   // Native sends planes+matrices every 3rd rendered frame; rebuild at most
-  // every 66 ms (15 Hz). Path-boolean painting at 30 Hz was a constant
-  // frame drain even on flagships — a translucent tint follows fine at 15.
-  static const _overlayMinInterval = Duration(milliseconds: 66);
+  // every 60 ms. Zone booleans are bounded (caps of 14/10/12 polygons) so
+  // the geometry can track the camera near-continuously without a frame
+  // drain — the vp poll repaints even faster between rebuilds.
+  static const _overlayMinInterval = Duration(milliseconds: 60);
 
   DateTime? _overlayLastBuildAt;
+
+  // Raw planes from the newest payload — rebuilds re-merge them against
+  // the current hold/synthetic state.
+  List<ARPlaneInfo> _lastPayloadPlanes = const [];
+
+  Timer? _overlayVpTimer;
+
+  bool _vpPollInFlight = false;
+
+  // Throttle for the whole planes pipeline (ingest + coach + overlay).
+  DateTime? _lastPipelineAt;
+
+  // Cached coach card state — build() must not re-run the O(n²) coverage
+  // math on every rebuild; the ticker/planes callback refresh it ≥1 Hz.
+  ScanCoachState? _lastCoachState;
+
+  // True when no overlay rebuild has landed for 2 s — the planes stream
+  // cadences every 3rd native frame (~600 ms even at 5 fps), so a 200 ms
+  // bar would starve the analysis tick on slow devices and pause floorY
+  // self-correction + synthetic wall fitting exactly when the session lags.
+  // 2 s only trips when the pipeline is genuinely stalled.
+  bool get _overlayStarved =>
+      _overlayLastBuildAt != null &&
+      DateTime.now().difference(_overlayLastBuildAt!) >
+          const Duration(seconds: 2);
 
   // Last logged overlay shape — the rebuild log only fires on change.
   String? _overlayStateKey;
@@ -301,6 +361,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // Slow-path timing: rebuild/paint over 12 ms logged at most every 2 s,
   // so device traces show WHERE frames go when the user reports lag.
   DateTime? _lastSlowRebuildAt;
+
+  // Attribution throttles: wall bottoms below the clamp base (should be
+  // impossible post-fix) and yaw-unlock events are rare but bursty.
+  DateTime? _lastWallDipLogAt;
+  DateTime? _lastUnlockLogAt;
 
   static const double _furnitureBarHeight = 72;
   static const double _roomBarHeight = 248;
@@ -341,9 +406,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachReadyTimer?.cancel();
     _scanCoachTicker?.cancel();
     _reticleTimer?.cancel();
+    _overlayVpTimer?.cancel();
     _stopRotateHold();
     _overlay.dispose();
+    _overlayVp.dispose();
+    // Null before super: an in-flight ticker callback resumes after this
+    // point, and `await _session?.…` must short-circuit — a depth call that
+    // slipped past native dispose SIGSEGV'd in ARCore (tombstone 2026-11-10).
     _session?.dispose();
+    _session = null;
     super.dispose();
   }
 
@@ -515,10 +586,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _session!
         .onInitialize(
       showAnimatedGuide: false,
-      // Raw feature dots are the best scanning aid on white surfaces — the
-      // user can see where ARCore actually sees texture and aim/parallax
-      // there. They share the same point cloud the probe already reads.
-      showFeaturePoints: true,
+      // Off: the native side rebuilds every point-cloud scene node on each
+      // slow frame while this is on, which pinned the session near 5 fps.
+      // All probes read the frame cloud directly, so nothing else needs it.
+      showFeaturePoints: false,
       // SceneView's raw ARCore polygons are replaced by the smoothed,
       // class-colored overlay drawn from the plane memory.
       showPlanes: false,
@@ -550,9 +621,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       // silence watchdog and clear a watchdog tripped earlier.
       _startWatchdog();
       if (_arUnresponsive) setState(() => _arUnresponsive = false);
+      // Native fires every 3rd rendered frame (~20 Hz); the UI isolate
+      // takes it at ~16 Hz so overlay geometry stays near the camera
+      // cadence without starving the frame budget.
+      final now = DateTime.now();
+      if (_lastPipelineAt != null &&
+          now.difference(_lastPipelineAt!) <
+              const Duration(milliseconds: 60)) {
+        return;
+      }
+      _lastPipelineAt = now;
       // Evidence trail: a non-empty payload followed by empties while the
       // memory still holds records means planes stopped arriving (resume
-      // wipe, tracking loss) — the presence prune will kill them in 12s.
+      // wipe, tracking loss) — the presence prune will kill them in 60s.
       if (planes.isEmpty && _payloadWasNonEmpty && _planeMemory.floorPlanes.isNotEmpty) {
         BootTrace.log(
             'ar-screen: payload empty (floorRecords=${_planeMemory.floorPlanes.length} floorY=${_planeMemory.floorY})');
@@ -599,6 +680,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _startWatchdog();
     _startScanCoachTicker();
     _startReticlePoll();
+    _startOverlayVpPoll();
   }
 
   void _startScanCoachTicker() {
@@ -622,13 +704,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
           // plane telemetry has gone quiet — a low-percentile probe can
           // pull a floorY that locked onto a wrong surface back down.
           final fy = _planeMemory.floorY;
-          if (fy != null) {
-            final candidate = await _session?.probeFloorY(floorY: fy);
-            if (candidate != null && mounted) {
-              _planeMemory.noteFloorYCandidate(candidate);
-              BootTrace.log(
-                  'ar-screen: probe $candidate → floorY=${_planeMemory.floorY}');
-            }
+          if (fy != null && !_overlayStarved) {
+            // Native probe only warms its accumulator for the cloud read
+            // below — its wide-band p20 sits on walls over a white floor
+            // (−0.7 m against a −0.94 m floor) and would own a streak it
+            // can never satisfy. The merged tight-band dart reading is the
+            // only voice that may noteFloorYCandidate.
+            await _session?.probeFloorY(floorY: fy);
             // Feature points starve on white surfaces (logged: 16–29 pts
             // total, 0 in the floor band for seconds); the depth map stays
             // dense regardless of texture. Merge both sources into one
@@ -641,8 +723,14 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               if (depth != null && depth.isNotEmpty) depth,
             ]);
             if (pts.isNotEmpty && mounted) {
+              // Long-lived memory, not the 4 s smoothed view: a wall that
+              // briefly leaves the payload must keep exempting its base or
+              // its own depth cells punch the painted wall away.
               final wallPlanes = <int, ARPlaneInfo>{
-                for (final p in [..._livePlanes, ..._syntheticWalls])
+                for (final p in [
+                  ..._planeMemory.wallPlanes,
+                  ..._syntheticWalls,
+                ])
                   if (p.planeType == 2) p.id: p,
               }.values.toList();
               final rawMasks = obstacleMaskQuads(
@@ -653,10 +741,27 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               final probe = floorProbeCandidate(points: pts, refY: fy);
               if (probe != null) {
                 _planeMemory.noteFloorYCandidate(probe);
+                BootTrace.log(
+                    'ar-screen: probe $probe → floorY=${_planeMemory.floorY}');
               }
-              final fits = fitWallPlanes(points: pts, refY: fy);
-              _wallTracks =
-                  updateWallTracks(tracks: _wallTracks, curr: fits);
+              final fits = fitWallPlanes(
+                points: pts,
+                refY: fy,
+                // Reference walls: live + held payload telemetry and the
+                // currently-emitted synthetics. Memory walls excluded —
+                // stale duplicates would over-reject fresh fits.
+                existing: [
+                  for (final e in _payloadPlaneHold.values)
+                    if (e.plane.planeType == 2 && !e.plane.subsumed)
+                      e.plane,
+                  ..._syntheticWalls,
+                ],
+              );
+              _wallTracks = updateWallTracks(
+                tracks: _wallTracks,
+                curr: fits,
+                cameraPos: _lastCameraPos,
+              );
               _syntheticWalls = emitWallTracks(_wallTracks);
             }
           }
@@ -693,27 +798,41 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // Rebuilds straight from the planes event — geometry and viewProjection
   // come from the same frame, so the overlay stops lagging behind the camera.
   void _updatePlaneOverlay(List<ARPlaneInfo> planes, Matrix4? vp) {
+    _lastPayloadPlanes = planes;
     final now = DateTime.now();
+    // Held geometry ages out: a plane you turn back to within a minute is
+    // still painted (matching PlaneMemory's window), and the cap bounds
+    // per-rebuild cost no matter how long the session runs.
+    _payloadPlaneHold
+        .removeWhere((_, e) => now.difference(e.at) > const Duration(seconds: 60));
     for (final p in planes) {
       _payloadPlaneHold[p.id] = (plane: p, at: now);
     }
-    // Held entries are never expired: a plane absent from the payload keeps
-    // its last geometry until this page closes, and the live payload always
-    // overwrites — so tracking updates win over held geometry. Synthetic
-    // cloud walls ride every rebuild (async and direct paths alike).
-    final merged = [
-      ...planes,
-      for (final e in _payloadPlaneHold.values)
-        if (!planes.any((p) => p.id == e.plane.id)) e.plane,
-      ..._syntheticWalls,
-    ];
+    if (_payloadPlaneHold.length > 64) {
+      final byAge = _payloadPlaneHold.entries.toList()
+        ..sort((a, b) => a.value.at.compareTo(b.value.at));
+      for (final e in byAge.take(_payloadPlaneHold.length - 64)) {
+        _payloadPlaneHold.remove(e.key);
+      }
+    }
+    // Held entries never overwrite live ones; live planes refresh their `at`
+    // above, so they are never the ones evicted. Synthetic cloud walls ride
+    // every rebuild (async and direct paths alike). Held-only copies are
+    // re-presented fresh=false so their frozen flags cannot feed the lock
+    // streak — see mergeOverlayPlanes.
+    final liveIds = <int>{for (final p in planes) p.id};
+    final merged = mergeOverlayPlanes(
+      live: _lastPayloadPlanes,
+      held: [for (final e in _payloadPlaneHold.values) e.plane],
+      synthetics: _syntheticWalls,
+    );
     if (vp == null) {
       // Stale native side still sends the bare list — fetch matrices the
       // old way so the overlay keeps tracking during the transition.
       final epoch = ++_overlayEpoch;
       _session?.getCameraViewProjection().then((v) {
         if (mounted && v != null && epoch == _overlayEpoch) {
-          _rebuildPlaneOverlay(merged, v);
+          _rebuildPlaneOverlay(merged, v, liveIds);
         }
       });
       return;
@@ -723,10 +842,36 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         DateTime.now().difference(last) < _overlayMinInterval) {
       return;
     }
-    _rebuildPlaneOverlay(merged, vp);
+    _rebuildPlaneOverlay(merged, vp, liveIds);
   }
 
-  void _rebuildPlaneOverlay(List<ARPlaneInfo> planes, Matrix4 vp) {
+  // Plane events carry same-frame matrices but arrive throttled — between
+  // them the painted polygons froze and slid with the preview. Fetch the
+  // latest matrices at camera cadence (a cheap latestFrame read) and write
+  // ONLY the vp notifier: PlaneOverlay reprojects the same world-space
+  // geometry, so no rebuild/zone work runs at this rate.
+  void _startOverlayVpPoll() {
+    _overlayVpTimer?.cancel();
+    _overlayVpTimer =
+        Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      if (!mounted || _session == null || _arError != null || _arUnresponsive) {
+        return;
+      }
+      if (_vpPollInFlight) return;
+      if (_overlay.value == null) return;
+      _vpPollInFlight = true;
+      try {
+        final v = await _session?.getCameraViewProjection();
+        if (!mounted || v == null) return;
+        _overlayVp.value = v;
+      } finally {
+        _vpPollInFlight = false;
+      }
+    });
+  }
+
+  void _rebuildPlaneOverlay(
+      List<ARPlaneInfo> planes, Matrix4 vp, Set<int> liveIds) {
     _overlayEpoch++;
     _overlayLastBuildAt = DateTime.now();
     final slowWatch = Stopwatch()..start();
@@ -735,31 +880,79 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final seenIds = <int>{};
     final floorY = _planeMemory.floorY;
     final trusted = _planeMemory.floorYRenderTrusted;
-    // A stale pose must not drive band decisions (a frozen cameraY from
-    // minutes ago classifies everything wrongly).
+    // A stale pose must not drive band decisions, but a single failed
+    // getCameraPose must not blank the overlay either — the zone window is
+    // longer than the coach's 2 s so held floors survive a pose gap.
     final cameraAt = _lastCameraYAt;
     final cameraY = cameraAt != null &&
-            DateTime.now().difference(cameraAt) <= _liveFloorFreshFor
+            DateTime.now().difference(cameraAt) <= _zoneCameraYFreshFor
         ? _lastCameraY
         : null;
     // Payload-lowest horizontal plane: the untrusted-floorY reference and
     // a fail-safe — a plane above it can never paint floor. Subsumed planes
-    // are mask material, never the floor anchor.
+    // are mask material, never the floor anchor. Held geometry still
+    // anchors: ARCore drops the real floor from the live payload on
+    // movement beats, and a live-only reference re-anchors to a tabletop
+    // and paints it as floor. A held plane far below the remembered floor
+    // is a stale ghost and stays excluded.
     double? lowestPlaneY;
     for (final p in planes) {
       if (p.planeType != 1 || p.subsumed) continue;
+      if (!liveIds.contains(p.id) &&
+          floorY != null &&
+          p.centerY < floorY - 0.5) {
+        continue;
+      }
       if (lowestPlaneY == null || p.centerY < lowestPlaneY) {
         lowestPlaneY = p.centerY;
       }
     }
     // Floor paint lands HERE, not on the plane's own drifted center height:
     // ARCore fitted Ys sit 7-20 cm above the probe-proven floor, which is
-    // exactly the sheet that hovers through furniture.
+    // exactly the sheet that hovers through furniture. Fresh cloud
+    // corroboration pins the height — a stray plane below (reflection)
+    // may not pull paint down and mask the real floor.
+    final corroborated = _planeMemory.floorYCorroborated();
     final refY = (trusted && floorY != null)
-        ? trustedOverlayRefY(floorY: floorY, lowestPlaneY: lowestPlaneY)
+        ? trustedOverlayRefY(
+            floorY: floorY,
+            lowestPlaneY: lowestPlaneY,
+            corroborateFloorY: corroborated,
+          )
         : null;
+    // Lowest floor actually painted this rebuild — the untrusted refY
+    // fallback for wall bases, so walls meet the green they are painted
+    // against instead of a stale raw floorY 7-20 cm below it.
+    double? minFloorPaintY;
     for (final p in planes) {
-      final smoothY = _smoothOverlayCenterY(p.id, p.centerY);
+      final st = p.id == 0 ? null : _overlayLock[p.id];
+      // A live observation far from the frozen geometry is a genuine
+      // re-fit — unfreeze, adopt it instantly, and re-run the streak.
+      // agree stays 0 so this same frame's _advanceOverlayLock counts the
+      // observation exactly once (agree=1 would double-count and re-lock
+      // one confirmation early).
+      if (st != null && st.locked && st.deviates(p)) {
+        _overlayPolyEma.remove(p.id);
+        _overlayCenterY.remove(p.id);
+        final dyaw = wrapYaw(p.yaw - st.yaw);
+        st.adopt(p);
+        st.agree = 0;
+        st.locked = false;
+        final now = DateTime.now();
+        final last = _lastUnlockLogAt;
+        if (last == null || now.difference(last) > const Duration(seconds: 2)) {
+          _lastUnlockLogAt = now;
+          BootTrace.log('ar-screen: unlock id=${p.id} '
+              'dyaw=${dyaw.toStringAsFixed(2)}');
+        }
+      }
+      final lk = (st != null && st.locked) ? st : null;
+      final smoothY = lk != null
+          ? lk.centerY
+          : _smoothOverlayCenterY(p.id, p.centerY);
+      final ring = lk != null
+          ? lk.polygon
+          : _smoothOverlayPolygon(p.id, polygonFromFlat(p.polygon));
       final zone = overlayZoneOf(
         planeType: p.planeType,
         centerY: smoothY,
@@ -767,25 +960,41 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         cameraY: cameraY,
         lowestPlaneY: lowestPlaneY,
         floorYTrusted: trusted,
+        corroborateFloorY: corroborated,
+        extentX: lk != null ? lk.extentX : p.extentX,
+        extentZ: lk != null ? lk.extentZ : p.extentZ,
       );
-      if (zone == OverlayZoneKind.drop) continue;
+      // Presence, not paint, keeps state: a wall patch dipping under the
+      // 1 m² gate for a frame must not lose its lock — re-freezing from
+      // scratch is what let paint chase ARCore refits while the camera
+      // moved. Streaks still only advance on painted frames (below).
       if (p.id != 0) seenIds.add(p.id);
+      if (zone == OverlayZoneKind.drop) continue;
       // A subsumed plane's outline already lives inside its parent's
       // polygon — only its elevated shape is news, and that is a mask.
       if (p.subsumed && zone != OverlayZoneKind.mask) continue;
       final paintY =
           zone == OverlayZoneKind.floor && refY != null ? refY : smoothY;
+      if (zone == OverlayZoneKind.floor &&
+          (minFloorPaintY == null || paintY < minFloorPaintY)) {
+        minFloorPaintY = paintY;
+      }
       final quad = PlaneQuad(
-        center: Vector3(p.centerX, paintY, p.centerZ),
-        yaw: p.yaw,
-        extentX: p.extentX,
-        extentZ: p.extentZ,
+        center: Vector3(
+          lk != null ? lk.centerX : p.centerX,
+          paintY,
+          lk != null ? lk.centerZ : p.centerZ,
+        ),
+        yaw: lk != null ? lk.yaw : p.yaw,
+        extentX: lk != null ? lk.extentX : p.extentX,
+        extentZ: lk != null ? lk.extentZ : p.extentZ,
         vertical: zone == OverlayZoneKind.wall,
         kind: zone == OverlayZoneKind.wall
             ? PlaneQuadKind.wall
             : PlaneQuadKind.floor,
-        polygon: _smoothOverlayPolygon(p.id, polygonFromFlat(p.polygon)),
+        polygon: ring,
       );
+      if (lk == null) _advanceOverlayLock(p, ring, smoothY);
       if (zone == OverlayZoneKind.mask) {
         masks.add(quad);
       } else {
@@ -799,13 +1008,21 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     // floor−wall clip can't cut what the wall doesn't cover. Merging
     // near-coplanar fragments afterwards turns ARCore's patchwork
     // silhouette into one clean rectangle (the "tetris" look).
-    final baseY = refY ?? floorY;
+    // Untrusted windows fall back to the lowest painted green, not raw
+    // floorY — otherwise walls stretch 7-20 cm BELOW the floor they meet.
+    // With no green painted at all (early session), raw floorY still beats
+    // shipping unclamped wall geometry that dips into the floor area.
+    final baseY = refY ?? minFloorPaintY ?? floorY;
+    var clampCount = 0;
     if (baseY != null) {
       final walls = <PlaneQuad>[];
       final rest = <PlaneQuad>[];
       for (final q in quads) {
         if (q.kind == PlaneQuadKind.wall) {
-          walls.add(withWallBaseAt(q, refY: baseY));
+          final before = _wallBottomY(q);
+          final stretched = withWallBaseAt(q, refY: baseY);
+          if (_wallBottomY(stretched) > before + 1e-9) clampCount++;
+          walls.add(stretched);
         } else {
           rest.add(q);
         }
@@ -813,17 +1030,58 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       quads
         ..clear()
         ..addAll(rest)
-        ..addAll(mergeWallQuads(walls));
+        // join last: closes the perpendicular seam at corners the merge
+        // cap (0.26 rad) can never bridge.
+        ..addAll(joinWallCorners(mergeWallQuads(capWallQuads(walls, 20))));
+      // Post-clamp canary: withWallBaseAt guarantees bottoms ≥ baseY, so
+      // any dip here proves a bypass path — the symptom-A trace.
+      var minWallBottom = double.infinity;
+      for (final q in quads) {
+        if (q.kind != PlaneQuadKind.wall) continue;
+        final b = _wallBottomY(q);
+        if (b < minWallBottom) minWallBottom = b;
+      }
+      if (minWallBottom.isFinite && minWallBottom < baseY - 0.01) {
+        final now = DateTime.now();
+        final last = _lastWallDipLogAt;
+        if (last == null || now.difference(last) > const Duration(seconds: 5)) {
+          _lastWallDipLogAt = now;
+          BootTrace.log('ar-screen: wall dip base='
+              '${baseY.toStringAsFixed(3)} '
+              'min=${minWallBottom.toStringAsFixed(3)}');
+        }
+      }
     }
     _overlayPolyEma.removeWhere((id, _) => !seenIds.contains(id));
     _overlayCenterY.removeWhere((id, _) => !seenIds.contains(id));
+    _overlayLock.removeWhere((id, _) => !seenIds.contains(id));
     // The synthetic stand-in may only paint at a PROVEN height — otherwise
     // it floats at a wrong floorY next to (or instead of) the real floor.
+    // It also must HOLD the spot where it first painted: re-centering it
+    // under the camera every rebuild is the one overlay element that moves
+    // with the view. A refY jump >0.15 m re-anchors at the new height.
+    if (refY != null &&
+        _syntheticAnchor != null &&
+        _syntheticAnchorY != null &&
+        (refY - _syntheticAnchorY!).abs() > 0.15) {
+      final cam = _lastCameraPos;
+      _syntheticAnchor =
+          cam == null ? null : Vector3(cam.x, cam.y, cam.z);
+      _syntheticAnchorY = cam == null ? null : refY;
+    }
     final synthetic = syntheticFloorQuad(
       floorY: refY,
-      cameraPos: _lastCameraPos,
+      cameraPos: _syntheticAnchor ?? _lastCameraPos,
       existing: quads,
     );
+    if (synthetic == null) {
+      _syntheticAnchor = null;
+      _syntheticAnchorY = null;
+    } else if (_syntheticAnchor == null && _lastCameraPos != null) {
+      final cam = _lastCameraPos!;
+      _syntheticAnchor = Vector3(cam.x, cam.y, cam.z);
+      _syntheticAnchorY = refY;
+    }
     _overlay.value = _OverlaySnapshot(
       vp: vp,
       quads: quads,
@@ -831,16 +1089,19 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       synthetic: synthetic,
     );
     // Throttled: only log when the overlay state actually changes shape.
+    // cameraY deliberately stays out — at 2 dp it changes most rebuilds
+    // and turned the trace into a 10 Hz file-IO stream. syn/clamp
+    // attribute paint bursts to RANSAC sources and clamp activity.
     final key = '$trusted|${floorY?.toStringAsFixed(2)}|'
-        '${cameraY?.toStringAsFixed(2)}|'
         '${quads.length}|${masks.length}|${lowestPlaneY?.toStringAsFixed(2)}|'
-        '${synthetic != null}|${_cloudMasks.length}';
+        '${synthetic != null}|${_cloudMasks.length}'
+        '|syn=${_syntheticWalls.length}|clamp=$clampCount';
     if (key != _overlayStateKey) {
       _overlayStateKey = key;
       BootTrace.log('ar-screen: overlay $key');
     }
     final ms = slowWatch.elapsedMilliseconds;
-    if (ms >= 12) {
+    if (ms >= 6) {
       final now = DateTime.now();
       final last = _lastSlowRebuildAt;
       if (last == null || now.difference(last) > const Duration(seconds: 2)) {
@@ -882,6 +1143,29 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     return next;
   }
 
+  // Thin wrapper: the streak/freeze logic lives in OverlayLock so it can
+  // be unit-tested; this adds the once-per-id lock attribution.
+  void _advanceOverlayLock(ARPlaneInfo p, List<Vector3> ring, double smoothY) {
+    if (p.id == 0) return;
+    final st = _overlayLock.putIfAbsent(p.id, OverlayLock.new);
+    if (st.locked) return;
+    if (st.advance(p, ring: ring, smoothY: smoothY)) {
+      BootTrace.log('ar-screen: lock id=${p.id} '
+          'yaw=${p.yaw.toStringAsFixed(2)} fresh=${p.fresh}');
+    }
+  }
+
+  double _wallBottomY(PlaneQuad q) {
+    if (q.polygon.length >= 3) {
+      var minY = double.infinity;
+      for (final c in planeQuadCorners(q)) {
+        if (c.y < minY) minY = c.y;
+      }
+      if (minY.isFinite) return minY;
+    }
+    return q.center.y - q.extentZ / 2;
+  }
+
   ScanCoachState _computeScanCoach() {
     final now = DateTime.now();
     final fresh = _livePlanesAt != null &&
@@ -917,6 +1201,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   void _maybeUpdateScanCoach() {
     final state = _computeScanCoach();
+    _lastCoachState = state;
     final key = '${state.step.index}|${state.ready ? 1 : 0}|'
         '${(state.progress * 20).round()}|${state.tip}';
     if (key == _scanCoachKey) return;
@@ -957,16 +1242,23 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         await _session!.hitTest(size.width / 2 * dpr, size.height / 2 * dpr);
     if (!mounted) return;
     final intent = _reticleIntent;
-    setState(() {
-      _reticle = ReticleAdvisor.evaluate(
-        hits: _memoryFiltered(hits, intent),
-        intent: intent,
-        liveFloorY: _currentLiveFloorY,
-        vouchedFloor: _vouchedFloor,
-        vouchedWall: _vouchedWall,
-        relaxed: _gatesRelaxed,
-      );
-    });
+    final next = ReticleAdvisor.evaluate(
+      hits: _memoryFiltered(hits, intent),
+      intent: intent,
+      liveFloorY: _currentLiveFloorY,
+      vouchedFloor: _vouchedFloor,
+      vouchedWall: _vouchedWall,
+      relaxed: _gatesRelaxed,
+    );
+    // Rebuild only on a real change: the size curve moves ≤1 px per 0.1 m,
+    // so tenths of a meter is the useful resolution.
+    final prev = _reticle;
+    if (prev.status == next.status &&
+        ((prev.distanceM ?? -1) * 10).round() ==
+            ((next.distanceM ?? -1) * 10).round()) {
+      return;
+    }
+    setState(() => _reticle = next);
   }
 
   PlacementType get _reticleIntent {
@@ -2134,13 +2426,17 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
               return const SizedBox.shrink();
             }
             return Positioned.fill(
-              child: PlaneOverlay(
-                viewProjection: snap.vp,
-                quads: [
-                  if (snap.synthetic != null) snap.synthetic!,
-                  ...snap.quads,
-                ],
-                masks: snap.masks,
+              // Inner listenable: matrix-only updates reproject the same
+              // quads (cheap paint) instead of waiting for the next plane
+              // event's rebuild — that gap was the camera swim.
+              child: ValueListenableBuilder<Matrix4?>(
+                valueListenable: _overlayVp,
+                builder: (context, vp, _) => PlaneOverlay(
+                  viewProjection: vp ?? snap.vp,
+                  quads: snap.renderQuads,
+                  masks: snap.masks,
+                  zoneCache: snap.zoneCache,
+                ),
               ),
             );
           },
@@ -2274,7 +2570,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             right: 0,
             child: SafeArea(
               child: ScanCoachOverlay(
-                state: _computeScanCoach(),
+                state: _lastCoachState ?? _computeScanCoach(),
                 onDismiss: () => setState(() => _scanCoachDismissed = true),
               ),
             ),

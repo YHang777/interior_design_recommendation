@@ -263,6 +263,27 @@ void main() {
           reason: 'the freestanding cluster masks alone');
     });
 
+    test('the wall-hug exemption is masking, not classification', () {
+      // One cell centred at (0.75, 1.95): iz=6/dz=0.15 sits exactly on the
+      // hug band, so only extentX (the reach) decides.
+      final pts = _flat([
+        for (var i = 0; i < 3; i++) [0.75, 1.0, 1.95],
+      ]);
+      // reach = 1.0/2 + 0.25 = 0.75 covers cx 0.75 → exempted.
+      final exempted = obstacleMaskQuads(
+          points: pts, refY: 0, walls: [_wall(cz: 1.8, ex: 1.0, ez: 1.0)]);
+      expect(exempted, isEmpty);
+
+      // A sub-m² fragment still exempts: reach passes (ex=1.0 → 0.75) but
+      // area 1.0×0.99 = 0.99 m² is under the shared gate. Its feet must
+      // keep the floor painted — wall classification stays gated at the
+      // five sites that paint/score/classify (overlay, RANSAC admit,
+      // emit, coach, placement), not at the mask exemption.
+      final kept = obstacleMaskQuads(
+          points: pts, refY: 0, walls: [_wall(cz: 1.8, ex: 1.0, ez: 0.99)]);
+      expect(kept, isEmpty);
+    });
+
     test('more than 14 clusters keeps the biggest, deterministically', () {
       // 15 isolated cells (every other column → never 8-connected),
       // counts 3..17 so the smallest cluster must be capped off.
@@ -354,20 +375,32 @@ void main() {
   });
 
   group('floorProbeCandidate', () {
-    test('median of the band with eight points', () {
+    test('p20 of the band with eight points', () {
       final ys = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07];
       final pts = _flat([
         for (var i = 0; i < ys.length; i++) [i * 0.01, ys[i], 0.0],
       ]);
-      expect(floorProbeCandidate(points: pts, refY: 0), closeTo(0.035, 1e-12));
+      expect(floorProbeCandidate(points: pts, refY: 0), closeTo(0.01, 1e-12));
     });
 
-    test('odd count takes the middle value', () {
-      final ys = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08];
+    test('upward contamination never drags the reading off the floor', () {
+      // Ten floor points plus ten wall-base points inside the band: a
+      // median landed between them and agreed with a wrong floorY forever.
       final pts = _flat([
-        for (var i = 0; i < ys.length; i++) [i * 0.01, ys[i], 0.0],
+        for (var i = 0; i < 10; i++) [i * 0.01, 0.0, 0.0],
+        for (var i = 0; i < 10; i++) [0.5 + i * 0.01, 0.12, 0.0],
       ]);
-      expect(floorProbeCandidate(points: pts, refY: 0), closeTo(0.04, 1e-12));
+      expect(floorProbeCandidate(points: pts, refY: 0), closeTo(0.0, 1e-12));
+    });
+
+    test('reads the floor under a too-high estimate', () {
+      // floorY locked 0.15 high: the band must reach down to the real
+      // floor, and in-band wall points above it must not win the percentile.
+      final pts = _flat([
+        for (var i = 0; i < 10; i++) [i * 0.01, 0.0, 0.0],
+        for (var i = 0; i < 10; i++) [0.5 + i * 0.01, 0.20, 0.0],
+      ]);
+      expect(floorProbeCandidate(points: pts, refY: 0.15), closeTo(0.0, 1e-12));
     });
 
     test('null below eight in-band points', () {
@@ -382,7 +415,7 @@ void main() {
         for (var i = 0; i < 7; i++) [i * 0.01, i * 0.01, 0.0],
         [0.0, 0.5, 0.0],
         [0.1, 0.6, 0.0],
-        [0.2, -0.4, 0.0],
+        [0.2, -0.7, 0.0],
       ]);
       expect(floorProbeCandidate(points: pts, refY: 0), isNull);
     });
@@ -417,6 +450,31 @@ void main() {
       expect(p.centerZ, closeTo(2.0, 1e-9));
       expect(p.subsumed, isFalse);
       expect(p.polygon, isEmpty);
+    });
+
+    test('a sub-m² vertical fit is rejected by the area gate alone', () {
+      // Dyadic grid: 8 xs (width 0.875) × 5 ys (height 1.0) = 0.875 m².
+      // That clears the old 0.7×0.5 = 0.35 m² admission gate, so ONLY the
+      // shared 1.0 m² wall-area gate rejects it.
+      final small = _grid(
+        xs: const [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875],
+        ys: const [0.25, 0.5, 0.75, 1.0, 1.25],
+        zs: const [2.0],
+      );
+      expect(fitWallPlanes(points: _flat(small), refY: 0), isEmpty);
+    });
+
+    test('a 1.0 m² vertical fit is admitted', () {
+      // Same grid with 9 xs → width 1.0, height 1.0 → exactly 1.0 m².
+      final exact = _grid(
+        xs: const [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0],
+        ys: const [0.25, 0.5, 0.75, 1.0, 1.25],
+        zs: const [2.0],
+      );
+      final planes = fitWallPlanes(points: _flat(exact), refY: 0);
+      expect(planes, hasLength(1));
+      expect(planes.single.extentX, closeTo(1.0, 1e-9));
+      expect(planes.single.extentZ, closeTo(1.0, 1e-9));
     });
 
     test('floor point cluster yields no wall', () {
@@ -456,6 +514,133 @@ void main() {
       expect(
         [for (final p in a) p.toJson()],
         [for (final p in b) p.toJson()],
+      );
+    });
+
+    test('bottom-heavy inliers put the rect bottom on minY', () {
+      // Mean of the ys is 0.47, bbox mid is 0.925 — the old mean-based cy
+      // built a rect whose bottom dipped under the true inlier minimum.
+      final heavy = _grid(
+        xs: const [0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4],
+        ys: const [0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 1.55],
+        zs: const [2.0],
+      );
+      final planes = fitWallPlanes(points: _flat(heavy), refY: 0);
+      expect(planes, hasLength(1));
+      final p = planes.single;
+      expect(p.centerY, closeTo(0.925, 1e-9),
+          reason: 'Y-bbox mid, not the bottom-heavy inlier mean');
+      expect(p.centerY - p.extentZ / 2, closeTo(0.3, 1e-9),
+          reason: 'rect bottom sits exactly on the inlier minY');
+    });
+
+    List<List<double>> rotatedA(double rad) => [
+          for (final p in wallA)
+            [
+              0.7 + (p[0] - 0.7) * math.cos(rad) - (p[2] - 2.0) * math.sin(rad),
+              p[1],
+              2.0 + (p[0] - 0.7) * math.sin(rad) + (p[2] - 2.0) * math.cos(rad),
+            ],
+        ];
+
+    test('a same-place fit contradicting an existing wall is rejected', () {
+      final existing = [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 0)];
+      expect(
+        fitWallPlanes(
+            points: _flat(rotatedA(0.5)), refY: 0, existing: existing),
+        isEmpty,
+        reason: 'yawDiff 0.5 on the same surface is a grazing-pan phantom',
+      );
+    });
+
+    test('the rotated control with no reference is accepted', () {
+      expect(fitWallPlanes(points: _flat(rotatedA(0.5)), refY: 0),
+          hasLength(1));
+    });
+
+    test('an existing wall 3 m off-plane does not reject the fit', () {
+      final existing = [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 5.0, yaw: 0)];
+      expect(
+        fitWallPlanes(
+            points: _flat(rotatedA(0.5)), refY: 0, existing: existing),
+        hasLength(1),
+        reason: 'a parallel wall at another depth is not the same surface',
+      );
+    });
+
+    test('same-surface fit noise (yawDiff 0.10) passes the gate', () {
+      final existing = [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 0.10)];
+      expect(
+        fitWallPlanes(points: _flat(wallA), refY: 0, existing: existing),
+        hasLength(1),
+        reason: '≤0.15 rad is fit noise, not a contradiction',
+      );
+    });
+
+    test('corner-region yaw noise (yawDiff 0.18) passes the gate', () {
+      final existing = [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 0.18)];
+      expect(
+        fitWallPlanes(points: _flat(wallA), refY: 0, existing: existing),
+        hasLength(1),
+        reason: 'ARCore yaw wobbles hardest near corners; ≤0.20 stays noise',
+      );
+    });
+
+    test('a same-place fit past the noise band is still rejected', () {
+      expect(
+        wallFitConsistentWith(
+          _wall(id: 900001, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 0.30),
+          [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 0)],
+        ),
+        isFalse,
+        reason: '0.30 rad on the same surface is beyond fit noise',
+      );
+    });
+
+    test('orientation is compared unoriented across the hemisphere seam',
+        () {
+      // Fits are canonicalized into the +z hemisphere; native telemetry
+      // yaw is not. A raw wrap of 3.0 vs 3.0−π is ~π — past the 1.3
+      // corner cap — so the gate used to read a flipped-hemisphere
+      // same-surface pair as a corner and fail open.
+      final ref = _wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 3.0);
+      expect(
+        wallFitConsistentWith(
+          _wall(
+              id: 900001,
+              cx: 0.7,
+              cy: 0.925,
+              cz: 2.0,
+              yaw: 3.0 - math.pi + 0.02),
+          [ref],
+        ),
+        isTrue,
+        reason: 'the same line within noise is yawDiff 0.02, not ~π',
+      );
+      expect(
+        wallFitConsistentWith(
+          _wall(
+              id: 900001,
+              cx: 0.7,
+              cy: 0.925,
+              cz: 2.0,
+              yaw: 3.0 - math.pi + 0.5),
+          [ref],
+        ),
+        isFalse,
+        reason: '0.5 rad off the same surface is still the grazing signature',
+      );
+    });
+
+    test('a flipped-hemisphere reference still rejects the grazing fit', () {
+      final existing = [_wall(id: 1, cx: 0.7, cy: 0.925, cz: 2.0, yaw: 3.0)];
+      expect(
+        fitWallPlanes(
+            points: _flat(rotatedA(3.0 - math.pi + 0.5)),
+            refY: 0,
+            existing: existing),
+        isEmpty,
+        reason: 'the +z-canonical fit must not read as a corner of yaw 3.0',
       );
     });
 
@@ -586,22 +771,56 @@ void main() {
     test('held wall keeps emitting during misses (holds ≤ maxHold) then '
         'drops', () {
       final fit = _wall(id: 900001, cx: 0);
-      var tracks = updateWallTracks(tracks: const [], curr: [fit]);
-      tracks = updateWallTracks(tracks: tracks, curr: [fit]);
+      var tracks = updateWallTracks(
+          tracks: const [], curr: [fit], maxHold: 2);
+      tracks = updateWallTracks(
+          tracks: tracks, curr: [fit], maxHold: 2);
       expect(emitWallTracks(tracks), hasLength(1));
 
-      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      tracks = updateWallTracks(tracks: tracks, curr: const [], maxHold: 2);
       expect(tracks.single.holds, 1);
       expect(emitWallTracks(tracks), hasLength(1),
           reason: 'held tracks keep their old streak');
 
-      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      tracks = updateWallTracks(tracks: tracks, curr: const [], maxHold: 2);
       expect(tracks.single.holds, 2);
       expect(emitWallTracks(tracks), hasLength(1));
 
-      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      tracks = updateWallTracks(tracks: tracks, curr: const [], maxHold: 2);
       expect(tracks, isEmpty, reason: 'holds > maxHold (2) drops the track');
       expect(emitWallTracks(tracks), isEmpty);
+    });
+
+    test('default hold tolerates a long turn-away before dropping', () {
+      // At the 1 Hz ticker the default maxHold (30) keeps a briefly-unseen
+      // wall alive through ~30 s of turning instead of 3 ticks.
+      final fit = _wall(id: 900001, cx: 0);
+      var tracks = updateWallTracks(tracks: const [], curr: [fit]);
+      tracks = updateWallTracks(tracks: tracks, curr: [fit]);
+      expect(emitWallTracks(tracks), hasLength(1));
+
+      for (var i = 0; i < 5; i++) {
+        tracks = updateWallTracks(tracks: tracks, curr: const []);
+        expect(tracks, hasLength(1), reason: 'miss ${i + 1} still held');
+        expect(emitWallTracks(tracks), hasLength(1),
+            reason: 'streak is preserved while held');
+      }
+      expect(tracks.single.streak, 2);
+    });
+
+    test('a sub-m² track never emits, even at full streak', () {
+      final small = updateWallTracks(
+          tracks: const [], curr: [_wall(id: 900001, ex: 0.9, ez: 1.0)]);
+      final streaked = updateWallTracks(
+          tracks: small, curr: [_wall(id: 900001, ex: 0.9, ez: 1.0)]);
+      expect(streaked.single.streak, greaterThanOrEqualTo(2));
+      expect(emitWallTracks(streaked), isEmpty,
+          reason: 'the shared area gate is the mandatory final boundary');
+
+      final ok = updateWallTracks(
+          tracks: const [], curr: [_wall(id: 900001)]); // 1.4×1.2
+      final ok2 = updateWallTracks(tracks: ok, curr: [_wall(id: 900001)]);
+      expect(emitWallTracks(ok2), hasLength(1));
     });
 
     test('a fit 0.6 m away (unmatched) stays hidden until its second tick',
@@ -662,6 +881,108 @@ void main() {
           [for (final t in b) (t.streak, t.holds)]);
       expect([for (final p in emitWallTracks(a)) p.toJson()],
           [for (final p in emitWallTracks(b)) p.toJson()]);
+    });
+
+    test('a held track paints through its retention window, then drops', () {
+      final fit = _wall(id: 900001, cx: 0);
+      var tracks = updateWallTracks(tracks: const [], curr: [fit]);
+      tracks = updateWallTracks(tracks: tracks, curr: [fit]); // streak 2
+      expect(emitWallTracks(tracks), hasLength(1));
+
+      for (var i = 0; i < 30; i++) {
+        tracks = updateWallTracks(tracks: tracks, curr: const []);
+      }
+      expect(tracks.single.holds, 30);
+      expect(emitWallTracks(tracks), hasLength(1),
+          reason: 'the emit grace rides the whole retention window — a '
+              'static wall must not flicker out while depth points are away');
+
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks, isEmpty, reason: 'holds > maxHold (30) drops the track');
+      expect(emitWallTracks(tracks), isEmpty);
+    });
+
+    test('a shorter explicit emit grace stops painting while retained', () {
+      final fit = _wall(id: 900001, cx: 0);
+      var tracks = updateWallTracks(tracks: const [], curr: [fit]);
+      tracks = updateWallTracks(tracks: tracks, curr: [fit]); // streak 2
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 1);
+      expect(emitWallTracks(tracks, maxEmitHolds: 1), hasLength(1),
+          reason: 'holds == grace still paints');
+      tracks = updateWallTracks(tracks: tracks, curr: const []);
+      expect(tracks.single.holds, 2);
+      expect(emitWallTracks(tracks, maxEmitHolds: 1), isEmpty,
+          reason: 'holds > grace stops painting');
+      expect(tracks, hasLength(1), reason: 'the track itself stays retained');
+    });
+
+    test('a fresh fragment is not crowded out by older tracks', () {
+      final older = [
+        for (var i = 0; i < 4; i++) _wall(id: 900001 + i, cx: i * 4.0)
+      ];
+      var tracks = updateWallTracks(tracks: const [], curr: older);
+      for (var i = 0; i < 9; i++) {
+        tracks = updateWallTracks(tracks: tracks, curr: older);
+      }
+      expect([for (final t in tracks) t.streak], [10, 10, 10, 10]);
+      final withFragment = [...older, _wall(id: 900005, cx: 20)];
+      tracks = updateWallTracks(tracks: tracks, curr: withFragment);
+      tracks = updateWallTracks(tracks: tracks, curr: withFragment);
+      final emitted = emitWallTracks(tracks);
+      expect(emitted, hasLength(5),
+          reason: 'streak-desc sort must have room for the new fragment — '
+              'with maxEmit 3 the held tracks held every slot');
+      expect(emitted.any((p) => p.id == 900005), isTrue);
+    });
+
+    test('an unconfirmed streak-2 track is suppressed until the camera moves',
+        () {
+      final fit = _wall(id: 900001, cx: 0);
+      final cam0 = Vector3(0, 1.5, 0);
+      var tracks =
+          updateWallTracks(tracks: const [], curr: [fit], cameraPos: cam0);
+      tracks =
+          updateWallTracks(tracks: tracks, curr: [fit], cameraPos: cam0);
+      expect(tracks.single.streak, 2);
+      expect(tracks.single.confirmed, isFalse);
+      expect(emitWallTracks(tracks), isEmpty,
+          reason: 'a single-view phantom never paints');
+
+      tracks = updateWallTracks(
+          tracks: tracks, curr: [fit], cameraPos: Vector3(0.3, 1.5, 0));
+      expect(tracks.single.confirmed, isTrue,
+          reason: 'camera moved ≥0.25 m since mint → two views');
+      expect(emitWallTracks(tracks), hasLength(1));
+    });
+
+    test('a stationary track still emits at the streak ≥4 fallback', () {
+      final fit = _wall(id: 900001, cx: 0);
+      final cam = Vector3(0, 1.5, 0);
+      var tracks =
+          updateWallTracks(tracks: const [], curr: [fit], cameraPos: cam);
+      for (var i = 0; i < 3; i++) {
+        tracks = updateWallTracks(tracks: tracks, curr: [fit], cameraPos: cam);
+      }
+      expect(tracks.single.streak, 4);
+      expect(tracks.single.confirmed, isFalse);
+      expect(emitWallTracks(tracks), hasLength(1),
+          reason: 'stationary detection survives at ~4 cloud ticks');
+    });
+
+    test('an unconfirmed held track stops painting', () {
+      final fit = _wall(id: 900001, cx: 0);
+      final cam = Vector3(0, 1.5, 0);
+      var tracks =
+          updateWallTracks(tracks: const [], curr: [fit], cameraPos: cam);
+      tracks =
+          updateWallTracks(tracks: tracks, curr: [fit], cameraPos: cam);
+      tracks =
+          updateWallTracks(tracks: tracks, curr: const [], cameraPos: cam);
+      expect(tracks.single.holds, 1);
+      expect(tracks.single.streak, 2);
+      expect(emitWallTracks(tracks), isEmpty,
+          reason: 'streak frozen below 4 and never confirmed');
     });
   });
 }

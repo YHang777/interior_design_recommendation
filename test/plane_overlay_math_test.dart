@@ -281,10 +281,37 @@ void main() {
   });
 
   group('overlayZoneOf', () {
-    test('every vertical plane is wall zone', () {
+    test('a wall-sized vertical plane is wall zone', () {
       expect(
-        overlayZoneOf(planeType: 2, centerY: 1.2, floorY: 0, cameraY: 1.5),
+        overlayZoneOf(
+          planeType: 2,
+          centerY: 1.2,
+          floorY: 0,
+          cameraY: 1.5,
+          extentX: 2.0,
+          extentZ: 1.5,
+        ),
         OverlayZoneKind.wall,
+      );
+    });
+
+    test('vertical planes below the shared area gate drop', () {
+      // 0.999 m² is just under ArPlacementPolicy.minWallAreaM2 (1.0).
+      expect(
+        overlayZoneOf(
+            planeType: 2, centerY: 1.0, extentX: 0.999, extentZ: 1.0),
+        OverlayZoneKind.drop,
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 2, centerY: 1.0, extentX: 1.001, extentZ: 1.0),
+        OverlayZoneKind.wall,
+        reason: 'the gate is >=, so exactly 1.0 m² also passes',
+      );
+      expect(
+        overlayZoneOf(planeType: 2, centerY: 1.0),
+        OverlayZoneKind.drop,
+        reason: 'no extents → fails closed, never paints wrongly',
       );
     });
 
@@ -399,6 +426,21 @@ void main() {
       );
     });
 
+    test('a floor-level untrusted plane paints even with no camera height',
+        () {
+      // Pose gap longer than the zone window: the memory already knows this
+      // floor, so a plane sitting on it must not blank the overlay.
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0.0,
+            floorY: 0,
+            cameraY: null,
+            lowestPlaneY: 0),
+        OverlayZoneKind.floor,
+      );
+    });
+
     test('a trusted floorY keeps painting while the camera crouches', () {
       expect(
         overlayZoneOf(
@@ -448,6 +490,34 @@ void main() {
             floorYTrusted: true),
         OverlayZoneKind.floor,
         reason: 'a 2 m gap is noise — the anchor wins',
+      );
+    });
+
+    test('cloud corroboration refuses a stray low plane for zones', () {
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: 0,
+            floorY: 0,
+            cameraY: 1.5,
+            lowestPlaneY: -0.45,
+            floorYTrusted: true,
+            corroborateFloorY: true),
+        OverlayZoneKind.floor,
+        reason: 'the confirmed height paints even when a reflection sits '
+            '0.45 m below',
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 1,
+            centerY: -0.45,
+            floorY: 0,
+            cameraY: 1.5,
+            lowestPlaneY: -0.45,
+            floorYTrusted: true,
+            corroborateFloorY: true),
+        OverlayZoneKind.drop,
+        reason: 'without the pull the stray plane is simply below the band',
       );
     });
 
@@ -505,6 +575,18 @@ void main() {
     test('noise far below never moves the reference', () {
       expect(trustedOverlayRefY(floorY: 0, lowestPlaneY: -2.0), 0);
     });
+
+    test('fresh cloud corroboration refuses the pull-down', () {
+      expect(
+        trustedOverlayRefY(
+          floorY: 0,
+          lowestPlaneY: -0.45,
+          corroborateFloorY: true,
+        ),
+        0,
+        reason: 'a stray low plane must not move a cloud-confirmed height',
+      );
+    });
   });
 
   group('withWallBaseAt', () {
@@ -522,8 +604,7 @@ void main() {
           kind: vertical ? PlaneQuadKind.wall : PlaneQuadKind.floor,
         );
 
-    test('a rect wall short of the floor stretches down to just below it',
-        () {
+    test('a rect wall short of the floor stretches down to it', () {
       final wall = rectWall(); // bottom at 0.15 m
       final out = withWallBaseAt(wall, refY: 0);
       expect(out, isNot(same(wall)));
@@ -531,9 +612,10 @@ void main() {
       expect(out.center.z, closeTo(2, 1e-12));
       expect(out.yaw, closeTo(0, 1e-12));
       expect(out.extentX, 2);
-      expect(out.extentZ, closeTo(2.17, 1e-9));
-      expect(out.center.y, closeTo(1.065, 1e-9));
-      expect(out.center.y - out.extentZ / 2, closeTo(-0.02, 1e-9));
+      expect(out.extentZ, closeTo(2.15, 1e-9));
+      expect(out.center.y, closeTo(1.075, 1e-9));
+      expect(out.center.y - out.extentZ / 2, closeTo(0, 1e-9),
+          reason: 'the base lands ON the floor paint plane, not below it');
       expect(out.vertical, isTrue);
       expect(out.kind, PlaneQuadKind.wall);
       expect(out.polygon, isEmpty);
@@ -542,7 +624,7 @@ void main() {
     test('the drop happens at exactly maxDropM and stops past it', () {
       final wall = rectWall(y: 1.5); // bottom = 0.5 exactly
       final inLimit = withWallBaseAt(wall, refY: 0, maxDropM: 0.5);
-      expect(inLimit.center.y - inLimit.extentZ / 2, closeTo(-0.02, 1e-9));
+      expect(inLimit.center.y - inLimit.extentZ / 2, closeTo(0, 1e-9));
       expect(withWallBaseAt(wall, refY: 0, maxDropM: 0.49), same(wall),
           reason: 'a fragment floating past the limit is genuinely high');
     });
@@ -550,8 +632,37 @@ void main() {
     test('a wall already reaching the floor is untouched', () {
       final atFloor = rectWall(y: 1.0); // bottom = 0
       expect(withWallBaseAt(atFloor, refY: 0), same(atFloor));
-      final below = rectWall(y: 0.9); // bottom = −0.1
-      expect(withWallBaseAt(below, refY: 0), same(below));
+    });
+
+    test('a wall dipping below the floor is raised onto it, top kept', () {
+      final below = rectWall(y: 0.9); // bottom = −0.1, top = 1.9
+      final out = withWallBaseAt(below, refY: 0);
+      expect(out, isNot(same(below)),
+          reason: 'the old pass-through painted the dip as blue-on-green');
+      expect(out.extentZ, closeTo(1.9, 1e-9), reason: 'top stays at 1.9');
+      expect(out.center.y, closeTo(0.95, 1e-9));
+      expect(out.center.y - out.extentZ / 2, closeTo(0, 1e-9));
+      expect(out.center.x, closeTo(1, 1e-12));
+      expect(out.yaw, closeTo(0, 1e-12));
+    });
+
+    test('a far-below dip raises onto the floor with no drop band', () {
+      final deep = rectWall(y: 0.4); // bottom = −0.6, top = 1.4
+      final out = withWallBaseAt(deep, refY: 0);
+      expect(out, isNot(same(deep)));
+      expect(out.center.y - out.extentZ / 2, closeTo(0, 1e-9));
+      expect(out.extentZ, closeTo(1.4, 1e-9));
+      expect(out.center.y, closeTo(0.7, 1e-9));
+    });
+
+    test('a wholly-below rect lifts rigidly, height preserved', () {
+      final under = rectWall(y: -1.5); // bottom = −2.5, top = −0.5 ≤ 0
+      final out = withWallBaseAt(under, refY: 0);
+      expect(out, isNot(same(under)));
+      expect(out.extentZ, closeTo(2, 1e-12),
+          reason: 'a rigid lift never distorts the height');
+      expect(out.center.y, closeTo(1, 1e-12));
+      expect(out.center.y - out.extentZ / 2, closeTo(0, 1e-12));
     });
 
     test('a fragment floating above maxDropM is untouched', () {
@@ -586,16 +697,16 @@ void main() {
       final out = withWallBaseAt(wall, refY: 0);
       expect(out, isNot(same(wall)));
       expect(out.polygon, hasLength(5));
-      expect(out.polygon[0].y, closeTo(-0.02, 1e-9));
+      expect(out.polygon[0].y, closeTo(0, 1e-9));
       expect(out.polygon[1].y, closeTo(0.30, 1e-9),
           reason: 'only the bottom row (≤ low + 0.10) moves');
-      expect(out.polygon[2].y, closeTo(-0.02, 1e-9));
+      expect(out.polygon[2].y, closeTo(0, 1e-9));
       expect(out.polygon[3].y, closeTo(2.0, 1e-9));
       expect(out.polygon[4].y, closeTo(2.0, 1e-9));
       expect(out.polygon[0].x, closeTo(-1.5, 1e-9));
       expect(out.polygon[2].z, closeTo(1.95, 1e-9));
-      // center.y shifts by the same delta: −0.02 − 0.15 = −0.17
-      expect(out.center.y, closeTo(1.1 - 0.17, 1e-9));
+      // center.y shifts by the same delta: 0 − 0.15 = −0.15
+      expect(out.center.y, closeTo(1.1 - 0.15, 1e-9));
       expect(out.center.x, closeTo(0, 1e-12));
       expect(out.center.z, closeTo(2, 1e-12));
       expect(out.extentX, 3);
@@ -604,7 +715,7 @@ void main() {
       expect(out.kind, PlaneQuadKind.wall);
     });
 
-    test('a polygon wall already at the floor is untouched', () {
+    test('a polygon wall dipping below the floor is raised onto it', () {
       final wall = PlaneQuad(
         center: Vector3.zero(),
         yaw: 0,
@@ -619,7 +730,45 @@ void main() {
           Vector3(-1, 2, 0),
         ],
       );
-      expect(withWallBaseAt(wall, refY: 0), same(wall));
+      final out = withWallBaseAt(wall, refY: 0);
+      expect(out, isNot(same(wall)),
+          reason: 'the old pass-through painted the dip as blue-on-green');
+      expect(out.polygon, hasLength(4));
+      expect(out.polygon[0].y, closeTo(0, 1e-9),
+          reason: 'sub-floor vertices land ON the floor paint plane');
+      expect(out.polygon[1].y, closeTo(0, 1e-9));
+      expect(out.polygon[2].y, closeTo(2, 1e-9));
+      expect(out.polygon[3].y, closeTo(2, 1e-9));
+      expect(out.center.y, closeTo(0.05, 1e-9),
+          reason: 'center.y += refY − minY');
+      expect(out.extentZ, 2, reason: 'height unchanged');
+    });
+
+    test('a wholly-below polygon translates up, ring intact', () {
+      final wall = PlaneQuad(
+        center: Vector3(0, -1, 2),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 1,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1, -1.5, 2),
+          Vector3(1, -1.5, 2),
+          Vector3(1, -0.5, 2),
+          Vector3(-1, -0.5, 2),
+        ],
+      );
+      final out = withWallBaseAt(wall, refY: 0);
+      expect(out, isNot(same(wall)));
+      final ys = [for (final v in out.polygon) v.y];
+      expect(ys, contains(closeTo(0, 1e-9)),
+          reason: 'minY lands on the floor');
+      expect(ys, contains(closeTo(1.0, 1e-9)),
+          reason: 'the ring translates rigidly — no collapse to a line');
+      expect(out.extentZ, closeTo(1, 1e-12));
+      expect(out.center.y, closeTo(0.5, 1e-9), reason: '−1 + 1.5 delta');
+      expect(out.polygon[0].x, closeTo(-1, 1e-9));
     });
 
     test('a polygon wall floating high is untouched', () {
@@ -728,10 +877,58 @@ void main() {
       final out = mergeWallQuads([a, b]);
       expect(out, hasLength(1));
       final m = out.single;
-      expect(m.center.y - m.extentZ / 2, closeTo(-0.02, 1e-9),
+      expect(m.center.y - m.extentZ / 2, closeTo(0, 1e-9),
           reason: 'the stretched base is part of the merged y-range');
-      expect(m.extentZ, closeTo(2.17, 1e-9));
-      expect(m.center.y, closeTo(1.065, 1e-9));
+      expect(m.extentZ, closeTo(2.15, 1e-9));
+      expect(m.center.y, closeTo(1.075, 1e-9));
+    });
+
+    test('a polygon-bearing wall owns the merged yaw', () {
+      final poly = PlaneQuad(
+        center: Vector3(1, 1, 2),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(0, 0, 2),
+          Vector3(2, 0, 2),
+          Vector3(2, 2, 2),
+          Vector3(0, 2, 2),
+        ],
+      );
+      // Wider rect-only synthetic whose near endpoint sits exactly on the
+      // polygon's right edge — widest-owns would rotate the group to 0.24.
+      final synth = wall(
+        x: 2 + 1.5 * math.cos(0.24),
+        z: 2 - 1.5 * math.sin(0.24),
+        yaw: 0.24,
+        width: 3,
+      );
+      final out = mergeWallQuads([poly, synth]);
+      expect(out, hasLength(1));
+      expect(out.single.yaw, closeTo(0, 1e-9),
+          reason: 'telemetry polygon owns the frame, not the wider fit');
+    });
+
+    test('a yaw-drift chain caps at the pairwise spread bound', () {
+      // Endpoints attach exactly (footprint gap 0); widths let the
+      // widest-led group yaw walk to 0.26 so the old pairwise-vs-group
+      // gate chains all four (span 0.39 rad) while the member-pairwise
+      // cap stops at three.
+      final a = wall(x: 1, z: 2, yaw: 0, width: 1.5);
+      final b = wall(x: 2.99, z: 1.838, yaw: 0.13, width: 2.5);
+      final c = wall(x: 5.921, z: 1.227, yaw: 0.26, width: 3.5);
+      final d = wall(x: 8.537, z: 0.398, yaw: 0.39, width: 2.0);
+      final out = mergeWallQuads([a, b, c, d]);
+      expect(out, hasLength(2),
+          reason: '0.39 − 0 = 0.39 rad breaks the pairwise 0.26 cap');
+      final chain = out.firstWhere((q) => q.yaw > 0.1);
+      expect(chain.yaw, closeTo(0.26, 1e-9),
+          reason: 'all-synthetic group takes the median yaw');
+      final lone = out.firstWhere((q) => q.yaw < 0.1);
+      expect(identical(lone, a), isTrue);
     });
 
     test('a lone polygon wall passes through unchanged', () {
@@ -754,6 +951,179 @@ void main() {
       expect(out.single, same(w));
       expect(out.single.polygon, hasLength(4));
       expect(mergeWallQuads(const []), isEmpty);
+    });
+  });
+
+  group('joinWallCorners', () {
+    PlaneQuad wall({
+      required double x,
+      required double z,
+      double yaw = 0,
+      double width = 2,
+      double height = 2,
+      double y = 1,
+      List<Vector3> polygon = const [],
+    }) =>
+        PlaneQuad(
+          center: Vector3(x, y, z),
+          yaw: yaw,
+          extentX: width,
+          extentZ: height,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+          polygon: polygon,
+        );
+
+    // Both runs 0.2 m short of their shared corner point (2, 2).
+    PlaneQuad runA({double y = 1}) => wall(x: 0, z: 2, width: 3.6, y: y);
+    PlaneQuad runB({double y = 1}) =>
+        wall(x: 2, z: 0, yaw: math.pi / 2, width: 3.6, y: y);
+
+    test('a right-angle seam extends both runs to the intersection', () {
+      final out = joinWallCorners([runA(), runB()]);
+      expect(out, hasLength(2));
+      final a = out.firstWhere((q) => (q.yaw).abs() < 1e-9);
+      final b = out.firstWhere((q) => (q.yaw - math.pi / 2).abs() < 1e-9);
+      expect(a.extentX, closeTo(3.8, 1e-9));
+      expect(a.center.x, closeTo(0.1, 1e-9),
+          reason: 'the rect grows one end, so the center slides half');
+      expect(b.extentX, closeTo(3.8, 1e-9));
+      expect(b.center.z, closeTo(0.1, 1e-9));
+      // Both ends now land on the line intersection (2, 2). B runs along
+      // −z (yaw π/2), so its near end sits at center.z + half.
+      final endA = Vector3(a.center.x + a.extentX / 2, a.center.y, 2);
+      final endB = Vector3(2, b.center.y, b.center.z + b.extentX / 2);
+      expect((endA - Vector3(2, 1, 2)).length, lessThan(1e-9));
+      expect((endB - Vector3(2, 1, 2)).length, lessThan(1e-9));
+      expect(a.extentZ, 2, reason: 'vertical stretch belongs to withWallBaseAt');
+      expect(a.center.y, 1);
+    });
+
+    test('distant perpendicular walls whose lines cross do not stretch', () {
+      // Gap to the crossing point is 1 m on each side — over maxGapM.
+      final a = wall(x: 0, z: 2, width: 2);
+      final b = wall(x: 2, z: 0, yaw: math.pi / 2, width: 2);
+      final out = joinWallCorners([a, b]);
+      expect(identical(out[0], a), isTrue);
+      expect(identical(out[1], b), isTrue);
+    });
+
+    test('a 0.6 m seam joins — ARCore runs stop that far short of corners',
+        () {
+      // Ends at x/z = ±1.4 → 0.6 m short of the (2, 2) intersection.
+      final a = wall(x: 0, z: 2, width: 2.8);
+      final b = wall(x: 2, z: 0, yaw: math.pi / 2, width: 2.8);
+      final out = joinWallCorners([a, b]);
+      expect(out[0].extentX, closeTo(3.4, 1e-9));
+      expect(out[0].center.x, closeTo(0.3, 1e-9));
+      expect(out[1].extentX, closeTo(3.4, 1e-9));
+      expect(out[1].center.z, closeTo(0.3, 1e-9));
+    });
+
+    test('the gap bound stays caller-tunable', () {
+      final a = wall(x: 0, z: 2, width: 2.8);
+      final b = wall(x: 2, z: 0, yaw: math.pi / 2, width: 2.8);
+      final out = joinWallCorners([a, b], maxGapM: 0.4);
+      expect(identical(out[0], a), isTrue,
+          reason: '0.6 m gap over a 0.4 m bound must not stretch');
+      expect(identical(out[1], b), isTrue);
+    });
+
+    test('same-yaw and oblique pairs pass through untouched', () {
+      final a = wall(x: 0, z: 2);
+      final b = wall(x: 4, z: 2);
+      final c = wall(x: 6, z: 0, yaw: 1.0); // 57° — not a corner
+      final out = joinWallCorners([a, b, c]);
+      expect(identical(out[0], a), isTrue);
+      expect(identical(out[1], b), isTrue);
+      expect(identical(out[2], c), isTrue);
+    });
+
+    test('height ranges that do not overlap refuse the join', () {
+      final a = wall(x: 0, z: 2, width: 3.6, height: 2, y: 2); // y ∈ [1, 3]
+      final b = wall(
+          x: 2, z: 0, yaw: math.pi / 2, width: 3.6, height: 0.5, y: 0.25);
+      final out = joinWallCorners([a, b]);
+      expect(identical(out[0], a), isTrue);
+      expect(identical(out[1], b), isTrue);
+    });
+
+    test('a T junction extends only the stem', () {
+      final cross = wall(x: 0, z: 2, width: 6); // P = (0, 2) inside its span
+      final stem = wall(x: 0, z: 0, yaw: math.pi / 2, width: 3.6);
+      final out = joinWallCorners([cross, stem]);
+      expect(identical(out[0], cross), isTrue,
+          reason: 'the intersection sits mid-span — the cross wall is done');
+      expect(out[1].extentX, closeTo(3.8, 1e-9));
+      expect(out[1].center.z + out[1].extentX / 2, closeTo(2, 1e-9),
+          reason: 'stem reaches the cross wall line');
+    });
+
+    test('polygon end vertices ride along, interior vertices stay', () {
+      final poly = [
+        Vector3(-1.8, 0, 2),
+        Vector3(1.8, 0, 2),
+        Vector3(1.8, 2, 2),
+        Vector3(-1.8, 2, 2),
+      ];
+      final a = wall(x: 0, z: 2, width: 3.6, polygon: poly);
+      final out = joinWallCorners([a, runB()]);
+      final joined = out.firstWhere((q) => (q.yaw).abs() < 1e-9);
+      expect(joined.polygon, hasLength(4));
+      expect(
+        joined.polygon.where((v) => (v.x - 2.0).abs() < 1e-9).length,
+        2,
+        reason: 'both vertices at the extended end moved by the gap',
+      );
+      expect(
+        joined.polygon.any((v) => (v.x + 1.8).abs() < 1e-9 && v.y == 0),
+        isTrue,
+        reason: 'the far end is untouched',
+      );
+    });
+
+    test('each end joins at most once per pass', () {
+      final a = wall(x: 0, z: 2, width: 3.6);
+      final first = wall(x: 2, z: 0, yaw: math.pi / 2, width: 3.6);
+      // Another right-angle run claiming A's already-extended +x end.
+      final second = wall(x: 2.05, z: 0, yaw: math.pi / 2, width: 3.6);
+      final out = joinWallCorners([a, first, second]);
+      expect(out[0].extentX, closeTo(3.8, 1e-9),
+          reason: 'extended exactly once, toward the first claim');
+      expect(identical(out[2], second), isTrue,
+          reason: 'the second claim on the same end is refused');
+    });
+
+    test('a second pass is a no-op', () {
+      final once = joinWallCorners([runA(), runB()]);
+      final twice = joinWallCorners(once);
+      for (var i = 0; i < once.length; i++) {
+        expect(identical(twice[i], once[i]), isTrue,
+            reason: 'ends already meet the intersection exactly');
+      }
+    });
+  });
+
+  group('capWallQuads', () {
+    PlaneQuad wall(double ex, double ez) => PlaneQuad(
+          center: Vector3.zero(),
+          yaw: 0,
+          extentX: ex,
+          extentZ: ez,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+        );
+
+    test('past the cap only the biggest footprints survive', () {
+      final capped = capWallQuads([wall(1, 2), wall(3, 3), wall(2, 2)], 2);
+      expect(capped, hasLength(2));
+      expect(capped.first.extentX, 3);
+      expect(capped.last.extentX, 2);
+    });
+
+    test('under the cap the list passes through untouched', () {
+      final few = [wall(1, 1), wall(2, 2)];
+      expect(identical(capWallQuads(few, 5), few), isTrue);
     });
   });
 

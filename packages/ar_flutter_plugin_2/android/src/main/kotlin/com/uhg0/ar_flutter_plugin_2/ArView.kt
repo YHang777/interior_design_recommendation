@@ -126,6 +126,15 @@ class ArView(
     // back onto real planes.
     private var latestFrame: Frame? = null
 
+    // Wall-clock stamp of the last delivered frame. Once frames stop
+    // (camera/ARCore stall) the stale latestFrame poisons every acquire*
+    // and hitTest call: a device run hung ~10 s inside acquirePointCloud
+    // on a frame the render loop had stopped refreshing, and a
+    // post-dispose acquireDepthImage segfaulted — both take the
+    // frame==null path via freshFrame() instead.
+    private var lastFrameAtMs = 0L
+    private var lastStaleLogAt = 0L
+
     // Live TRACKING-plane snapshot for the onPlanesUpdate telemetry (Bug 2).
     // Keyed by the ARCore Plane (stable per-session reference). A fully-formed
     // floor stops appearing in getUpdatedTrackables once it is stable, but must
@@ -197,6 +206,25 @@ class ArView(
                 else -> result.notImplemented()
             }
         }
+    // ~25 rendered frames of grace: during normal tracking the stamp is
+    // refreshed at 30–60 Hz, so this never fires. When the frame loop has
+    // stalled (or the session is being torn down) callers get null and
+    // take their cheap early-return instead of entering ARCore with dead
+    // state. Throttled trace so a 50 ms poll can't flood the log.
+    private fun freshFrame(): Frame? {
+        val f = latestFrame ?: return null
+        val age = SystemClock.elapsedRealtime() - lastFrameAtMs
+        if (age > 800) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastStaleLogAt > 2000) {
+                lastStaleLogAt = now
+                NativeTrace.log(viewContext, "arview: stale frame age=${age}ms")
+            }
+            return null
+        }
+        return f
+    }
+
     private fun handleDisableCamera(result: MethodChannel.Result) {
         try {
             isSessionPaused = true
@@ -204,6 +232,10 @@ class ArView(
             // tracking resumes — start the buffer fresh.
             pointAccumulator.clear()
             lastAccumCloudTimestamp = -1L
+            // Frames stop here; a pre-pause frame must not outlive the
+            // pause (acquire* on it hangs or crashes ARCore).
+            latestFrame = null
+            lastFrameAtMs = 0L
             sceneView.session?.pause()
             result.success(null)
         } catch (e: Exception) {
@@ -290,6 +322,8 @@ class ArView(
                     livePlanes.clear()
                     planeLastFreshAt.clear()
                     detectedPlanes.clear()
+                    latestFrame = null
+                    lastFrameAtMs = 0L
                     lastConfiguredSession = session
                 }
                 NativeTrace.log(
@@ -402,7 +436,7 @@ class ArView(
                                 // hit-testing with it never moves anything.
                                 // The live finger position is on the detector.
                                 val moveEvent = detector.currentMotionEvent ?: e
-                                latestFrame?.hitTest(moveEvent.x, moveEvent.y)
+                                freshFrame()?.hitTest(moveEvent.x, moveEvent.y)
                                     ?.firstOrNull { hit ->
                                         val trackable = hit.trackable
                                         if (trackable !is Plane ||
@@ -750,6 +784,7 @@ class ArView(
                         if (!isSessionPaused) {
                             run {
                                 latestFrame = frame
+                                lastFrameAtMs = SystemClock.elapsedRealtime()
                                 if (!firstFrameTraced) {
                                     firstFrameTraced = true
                                     NativeTrace.log(viewContext, "arview: first frame")
@@ -966,6 +1001,23 @@ class ArView(
                                         val freshAt = planeLastFreshAt[plane] ?: nowMs
                                         planesPayload.add(telemetry + ("freshMs" to (nowMs - freshAt)))
                                     }
+                                    // Freshest 48 only: livePlanes grows for as
+                                    // long as ARCore keeps a plane tracking, so
+                                    // the codec cost of this message would grow
+                                    // forever with the area scanned. Planes you
+                                    // walk away from age out of freshMs first
+                                    // and re-enter the moment ARCore updates
+                                    // them again (turning back).
+                                    val planesOut: List<Map<String, Any>> =
+                                        if (planesPayload.size <= 48) {
+                                            planesPayload
+                                        } else {
+                                            planesPayload
+                                                .sortedBy {
+                                                    (it["freshMs"] as Number).toLong()
+                                                }
+                                                .take(48)
+                                        }
                                     val projection = FloatArray(16)
                                     frame.camera.getProjectionMatrix(projection, 0, 0.1f, 100f)
                                     val view = FloatArray(16)
@@ -974,7 +1026,7 @@ class ArView(
                                         sessionChannel.invokeMethod(
                                             "onPlanesUpdate",
                                             mapOf(
-                                                "planes" to planesPayload,
+                                                "planes" to planesOut,
                                                 "projection" to projection.map { it.toDouble() },
                                                 "view" to view.map { it.toDouble() },
                                             ),
@@ -1028,7 +1080,7 @@ class ArView(
                                 // surface behind it, not be swallowed as a
                                 // phantom node tap (that killed placement
                                 // the moment showFeaturePoints went on).
-                                latestFrame?.let { frame ->
+                                freshFrame()?.let { frame ->
                                     val hitResults = frame.hitTest(motionEvent)
                                     val planeHits = hitResults
                                         .filter { hit ->
@@ -1047,7 +1099,7 @@ class ArView(
                             // used to) is an EXTRA update ARCore never expects
                             // mid-gesture — it desyncs tracking. `latestFrame` is
                             // refreshed every frame by onSessionUpdated above.
-                            latestFrame?.let { frame ->
+                            freshFrame()?.let { frame ->
                                 val hitResults = frame.hitTest(motionEvent)
                                 val planeHits = hitResults
                                     .filter { hit ->
@@ -1360,7 +1412,10 @@ class ArView(
             // Read the current camera pose from the frame the render loop
             // already updated. Calling session.update() here (as this used to)
             // injects an unsolicited extra update and desyncs tracking.
-            val cameraPose = latestFrame?.camera?.pose
+            // A stale frame answers null (Dart treats it as "pose gap")
+            // instead of erroring every 50 ms poll through a stall.
+            val frame = freshFrame()
+            val cameraPose = frame?.camera?.pose
             if (cameraPose != null) {
                 // Column-major 4x4 — the exact format the Dart side
                 // (MatrixConverter.fromJson) expects. This handler used to
@@ -1368,7 +1423,7 @@ class ArView(
                 // so getCameraPose() silently returned null every call.
                 result.success(serializePose(cameraPose).toList())
             } else {
-                result.error("NO_CAMERA_POSE", "Camera pose is not available", null)
+                result.success(null)
             }
         } catch (e: Exception) {
             result.error("CAMERA_POSE_ERROR", e.message, null)
@@ -1455,7 +1510,7 @@ class ArView(
     // camera feed the AR content is drawn over.
     private fun handleGetCameraMatrices(result: MethodChannel.Result) {
         try {
-            val camera = latestFrame?.camera
+            val camera = freshFrame()?.camera
             if (camera == null) {
                 result.error("NO_CAMERA", "Camera is not available", null)
                 return
@@ -1524,7 +1579,7 @@ class ArView(
             val args = call.arguments as? Map<*, *>
             val x = (args?.get("x") as? Number)?.toFloat()
             val y = (args?.get("y") as? Number)?.toFloat()
-            val frame = latestFrame
+            val frame = freshFrame()
             if (x == null || y == null || frame == null) {
                 result.success(emptyList<Map<String, Any>>())
                 return
@@ -1557,7 +1612,7 @@ class ArView(
 
             // Use the frame the render loop already produced — never call
             // session.update() here (that desyncs tracking; see onSessionUpdated).
-            val frame = latestFrame
+            val frame = freshFrame()
             if (frame == null) {
                 result.success(null)
                 return
@@ -1632,7 +1687,7 @@ class ArView(
                 result.error("INVALID_ARGUMENT", "floorY required", null)
                 return
             }
-            val frame = latestFrame
+            val frame = freshFrame()
             if (frame == null) {
                 result.success(null)
                 return
@@ -1720,7 +1775,7 @@ class ArView(
             }
             // Same frame the render loop already produced — never call
             // session.update() here (that desyncs tracking).
-            val frame = latestFrame
+            val frame = freshFrame()
             if (frame == null) {
                 result.success(emptyList<Double>())
                 return
@@ -2239,6 +2294,11 @@ class ArView(
         sessionChannel.setMethodCallHandler(null)
         objectChannel.setMethodCallHandler(null)
         anchorChannel.setMethodCallHandler(null)
+        // Dart's ticker can still have a call in flight here; without this
+        // it landed in frame.acquireDepthImage on a destroyed session and
+        // SIGSEGV'd in libarcore_c (device tombstone 2026-11-10 21:21:08).
+        latestFrame = null
+        lastFrameAtMs = 0L
         nodesMap.clear()
         livePlanes.clear()
         planeLastFreshAt.clear()
