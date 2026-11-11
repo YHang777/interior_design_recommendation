@@ -21,6 +21,7 @@ import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/boot_trace.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
+import '../../../../../models/room_design.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/catalog_picker_sheet.dart';
 import '../../../../../shared/widgets/confirm_dialog.dart';
@@ -41,6 +42,7 @@ import '../../data/glb_generator.dart';
 import '../../data/room_finishes.dart';
 import '../../data/placement_reticle.dart';
 import '../../data/plane_overlay_math.dart';
+import '../../data/room_outline_builder.dart';
 import '../../data/scan_coach.dart';
 import '../widgets/placement_reticle.dart';
 import '../widgets/plane_overlay.dart';
@@ -141,12 +143,17 @@ class ArViewerScreen extends StatefulWidget {
     super.key,
     this.items,
     this.product,
+    this.design,
     this.title = 'AR Preview',
   });
 
   final List<ArFurnitureItem>? items;
 
   final Product? product;
+
+  // When set, the top bar gains a "Use room shape" action that pops this
+  // design back with an outline built from the painted wall quads.
+  final RoomDesign? design;
 
   final String title;
 
@@ -2409,6 +2416,30 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     );
   }
 
+  // Capture what the scan painted: the same merged/corner-joined wall quads
+  // the overlay draws become a planner-outline plan handed back to the caller.
+  void _useRoomShape() {
+    final design = widget.design;
+    if (design == null) return;
+    final snap = _overlay.value;
+    final outline = buildRoomOutline([
+      if (snap != null)
+        for (final q in snap.quads)
+          if (q.kind == PlaneQuadKind.wall) q,
+    ]);
+    if (outline == null) {
+      showAppSnackbar(context, 'Not enough walls yet — scan around the room',
+          isError: true);
+      return;
+    }
+    Navigator.of(context).pop(design.copyWith(
+      walls: outline.walls,
+      widthCm: outline.widthCm,
+      heightCm: outline.heightCm,
+      updatedAt: DateTime.now(),
+    ));
+  }
+
   Widget _buildArView() {
     return Stack(
       fit: StackFit.expand,
@@ -2482,6 +2513,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                           color: Colors.white),
                     ),
                   ),
+                  if (widget.design != null)
+                    IconButton(
+                      icon: const Icon(Icons.crop_free, color: Colors.white),
+                      tooltip: 'Use room shape',
+                      onPressed: _useRoomShape,
+                    ),
                   Semantics(
                     button: true,
                     label: _placed.isEmpty

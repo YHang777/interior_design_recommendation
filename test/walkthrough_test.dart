@@ -369,5 +369,75 @@ void main() {
 
       expect(find.text('Please sign in to save designs'), findsOneWidget);
     });
+
+    testWidgets('debugDesign snapshots the live plan', (tester) async {
+      await pumpWalk(
+        tester,
+        walls: squareWalls,
+        overrides: standardOverrides(),
+      );
+
+      await tester.tap(find.byTooltip('Add furniture'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sofa'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Place'));
+      await tester.pump();
+
+      final snapshot = walkState(tester).debugDesign as RoomDesign;
+      expect(snapshot.walls, squareWalls);
+      expect(snapshot.widthCm, 400);
+      expect(snapshot.heightCm, 500);
+      expect(snapshot.furniture, hasLength(1));
+      expect(snapshot.name, 'Test Walk');
+      expect(snapshot.id, 'd1');
+    });
+
+    testWidgets('going back hands the live plan to whoever pushed us',
+        (tester) async {
+      RoomDesign? popped;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: standardOverrides(),
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  popped = await Navigator.push<RoomDesign>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => WalkthroughScreen(
+                        design: design(walls: squareWalls),
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add furniture'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sofa'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Place'));
+      await tester.pump();
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(popped, isNotNull);
+      expect(popped!.walls, squareWalls);
+      expect(popped!.widthCm, 400);
+      expect(popped!.heightCm, 500);
+      expect(popped!.furniture, hasLength(1));
+      expect(popped!.furniture.single.name, 'Sofa');
+    });
   });
 }

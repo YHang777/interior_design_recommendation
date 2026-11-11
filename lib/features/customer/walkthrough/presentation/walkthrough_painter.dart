@@ -38,6 +38,24 @@ String? _spritePathFor(FurniturePlacement f) {
   return null;
 }
 
+int _chan(double v) {
+  final r = v.round();
+  return r < 0 ? 0 : (r > 255 ? 255 : r);
+}
+
+// Scale a colour's channels — k > 1 warms it toward the light, k < 1 is
+// the shading/AO falloff.
+Color _scale(Color c, double k) => Color.fromRGBO(
+      _chan(c.r * 255 * k),
+      _chan(c.g * 255 * k),
+      _chan(c.b * 255 * k),
+      c.a,
+    );
+
+// One plan-space light for the whole room: north-west, fixed, so walls,
+// the floor pool and furniture shadows all agree.
+const _lightPlan = Offset(-0.38, -0.92);
+
 // Street View style standing renderer: the camera is the walker (eye 150 cm,
 // yaw = controller heading), so you look at the room from inside it. Only
 // this file changes when a real 3D/VR renderer takes over the pose stream.
@@ -146,21 +164,41 @@ class WalkthroughPainter extends CustomPainter {
       String? label,
       (Offset, double)? labelAnchor,
       Color labelColor = AppColors.textPrimary,
+      List<Color>? fillGradient,
+      double blur = 0,
+      double depthBias = 0,
     }) {
       final cam = [for (final c in corners) toCam(c.$1, c.$2)];
       final clipped = clipNear(cam);
       if (clipped.length < 3) return;
       final path = polyPath(clipped);
       if (path == null) return;
-      final depth = clipped.fold<double>(0, (s, p) => s + p.z) / clipped.length;
+      final depth =
+          clipped.fold<double>(0, (s, p) => s + p.z) / clipped.length +
+              depthBias;
       Offset? labelPos;
       if (label != null && labelAnchor != null) {
         labelPos = project(toCam(labelAnchor.$1, labelAnchor.$2));
       }
+      var fillPaint = Paint()..color = fill;
+      if (fillGradient != null && fillGradient.length >= 2) {
+        final b = path.getBounds();
+        if (b.width >= 1 && b.height >= 1) {
+          fillPaint = Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: fillGradient,
+            ).createShader(b);
+        }
+      }
+      if (blur > 0) {
+        fillPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+      }
       into.add((
         depth: depth,
         path: path,
-        fill: Paint()..color = fill,
+        fill: fillPaint,
         stroke: Paint()
           ..color = stroke
           ..style = PaintingStyle.stroke
@@ -223,6 +261,30 @@ class WalkthroughPainter extends CustomPainter {
       final fw = footprintW(f);
       final fh = footprintH(f);
       final h = heightCmForFurniture(f.iconName);
+      if (h > 8) {
+        // Drop shadow on the floor, cast away from _lightPlan; the depth
+        // bias keeps it sorted under its own piece but over anything behind.
+        final spread = h * 0.3;
+        final c = Offset(
+          f.x + fw / 2 - _lightPlan.dx * spread,
+          f.y + fh / 2 - _lightPlan.dy * spread,
+        );
+        final hw = fw * 0.55;
+        final hh = fh * 0.55;
+        enqueue(
+          into,
+          [
+            (Offset(c.dx - hw, c.dy - hh), 0.0),
+            (Offset(c.dx + hw, c.dy - hh), 0.0),
+            (Offset(c.dx + hw, c.dy + hh), 0.0),
+            (Offset(c.dx - hw, c.dy + hh), 0.0),
+          ],
+          fill: Colors.black.withValues(alpha: ghostStyle ? 0.10 : 0.16),
+          stroke: Colors.transparent,
+          blur: 8,
+          depthBias: fw / 2 + fh / 2 + spread + 2,
+        );
+      }
       final center = Offset(f.x + fw / 2, f.y + fh / 2);
       final camC = toCam(center, h / 2);
       final imgPath = _spritePathFor(f);
@@ -358,6 +420,19 @@ class WalkthroughPainter extends CustomPainter {
           colors: [Color(0xFFEFECE4), Color(0xFFE7E3D9)],
         ).createShader(Offset.zero & size),
     );
+    // Vignette so the space past the outline reads as depth, not paper.
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          size.center(Offset.zero),
+          size.shortestSide * 0.72,
+          [
+            Colors.transparent,
+            Colors.black.withValues(alpha: 0.16),
+          ],
+        ),
+    );
 
     final outline = <Offset>[
       if (ctl.walls.length >= 3)
@@ -371,12 +446,39 @@ class WalkthroughPainter extends CustomPainter {
       ],
     ];
 
+    var sumX = 0.0;
+    var sumY = 0.0;
+    for (final w in outline) {
+      sumX += w.dx;
+      sumY += w.dy;
+    }
+    final centroid = Offset(sumX / outline.length, sumY / outline.length);
+
     // ── Floor + grid ──
     final floorPath = polyPath(clipNear([for (final w in outline) toCam(w, 0.0)]));
     if (floorPath != null) {
       canvas.drawPath(floorPath, Paint()..color = const Color(0xFFFFFBF5));
       canvas.save();
       canvas.clipPath(floorPath);
+      // Light pooling under the room centre, drawn before the grid so the
+      // metric lines stay crisp on top of it.
+      final pool = project(toCam(centroid, 0.0));
+      if (pool != null) {
+        final r = (size.width * 0.5).clamp(80.0, 400.0).toDouble();
+        canvas.drawCircle(
+          pool,
+          r,
+          Paint()
+            ..shader = ui.Gradient.radial(
+              pool,
+              r,
+              [
+                Colors.white.withValues(alpha: 0.20),
+                Colors.transparent,
+              ],
+            ),
+        );
+      }
       final minor = Paint()
         ..color = const Color(0xFFE8E4DB)
         ..strokeWidth = 0.6;
@@ -400,6 +502,17 @@ class WalkthroughPainter extends CustomPainter {
         worldLine(Offset(0, y), Offset(ctl.roomW, y),
             y % 100 == 0 ? major : minor);
       }
+      // Contact shadow along the wall line — the inner half of this stroke
+      // survives the clip and reads as the dark seam where floor meets wall.
+      canvas.drawPath(
+        floorPath,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.14)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 30
+          ..strokeJoin = StrokeJoin.round
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
       canvas.restore();
     }
 
@@ -410,17 +523,43 @@ class WalkthroughPainter extends CustomPainter {
       [for (final w in outline) (w, wallHeight)],
       fill: const Color(0xFFF4F1E9),
       stroke: const Color(0xFFE4DFD4),
+      fillGradient: const [Color(0xFFF7F4EC), Color(0xFFEDEAE1)],
     );
 
-    // ── Walls (each segment as a quad) ──
+    // ── Walls (each segment as a quad, lit by orientation + floor AO) ──
+    const wallBase = Color(0xFFE9E3D6);
     for (var i = 0; i < outline.length; i++) {
       final a = outline[i];
       final b = outline[(i + 1) % outline.length];
+      final d = b - a;
+      final len = d.distance;
+      var nx = 0.0;
+      var ny = 0.0;
+      if (len > 1e-6) {
+        nx = -d.dy / len;
+        ny = d.dx / len;
+        // Orient the normal into the room so both sides of a seam agree.
+        final mx = (a.dx + b.dx) / 2 - centroid.dx;
+        final my = (a.dy + b.dy) / 2 - centroid.dy;
+        if (nx * mx + ny * my < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+      }
+      final shade = (0.94 + 0.10 * (nx * _lightPlan.dx + ny * _lightPlan.dy))
+          .clamp(0.8, 1.06)
+          .toDouble();
       enqueue(
         faces,
         [(a, 0.0), (b, 0.0), (b, wallHeight), (a, wallHeight)],
-        fill: const Color(0xFFE9E3D6),
+        fill: _scale(wallBase, shade),
         stroke: const Color(0xFFD6CFC0),
+        // Darker at the floor line: the ambient-occlusion seam every real
+        // room shows where the wall meets the ground.
+        fillGradient: [
+          _scale(wallBase, shade),
+          _scale(wallBase, shade * 0.9),
+        ],
       );
     }
 

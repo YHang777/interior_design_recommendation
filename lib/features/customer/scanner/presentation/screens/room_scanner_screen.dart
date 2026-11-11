@@ -16,6 +16,7 @@ import '../../../../../shared/widgets/app_feedback.dart';
 import '../../../../../shared/widgets/catalog_picker_sheet.dart';
 import '../../../../../shared/widgets/float_button.dart';
 import '../../../ar/data/furniture_model_library.dart';
+import '../../../ar/presentation/ar_viewer_args.dart';
 import '../../../homeowner/presentation/providers/design_providers.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/furniture_catalog.dart';
@@ -1075,11 +1076,22 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       IconButton(
                         icon: Icon(Icons.view_in_ar, color: fgColor),
                         tooltip: 'View in AR',
-                        onPressed: () => context.push(
-                          '/ar-viewer',
-                          extra: ArFurnitureLibrary.fromIconNames(
-                              _furniture.map((f) => f.iconName).toList()),
-                        ),
+                        onPressed: () async {
+                          // Same round-trip as Walk Through: capture a
+                          // scanned outline in AR and adopt it back here.
+                          final updated =
+                              await context.push<RoomDesign>(
+                            '/ar-viewer',
+                            extra: ArViewerArgs(
+                              items: ArFurnitureLibrary.fromIconNames(
+                                  _furniture.map((f) => f.iconName).toList()),
+                              design: _snapshotDesign(),
+                            ),
+                          );
+                          if (updated != null && mounted) {
+                            _adoptDesign(updated);
+                          }
+                        },
                       ),
                       IconButton(
                         icon: Icon(Icons.directions_walk, color: fgColor),

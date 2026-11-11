@@ -38,6 +38,7 @@ import '../../features/customer/marketplace/presentation/screens/buyer_order_det
 import '../../features/customer/marketplace/presentation/screens/wishlist_screen.dart';
 import '../../features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 import '../../features/customer/ar/data/furniture_model_library.dart';
+import '../../features/customer/ar/presentation/ar_viewer_args.dart';
 import '../../features/customer/ar/presentation/screens/ar_viewer_screen.dart';
 import '../../features/customer/walkthrough/presentation/walkthrough_screen.dart';
 import '../../features/supplier/presentation/screens/order_detail_screen.dart';
@@ -138,7 +139,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
-      // ── AR Viewer (full-screen; extras: Product | List<ArFurnitureItem>) ──
+      // ── AR Viewer (full-screen; extras: Product | ArViewerArgs |
+      // List<ArFurnitureItem>) ──
       GoRoute(
         path: '/ar-viewer',
         name: RouteNames.arViewer,
@@ -456,6 +458,13 @@ CustomTransitionPage<T> _buildPage<T>(Widget child) {
 
 Widget _buildArViewer(Object? extra) {
   if (extra is Product) return ArViewerScreen(product: extra);
+  if (extra is ArViewerArgs) {
+    return ArViewerScreen(
+      items: extra.items,
+      design: extra.design,
+      title: extra.title ?? 'AR Preview',
+    );
+  }
   if (extra is List<ArFurnitureItem>) return ArViewerScreen(items: extra);
   return const ArViewerScreen();
 }

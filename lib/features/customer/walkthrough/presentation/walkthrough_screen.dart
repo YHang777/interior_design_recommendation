@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
@@ -11,6 +12,8 @@ import '../../../../core/utils/user_errors.dart';
 import '../../../../models/room_design.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/catalog_picker_sheet.dart';
+import '../../ar/data/furniture_model_library.dart';
+import '../../ar/presentation/ar_viewer_args.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../homeowner/presentation/providers/design_providers.dart';
 import '../../scanner/data/furniture_catalog.dart';
@@ -31,7 +34,7 @@ class WalkthroughScreen extends ConsumerStatefulWidget {
 }
 
 class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
-  late final WalkthroughController _ctl;
+  late WalkthroughController _ctl;
   final FocusNode _focus = FocusNode();
   RoomCatalogItem? _placing;
   int _placingRotation = 0;
@@ -102,9 +105,21 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   @visibleForTesting
   bool get debugPlacing => _placing != null;
 
+  @visibleForTesting
+  RoomDesign get debugDesign => _currentDesign();
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // Leaving (back button or system gesture) still hands the current
+      // plan to whoever pushed us, so placements made here land back in the
+      // planner even without an explicit save.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        Navigator.of(context).pop(_currentDesign());
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
@@ -118,6 +133,11 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
               color: AppColors.textPrimary),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong),
+            tooltip: 'Scan room',
+            onPressed: _scanRoom,
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
             tooltip: 'Add furniture',
@@ -189,6 +209,7 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
             Positioned(right: 14, bottom: 24, child: _dPad()),
           ],
         ),
+      ),
       ),
     );
   }
@@ -436,7 +457,51 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     showAppSnackbar(context, '${placed.name} placed');
   }
 
+  // ─── Scan ───
+
+  // Open the AR viewer as a room scanner: it returns a plan whose walls and
+  // dimensions come from the detected room shape — the controller rebuilds
+  // on it (furniture carries over, the walker respawns inside the outline).
+  Future<void> _scanRoom() async {
+    final updated = await context.push<RoomDesign>(
+      '/ar-viewer',
+      extra: ArViewerArgs(
+        title: 'Scan Room',
+        design: _currentDesign(),
+        items: ArFurnitureLibrary.fromIconNames(
+          _ctl.furniture.map((f) => f.iconName).toList(),
+        ),
+      ),
+    );
+    if (updated == null || !mounted) return;
+    final old = _ctl;
+    setState(() => _ctl = WalkthroughController(design: updated));
+    old.dispose();
+    _loadSprites();
+    showAppSnackbar(context, 'Room shape updated');
+  }
+
   // ─── Save ───
+
+  // The live plan as a RoomDesign: Save names/users it, and exiting pops it
+  // to the caller — both must agree on what "the current plan" is.
+  RoomDesign _currentDesign({String? name, String? userId}) {
+    final now = DateTime.now();
+    final existing = widget.design;
+    return RoomDesign(
+      id: existing?.id ?? '',
+      name: name ?? existing?.name ?? 'Walkthrough',
+      roomType: existing?.roomType ?? 'living_room',
+      widthCm: _ctl.roomW,
+      heightCm: _ctl.roomH,
+      furniture: List.of(_ctl.furniture),
+      walls: List.of(_ctl.walls),
+      detectedItems: existing?.detectedItems ?? const [],
+      userId: userId ?? existing?.userId ?? '',
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    );
+  }
 
   Future<void> _saveDesign() async {
     final user = ref.read(currentUserProvider);
@@ -485,19 +550,8 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     final designId =
         hasId ? existing.id : 'design-${now.millisecondsSinceEpoch}';
 
-    final design = RoomDesign(
-      id: designId,
-      name: name,
-      roomType: existing?.roomType ?? 'living_room',
-      widthCm: _ctl.roomW,
-      heightCm: _ctl.roomH,
-      furniture: List.of(_ctl.furniture),
-      walls: List.of(_ctl.walls),
-      detectedItems: existing?.detectedItems ?? const [],
-      userId: user.uid,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    );
+    final design =
+        _currentDesign(name: name, userId: user.uid).copyWith(id: designId);
 
     try {
       if (hasId) {
