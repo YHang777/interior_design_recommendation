@@ -253,6 +253,7 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
     'vase': ProductDimensions(widthM: 0.3, heightM: 0.45, depthM: 0.3),
     'mirror': ProductDimensions(widthM: 0.9, heightM: 1.2, depthM: 0.1),
     'cushion': ProductDimensions(widthM: 0.45, heightM: 0.15, depthM: 0.45),
+    'plant': ProductDimensions(widthM: 0.3, heightM: 0.6, depthM: 0.3),
   };
 
   ProductDimensions? _guessDefaultDims() {

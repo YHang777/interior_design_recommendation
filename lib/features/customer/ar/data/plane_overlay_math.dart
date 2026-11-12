@@ -442,14 +442,66 @@ Vector3 _polygonCentroidXZ(List<Vector3> pts) {
 // distance window. When the item's half extents and yaw are passed, the
 // clearance is measured from the item's BODY (its support extent along the
 // push direction), so a wide sofa slides far enough that its edge — not just
-// its center — clears the object. Returns [point] unchanged when there is
-// nothing to push away from or no valid landing exists — never worse than
+// its center — clears the object. [walls] add the second stage: a body
+// straddling a wall-kind quad's plane slides onto the tap's own side of it
+// (flush wall hugging is never pushed). Returns [point] unchanged when there
+// is nothing to push away from or no valid landing exists — never worse than
 // the raw tap.
 Vector3 pushIntoFloorZone({
   required Vector3 point,
   required List<PlaneQuad> masks,
   required List<PlaneQuad> floorZones,
   required Vector3 cameraPos,
+  List<PlaneQuad> walls = const [],
+  double clearanceM = 0.3,
+  double minDistanceM = 0.25,
+  double maxDistanceM = 4.0,
+  double? halfWidthM,
+  double? halfDepthM,
+  double? footprintYaw,
+}) {
+  if (floorZones.isEmpty) return point;
+  var landing = point;
+  if (masks.isNotEmpty) {
+    landing = _pushOffMasks(
+      point: landing,
+      masks: masks,
+      floorZones: floorZones,
+      walls: walls,
+      cameraPos: cameraPos,
+      clearanceM: clearanceM,
+      minDistanceM: minDistanceM,
+      maxDistanceM: maxDistanceM,
+      halfWidthM: halfWidthM,
+      halfDepthM: halfDepthM,
+      footprintYaw: footprintYaw,
+    );
+  }
+  if (walls.isNotEmpty) {
+    landing = _pushOffWalls(
+      point: landing,
+      masks: masks,
+      floorZones: floorZones,
+      walls: walls,
+      cameraPos: cameraPos,
+      clearanceM: clearanceM,
+      minDistanceM: minDistanceM,
+      maxDistanceM: maxDistanceM,
+      halfWidthM: halfWidthM,
+      halfDepthM: halfDepthM,
+      footprintYaw: footprintYaw,
+    );
+  }
+  return landing;
+}
+
+// The mask half of the push — see pushIntoFloorZone.
+Vector3 _pushOffMasks({
+  required Vector3 point,
+  required List<PlaneQuad> masks,
+  required List<PlaneQuad> floorZones,
+  required Vector3 cameraPos,
+  List<PlaneQuad> walls = const [],
   double clearanceM = 0.3,
   double minDistanceM = 0.25,
   double maxDistanceM = 4.0,
@@ -554,6 +606,7 @@ Vector3 pushIntoFloorZone({
       depthM: halfDepthM * 2,
       floorZones: floorZones,
       masks: masks,
+      walls: walls,
       maskClearanceM: clearanceM - 0.01,
     )) {
       return point;
@@ -581,6 +634,185 @@ Vector3 pushIntoFloorZone({
   return candidate;
 }
 
+// The wall half of the push — see pushIntoFloorZone. A body straddling a
+// wall-kind quad's plane ("my model is stuck in the wall plane") slides
+// onto the tap's own side of the plane: the side the seed point is on,
+// far enough that no corner is left inside the plane band. A body whose
+// footprint is unknown only moves when its tap lands ON the plane — a tap
+// near a wall is hugging, and hugging is legal. Falls back to the raw tap
+// when the slid landing cannot pass the same validation as the mask push.
+Vector3 _pushOffWalls({
+  required Vector3 point,
+  required List<PlaneQuad> masks,
+  required List<PlaneQuad> floorZones,
+  required List<PlaneQuad> walls,
+  required Vector3 cameraPos,
+  double clearanceM = 0.3,
+  double minDistanceM = 0.25,
+  double maxDistanceM = 4.0,
+  double? halfWidthM,
+  double? halfDepthM,
+  double? footprintYaw,
+}) {
+  final hasFootprint =
+      halfWidthM != null && halfDepthM != null && footprintYaw != null;
+  final corners = hasFootprint
+      ? _rectCornersXZ(point, footprintYaw, halfWidthM * 2, halfDepthM * 2)
+      : [Vector3(point.x, point.y, point.z)];
+  PlaneQuad? worst;
+  var worstPush = 0.0;
+  var worstSide = 1.0;
+  for (final w in walls) {
+    final range = _wallBodyRange(w, corners, point.y);
+    if (range == null) continue;
+    final collides = hasFootprint
+        ? (range.minD < -straddleTolM && range.maxD > straddleTolM)
+        : (range.minD > -straddleTolM && range.maxD < straddleTolM);
+    if (!collides) continue;
+    final nx = math.sin(w.yaw);
+    final nz = math.cos(w.yaw);
+    final side =
+        (point.x - w.center.x) * nx + (point.z - w.center.z) * nz >= 0
+            ? 1.0
+            : -1.0;
+    final push = side > 0 ? straddleTolM - range.minD : range.maxD + straddleTolM;
+    if (push > worstPush) {
+      worstPush = push;
+      worst = w;
+      worstSide = side;
+    }
+  }
+  if (worst == null) return point;
+  final candidate = Vector3(
+    point.x + math.sin(worst.yaw) * worstSide * worstPush,
+    point.y,
+    point.z + math.cos(worst.yaw) * worstSide * worstPush,
+  );
+  if (hasFootprint) {
+    if (!footprintFitsInZones(
+      center: candidate,
+      yaw: footprintYaw,
+      widthM: halfWidthM * 2,
+      depthM: halfDepthM * 2,
+      floorZones: floorZones,
+      masks: masks,
+      walls: walls,
+      maskClearanceM: clearanceM - 0.01,
+    )) {
+      return point;
+    }
+  } else {
+    if (!_pointOnZones(candidate, floorZones)) return point;
+    for (final m in masks) {
+      final pts = planeQuadCorners(m);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n != null && _pointInPolygon(candidate, pts, n)) return point;
+      final np = _nearestOnOutlineXZ(candidate, pts);
+      final dx = candidate.x - np.x;
+      final dz = candidate.z - np.z;
+      if (math.sqrt(dx * dx + dz * dz) < clearanceM - 0.01) return point;
+    }
+  }
+  for (final m in masks) {
+    if (segmentBlockedByQuad(origin: cameraPos, target: candidate, quad: m)) {
+      return point;
+    }
+  }
+  final camDist = (candidate - cameraPos).length;
+  if (camDist < minDistanceM || camDist > maxDistanceM) return point;
+  return candidate;
+}
+
+// Straddle-only wall gate. A footprint that crosses a wall-kind quad's
+// plane is stuck inside it the moment it lands — the misdetected-furniture
+// case: the gap under the furniture reads as placeable floor and the model
+// wedges into the face plane. Flush wall hugging is legal on purpose: a
+// body entirely one side of the plane (touching within [straddleTolM])
+// never bounces off a real wall. Quads whose base floats above the body's
+// reach ([straddleBodyHeightM]) cannot collide and are ignored, and a
+// crossing just past a fragment's detected end still counts
+// ([straddleEndMarginM]) — ARCore stops where scanning stopped, not where
+// the physical wall ends.
+const straddleTolM = 0.02;
+const straddleBodyHeightM = 1.8;
+const straddleEndMarginM = 0.1;
+
+List<Vector3> _rectCornersXZ(
+    Vector3 center, double yaw, double widthM, double depthM) {
+  final c = math.cos(yaw);
+  final s = math.sin(yaw);
+  final halfW = widthM / 2;
+  final halfD = depthM / 2;
+  Vector3 at(double sx, double sz) => Vector3(
+        center.x + c * halfW * sx + s * halfD * sz,
+        center.y,
+        center.z + -s * halfW * sx + c * halfD * sz,
+      );
+  return [at(1, 1), at(1, -1), at(-1, -1), at(-1, 1)];
+}
+
+// Signed corner distances across [wall]'s vertical plane when the body can
+// collide with it at all (vertical, within vertical reach, crossing the
+// wall's run); null when the wall is irrelevant to this body.
+({double minD, double maxD})? _wallBodyRange(
+    PlaneQuad wall, List<Vector3> corners, double bodyAtY) {
+  if (!wall.vertical) return null;
+  final pts = planeQuadCorners(wall);
+  if (pts.length < 3) return null;
+  final ux = math.cos(wall.yaw);
+  final uz = -math.sin(wall.yaw);
+  var minY = double.infinity;
+  var maxY = double.negativeInfinity;
+  var minAlong = double.infinity;
+  var maxAlong = double.negativeInfinity;
+  for (final v in pts) {
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+    final along = (v.x - wall.center.x) * ux + (v.z - wall.center.z) * uz;
+    if (along < minAlong) minAlong = along;
+    if (along > maxAlong) maxAlong = along;
+  }
+  if (!minY.isFinite || !maxY.isFinite) return null;
+  if (maxY < bodyAtY || minY > bodyAtY + straddleBodyHeightM) return null;
+  final nx = math.sin(wall.yaw);
+  final nz = math.cos(wall.yaw);
+  var minD = double.infinity;
+  var maxD = double.negativeInfinity;
+  var cMin = double.infinity;
+  var cMax = double.negativeInfinity;
+  for (final c in corners) {
+    final d = (c.x - wall.center.x) * nx + (c.z - wall.center.z) * nz;
+    if (d < minD) minD = d;
+    if (d > maxD) maxD = d;
+    final along = (c.x - wall.center.x) * ux + (c.z - wall.center.z) * uz;
+    if (along < cMin) cMin = along;
+    if (along > cMax) cMax = along;
+  }
+  if (cMax < minAlong - straddleEndMarginM ||
+      cMin > maxAlong + straddleEndMarginM) {
+    return null;
+  }
+  return (minD: minD, maxD: maxD);
+}
+
+bool footprintStraddlesWall({
+  required Vector3 center,
+  required double yaw,
+  required double widthM,
+  required double depthM,
+  required List<PlaneQuad> walls,
+}) {
+  if (walls.isEmpty || widthM <= 0 || depthM <= 0) return false;
+  final corners = _rectCornersXZ(center, yaw, widthM, depthM);
+  for (final w in walls) {
+    final range = _wallBodyRange(w, corners, center.y);
+    if (range == null) continue;
+    if (range.minD < -straddleTolM && range.maxD > straddleTolM) return true;
+  }
+  return false;
+}
+
 // Oriented-rectangle fit: the item's footprint (width × depth at [yaw],
 // centered at [center] in XZ) must sit entirely on open floor — every sample
 // inside at least one floor-zone polygon (union) and clear of every mask.
@@ -589,8 +821,9 @@ Vector3 pushIntoFloorZone({
 // pushIntoFloorZone already validates against. The floor check uses a rect
 // deflated by [floorMarginM] so a footprint flush against a zone edge still
 // passes; the mask check uses the full rect with [maskClearanceM] to keep
-// the body off detected objects. Empty [floorZones] fails open — nothing
-// there says the spot is bad.
+// the body off detected objects. [walls] add the straddle gate — see
+// footprintStraddlesWall. Empty [floorZones] fails open — nothing there
+// says the spot is bad.
 bool footprintFitsInZones({
   required Vector3 center,
   required double yaw,
@@ -598,34 +831,43 @@ bool footprintFitsInZones({
   required double depthM,
   required List<PlaneQuad> floorZones,
   List<PlaneQuad> masks = const [],
+  List<PlaneQuad> walls = const [],
   double floorMarginM = 0.04,
   double maskClearanceM = 0.05,
 }) {
   if (widthM <= 0 || depthM <= 0) return true;
-  if (floorZones.isEmpty) return true;
-  final full = _orientedRectSamples(center, yaw, widthM, depthM, inflateM: 0);
-  final shrinkOk = floorMarginM * 2 < widthM && floorMarginM * 2 < depthM;
-  final inset = shrinkOk
-      ? _orientedRectSamples(center, yaw, widthM, depthM,
-          inflateM: -floorMarginM)
-      : full;
-  for (final s in inset) {
-    if (!_pointOnZones(s, floorZones)) return false;
-  }
-  for (final m in masks) {
-    final pts = planeQuadCorners(m);
-    if (pts.length < 3) continue;
-    final n = _polygonNormal(pts);
-    if (n == null) continue;
-    for (final s in full) {
-      if (_pointInPolygon(s, pts, n)) return false;
-      final np = _nearestOnOutlineXZ(s, pts);
-      final dx = s.x - np.x;
-      final dz = s.z - np.z;
-      if (math.sqrt(dx * dx + dz * dz) < maskClearanceM) return false;
+  if (floorZones.isEmpty && walls.isEmpty) return true;
+  if (floorZones.isNotEmpty) {
+    final full = _orientedRectSamples(center, yaw, widthM, depthM, inflateM: 0);
+    final shrinkOk = floorMarginM * 2 < widthM && floorMarginM * 2 < depthM;
+    final inset = shrinkOk
+        ? _orientedRectSamples(center, yaw, widthM, depthM,
+            inflateM: -floorMarginM)
+        : full;
+    for (final s in inset) {
+      if (!_pointOnZones(s, floorZones)) return false;
+    }
+    for (final m in masks) {
+      final pts = planeQuadCorners(m);
+      if (pts.length < 3) continue;
+      final n = _polygonNormal(pts);
+      if (n == null) continue;
+      for (final s in full) {
+        if (_pointInPolygon(s, pts, n)) return false;
+        final np = _nearestOnOutlineXZ(s, pts);
+        final dx = s.x - np.x;
+        final dz = s.z - np.z;
+        if (math.sqrt(dx * dx + dz * dz) < maskClearanceM) return false;
+      }
     }
   }
-  return true;
+  return !footprintStraddlesWall(
+    center: center,
+    yaw: yaw,
+    widthM: widthM,
+    depthM: depthM,
+    walls: walls,
+  );
 }
 
 // Nine sample points of the oriented rect: four corners, four edge
@@ -665,6 +907,15 @@ List<Vector3> _orientedRectSamples(
   ];
 }
 
+// Furniture-scale floating fragments — a misdetected desk/console/sofa
+// face with a gap under it — stretch to the floor even past [maxDropM]:
+// the gap is exactly where green read inside the wall area and models
+// wedged into the plane. Wall-scale fragments and genuinely high ones
+// keep [maxDropM]: a shelf face must never paint a phantom sheet below
+// itself.
+const _furnitureScaleHeightM = 1.5;
+const _furnitureScaleMaxDropM = 0.75;
+
 // ARCore wall fragments routinely stop 10–20 cm above the floor, which
 // leaves exactly the green base strip at the wall foot — the floor−wall
 // clip can't cut what the wall doesn't cover. Stretch a short wall down
@@ -702,7 +953,11 @@ PlaneQuad withWallBaseAt(PlaneQuad wall,
         kind: wall.kind,
       );
     }
-    if (bottom == refY || bottom - refY > maxDropM) return wall;
+    if (bottom == refY) return wall;
+    final drop = bottom - refY;
+    final furnitureScale = wall.extentZ <= _furnitureScaleHeightM &&
+        drop <= _furnitureScaleMaxDropM;
+    if (!furnitureScale && drop > maxDropM) return wall;
     final newExtentZ = wall.extentZ + (bottom - refY);
     return PlaneQuad(
       center: Vector3(wall.center.x, refY + newExtentZ / 2, wall.center.z),
@@ -734,7 +989,12 @@ PlaneQuad withWallBaseAt(PlaneQuad wall,
       polygon: [for (final v in wall.polygon) Vector3(v.x, v.y + delta, v.z)],
     );
   }
-  if (minY > refY && minY - refY > maxDropM) return wall;
+  if (minY > refY) {
+    final drop = minY - refY;
+    final furnitureScale = (maxY - minY) <= _furnitureScaleHeightM &&
+        drop <= _furnitureScaleMaxDropM;
+    if (!furnitureScale && drop > maxDropM) return wall;
+  }
   // ARCore's bottom edge wobbles a few cm — snap the whole bottom row
   // (within 10 cm of the cut) flat onto the floor line. The clamp branch
   // cuts at refY+0.10 so every sub-floor vertex is raised.

@@ -1,10 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
@@ -12,17 +12,21 @@ import '../../../../core/utils/user_errors.dart';
 import '../../../../models/room_design.dart';
 import '../../../../shared/widgets/app_feedback.dart';
 import '../../../../shared/widgets/catalog_picker_sheet.dart';
-import '../../ar/data/furniture_model_library.dart';
-import '../../ar/presentation/ar_viewer_args.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../ar/data/room_finishes.dart';
 import '../../homeowner/presentation/providers/design_providers.dart';
+import '../../scanner/data/camera_rig.dart';
 import '../../scanner/data/furniture_catalog.dart';
+import '../data/showroom_designs.dart';
 import 'walkthrough_controller.dart';
 import 'walkthrough_painter.dart';
+import 'walkthrough_scene.dart';
 
-// Street View style walkthrough of a saved plan: you stand in the room in
-// first person — ↑↓ walk forward/back along the heading, ←→ turn in place,
-// drag the view to look around — and furniture can be placed at your spot.
+// Street View style walkthrough of a plan: you stand in the room in first
+// person — ↑↓ walk forward/back along the heading, ←→ turn in place, drag the
+// view to look around — and furniture can be placed at your spot. With no
+// design it opens the showroom instead: predesigned room-type layouts browsed
+// with arrow keys (or swipes) for inspiration, each walkable the same way.
 // Pose stays 2D (position + heading); VR swaps the painter, not the model.
 class WalkthroughScreen extends ConsumerStatefulWidget {
   const WalkthroughScreen({super.key, this.design});
@@ -35,16 +39,25 @@ class WalkthroughScreen extends ConsumerStatefulWidget {
 
 class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   late WalkthroughController _ctl;
+  final FirstPersonRig _rig = FirstPersonRig();
   final FocusNode _focus = FocusNode();
+  final PageController _galleryCtrl = PageController();
   RoomCatalogItem? _placing;
   int _placingRotation = 0;
   bool _showHint = true;
   Timer? _repeat;
   final Map<String, ui.Image> _sprites = {};
+  bool _inGallery;
+  int _galleryPage = 0;
+  RoomDesign? _showroomDesign;
+  RoomDesign? _returnDesign;
+
+  _WalkthroughScreenState() : _inGallery = false;
 
   @override
   void initState() {
     super.initState();
+    _inGallery = widget.design == null;
     _ctl = WalkthroughController(design: widget.design ?? _emptyDesign());
     _loadSprites();
   }
@@ -52,6 +65,7 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   @override
   void dispose() {
     _repeat?.cancel();
+    _galleryCtrl.dispose();
     _ctl.dispose();
     _focus.dispose();
     super.dispose();
@@ -108,16 +122,31 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   @visibleForTesting
   RoomDesign get debugDesign => _currentDesign();
 
+  @visibleForTesting
+  bool get debugInGallery => _inGallery;
+
+  @visibleForTesting
+  int get debugGalleryIndex => _galleryPage;
+
+  @visibleForTesting
+  String? get debugShowroomId => _showroomDesign?.id;
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      // Leaving (back button or system gesture) still hands the current
-      // plan to whoever pushed us, so placements made here land back in the
-      // planner even without an explicit save.
+      // Back walks the mode stack first: a showroom room returns to the
+      // gallery, and only leaving the gallery hands the current plan to
+      // whoever pushed us (placements land back in the planner unsaved).
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        Navigator.of(context).pop(_currentDesign());
+        if (_inGallery) {
+          Navigator.of(context).pop(_returnDesign ?? widget.design);
+        } else if (_showroomDesign != null) {
+          _leaveToGallery();
+        } else {
+          Navigator.of(context).pop(_currentDesign());
+        }
       },
       child: Scaffold(
       backgroundColor: AppColors.background,
@@ -126,91 +155,305 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
         title: Text(
-          'Walkthrough',
+          _inGallery
+              ? 'Showroom'
+              : _showroomDesign?.name ?? 'Walkthrough',
           style: GoogleFonts.poppins(
               fontSize: 16,
               fontWeight: FontWeight.w600,
               color: AppColors.textPrimary),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.center_focus_strong),
-            tooltip: 'Scan room',
-            onPressed: _scanRoom,
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Add furniture',
-            onPressed: _openFurniturePicker,
-          ),
-          IconButton(
-            icon: const Icon(Icons.save_outlined),
-            tooltip: 'Save Design',
-            onPressed: _saveDesign,
-          ),
+          if (!_inGallery) ...[
+            IconButton(
+              icon: const Icon(Icons.view_carousel),
+              tooltip: 'Rooms',
+              onPressed: _leaveToGallery,
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: 'Add furniture',
+              onPressed: _openFurniturePicker,
+            ),
+            IconButton(
+              icon: const Icon(Icons.save_outlined),
+              tooltip: 'Save Design',
+              onPressed: _saveDesign,
+            ),
+          ],
         ],
       ),
       body: Focus(
         focusNode: _focus,
         autofocus: true,
         onKeyEvent: _onKey,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                // Drag right → the world follows the finger, i.e. you look
-                // left — the same grab-the-scene feel as Street View.
-                onHorizontalDragUpdate: (d) {
-                  final delta = d.primaryDelta;
-                  if (delta != null) _act(() => _ctl.turn(-delta * 0.005));
-                },
-                child: ListenableBuilder(
-                  listenable: _ctl,
-                  builder: (_, _) => CustomPaint(
-                    size: Size.infinite,
-                    painter: WalkthroughPainter(
-                      controller: _ctl,
-                      ghost: _placing == null
-                          ? null
-                          : _ctl.resolveGhost(_pending()),
-                      sprites: _sprites,
+        child: _inGallery ? _galleryView() : _walkView(),
+      ),
+      ),
+    );
+  }
+
+  // ─── Showroom gallery ───
+
+  Widget _galleryView() {
+    return Column(
+      children: [
+        Expanded(
+          child: PageView.builder(
+            controller: _galleryCtrl,
+            onPageChanged: (i) => setState(() => _galleryPage = i),
+            itemCount: showroomRooms.length,
+            itemBuilder: (_, i) => _showroomCard(showroomRooms[i]),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var i = 0; i < showroomRooms.length; i++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: i == _galleryPage ? 18 : 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: i == _galleryPage
+                            ? AppColors.accent
+                            : AppColors.border,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.78),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '← → browse rooms · tap a room to walk',
+                  style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white),
+                ),
+              ),
+              if (widget.design != null) ...[
+                const SizedBox(height: 10),
+                TextButton.icon(
+                  onPressed: _resumeOwnDesign,
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: Text(
+                    'Back to my design',
+                    style: GoogleFonts.poppins(
+                        fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _showroomCard(ShowroomRoom room) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: GestureDetector(
+        onTap: () => _enterShowroom(room),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: ColoredBox(
+                      color: const Color(0xFFFAF7F0),
+                      child: CustomPaint(
+                        painter: _PlanThumbPainter(room.design),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (_showHint && _placing == null)
-              const Positioned(
-                  top: 12, left: 0, right: 0, child: Center(child: _HintChip())),
-            if (_placing != null)
-              Positioned(
-                  top: 12, left: 12, right: 12, child: _placementBar()),
-            Positioned(
-              left: 14,
-              bottom: 24,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _circleButton(
-                    icon: Icons.add,
-                    tooltip: 'Zoom in',
-                    onTap: () => _ctl.setZoom(_ctl.zoom * 1.25),
-                  ),
-                  const SizedBox(height: 8),
-                  _circleButton(
-                    icon: Icons.remove,
-                    tooltip: 'Zoom out',
-                    onTap: () => _ctl.setZoom(_ctl.zoom / 1.25),
-                  ),
-                ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(room.icon,
+                            size: 20, color: AppColors.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            room.name,
+                            style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      room.description,
+                      style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                          height: 1.4),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () => _enterShowroom(room),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(40),
+                        textStyle: GoogleFonts.poppins(
+                            fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      child: const Text('Walk this room'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Positioned(right: 14, bottom: 24, child: _dPad()),
-          ],
+            ],
+          ),
         ),
       ),
-      ),
+    );
+  }
+
+  void _enterShowroom(ShowroomRoom room) {
+    if (_showroomDesign == null && widget.design != null) {
+      _returnDesign = _currentDesign();
+    }
+    _showroomDesign = room.design;
+    _placing = null;
+    _placingRotation = 0;
+    _showHint = true;
+    _rebuildController(room.design);
+    setState(() => _inGallery = false);
+  }
+
+  void _leaveToGallery() {
+    if (_showroomDesign == null && widget.design != null) {
+      _returnDesign = _currentDesign();
+    }
+    setState(() {
+      _inGallery = true;
+      _showroomDesign = null;
+      _placing = null;
+      _placingRotation = 0;
+    });
+  }
+
+  void _resumeOwnDesign() {
+    final back = _returnDesign ?? widget.design;
+    if (back == null) return;
+    _returnDesign = null;
+    _showroomDesign = null;
+    _showHint = true;
+    _rebuildController(back);
+    setState(() => _inGallery = false);
+  }
+
+  void _rebuildController(RoomDesign design) {
+    final old = _ctl;
+    setState(() => _ctl = WalkthroughController(design: design));
+    old.dispose();
+    _loadSprites();
+  }
+
+  // ─── Walk view ───
+
+  Widget _walkView() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: WalkthroughScene(
+            controller: _ctl,
+            rig: _rig,
+            design: _shellDesign,
+            ghost: _placing == null ? null : _pending(),
+            fallback: GestureDetector(
+              // Drag right → the world follows the finger, i.e. you look
+              // left — the same grab-the-scene feel as Street View.
+              onHorizontalDragUpdate: (d) {
+                final delta = d.primaryDelta;
+                if (delta != null) _act(() => _ctl.turn(-delta * 0.005));
+              },
+              child: ListenableBuilder(
+                listenable: _ctl,
+                builder: (_, _) => CustomPaint(
+                  size: Size.infinite,
+                  painter: WalkthroughPainter(
+                    controller: _ctl,
+                    ghost: _placing == null
+                        ? null
+                        : _ctl.resolveGhost(_pending()),
+                    sprites: _sprites,
+                    finishes: _painterFinishes,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (_showHint && _placing == null)
+          const Positioned(
+              top: 12, left: 0, right: 0, child: Center(child: _HintChip())),
+        if (_placing != null)
+          Positioned(
+              top: 12, left: 12, right: 12, child: _placementBar()),
+        Positioned(
+          left: 14,
+          bottom: 24,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _circleButton(
+                icon: Icons.add,
+                tooltip: 'Zoom in',
+                onTap: () => _ctl.setZoom(_ctl.zoom * 1.25),
+              ),
+              const SizedBox(height: 8),
+              _circleButton(
+                icon: Icons.remove,
+                tooltip: 'Zoom out',
+                onTap: () => _ctl.setZoom(_ctl.zoom / 1.25),
+              ),
+            ],
+          ),
+        ),
+        Positioned(right: 14, bottom: 24, child: _dPad()),
+      ],
     );
   }
 
@@ -219,6 +462,25 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
+    }
+    if (_inGallery) {
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.arrowLeft:
+        case LogicalKeyboardKey.arrowUp:
+          _flipGallery(-1);
+        case LogicalKeyboardKey.arrowRight:
+        case LogicalKeyboardKey.arrowDown:
+          _flipGallery(1);
+        case LogicalKeyboardKey.enter:
+        case LogicalKeyboardKey.numpadEnter:
+        case LogicalKeyboardKey.space:
+          if (_galleryPage < showroomRooms.length) {
+            _enterShowroom(showroomRooms[_galleryPage]);
+          }
+        default:
+          return KeyEventResult.ignored;
+      }
+      return KeyEventResult.handled;
     }
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowUp:
@@ -233,6 +495,17 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
         return KeyEventResult.ignored;
     }
     return KeyEventResult.handled;
+  }
+
+  void _flipGallery(int dir) {
+    if (!_galleryCtrl.hasClients) return;
+    final target = (_galleryPage + dir).clamp(0, showroomRooms.length - 1);
+    if (target == _galleryPage) return;
+    _galleryCtrl.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
   }
 
   void _act(VoidCallback action) {
@@ -457,39 +730,29 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     showAppSnackbar(context, '${placed.name} placed');
   }
 
-  // ─── Scan ───
-
-  // Open the AR viewer as a room scanner: it returns a plan whose walls and
-  // dimensions come from the detected room shape — the controller rebuilds
-  // on it (furniture carries over, the walker respawns inside the outline).
-  Future<void> _scanRoom() async {
-    final updated = await context.push<RoomDesign>(
-      '/ar-viewer',
-      extra: ArViewerArgs(
-        title: 'Scan Room',
-        design: _currentDesign(),
-        items: ArFurnitureLibrary.fromIconNames(
-          _ctl.furniture.map((f) => f.iconName).toList(),
-        ),
-      ),
-    );
-    if (updated == null || !mounted) return;
-    final old = _ctl;
-    setState(() => _ctl = WalkthroughController(design: updated));
-    old.dispose();
-    _loadSprites();
-    showAppSnackbar(context, 'Room shape updated');
-  }
-
   // ─── Save ───
 
   // The live plan as a RoomDesign: Save names/users it, and exiting pops it
-  // to the caller — both must agree on what "the current plan" is.
+  // to the caller — both must agree on what "the current plan" is. Walking a
+  // showroom room snapshots that room (id cleared) so a save is a save-as.
+  // The design's matched finishes paint the room; no finish fields (classic
+  // cream look) for showroom rooms and pre-finish designs.
+  FinishSelection? get _painterFinishes {
+    final d = _showroomDesign ?? widget.design;
+    if (d == null) return null;
+    if (d.floorFinishType == null && d.wallFinishType == null) return null;
+    return finishSelectionFrom(d);
+  }
+
+  // Finish source for the 3D room shell (live geometry rides the controller).
+  RoomDesign get _shellDesign =>
+      _showroomDesign ?? widget.design ?? _emptyDesign();
+
   RoomDesign _currentDesign({String? name, String? userId}) {
     final now = DateTime.now();
-    final existing = widget.design;
+    final existing = _showroomDesign ?? widget.design;
     return RoomDesign(
-      id: existing?.id ?? '',
+      id: _showroomDesign != null ? '' : (existing?.id ?? ''),
       name: name ?? existing?.name ?? 'Walkthrough',
       roomType: existing?.roomType ?? 'living_room',
       widthCm: _ctl.roomW,
@@ -497,6 +760,10 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
       furniture: List.of(_ctl.furniture),
       walls: List.of(_ctl.walls),
       detectedItems: existing?.detectedItems ?? const [],
+      floorFinishType: existing?.floorFinishType,
+      floorFinishColor: existing?.floorFinishColor,
+      wallFinishType: existing?.wallFinishType,
+      wallFinishColor: existing?.wallFinishColor,
       userId: userId ?? existing?.userId ?? '',
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -511,8 +778,10 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
       return;
     }
 
-    final existing = widget.design;
-    final hasId = existing != null && existing.id.isNotEmpty;
+    final existing = _showroomDesign ?? widget.design;
+    final hasId = _showroomDesign == null &&
+        existing != null &&
+        existing.id.isNotEmpty;
     final nameCtrl = TextEditingController(
         text: existing != null && existing.name.isNotEmpty
             ? existing.name
@@ -581,6 +850,60 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
   }
 }
 
+// Top-down floor plan fitted into the card: wall ring as the floor slab,
+// furniture footprints as chips (flat pieces read lighter than solid ones).
+class _PlanThumbPainter extends CustomPainter {
+  _PlanThumbPainter(this.design);
+
+  final RoomDesign design;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final walls = design.walls;
+    if (walls.length < 3) return;
+    var minX = walls.first.dx, maxX = minX, minY = walls.first.dy, maxY = minY;
+    for (final p in walls) {
+      minX = math.min(minX, p.dx);
+      maxX = math.max(maxX, p.dx);
+      minY = math.min(minY, p.dy);
+      maxY = math.max(maxY, p.dy);
+    }
+    final w = math.max(maxX - minX, 1.0);
+    final h = math.max(maxY - minY, 1.0);
+    final scale =
+        math.min((size.width - 28) / w, (size.height - 28) / h);
+    final dx = (size.width - w * scale) / 2 - minX * scale;
+    final dy = (size.height - h * scale) / 2 - minY * scale;
+
+    final floor = Path()
+      ..addPolygon(
+          [for (final p in walls) Offset(p.dx * scale + dx, p.dy * scale + dy)],
+          true);
+    canvas.drawPath(floor, Paint()..color = const Color(0xFFF1EBDD));
+    for (final f in design.furniture) {
+      final rect = Rect.fromLTWH(
+          f.x * scale + dx, f.y * scale + dy, f.width * scale, f.height * scale);
+      final flat = f.height <= 4;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect.deflate(1.5), const Radius.circular(3)),
+        Paint()
+          ..color =
+              flat ? const Color(0xFFD8CCB8) : const Color(0xFFB98E6E),
+      );
+    }
+    canvas.drawPath(
+      floor,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = const Color(0xFF6B5E4E),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PlanThumbPainter old) => old.design != design;
+}
+
 class _HintChip extends StatelessWidget {
   const _HintChip();
 
@@ -610,13 +933,12 @@ class _CatalogThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final image = cat.imageAsset;
     if (image != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.asset(
-          image,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _iconFallback(),
-        ),
+      return Image.asset(
+        image,
+        fit: BoxFit.contain,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) => _iconFallback(),
       );
     }
     return _iconFallback();

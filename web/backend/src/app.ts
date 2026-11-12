@@ -14,6 +14,8 @@ import { createAiChatRouter } from './routes/ai-chat.routes';
 import { defaultAiChatDeps } from './services/ai-chat.service';
 import { createProductVisionRouter } from './routes/product-vision.routes';
 import { defaultProductVisionDeps } from './services/product-vision.service';
+import { createRoomMaterialRouter } from './routes/room-material.routes';
+import { defaultRoomMaterialDeps } from './services/room-material.service';
 import { createTripoRouter } from './routes/tripo.routes';
 import { defaultTripoDeps } from './services/tripo.service';
 import { defaultCheckoutDeps } from './services/checkout.service';
@@ -95,6 +97,11 @@ export function createApp(): express.Express {
     }
   );
 
+  // Camera frames ride as base64 JSON — this one path needs a far larger
+  // body cap than the global parser, and must claim the stream first (the
+  // second json() sees an already-parsed body and skips).
+  app.use('/api/ai/analyze-room-material', express.json({ limit: '16mb' }));
+
   app.use(express.json({ limit: '128kb' }));
 
   // Email verification for the mobile app (registration flow).
@@ -117,6 +124,10 @@ export function createApp(): express.Express {
   // Listing-photo analysis — same /api/ai prefix, same reasoning (a paid
   // vision model behind an authenticated, ownership-checked route).
   app.use('/api/ai', createProductVisionRouter(defaultProductVisionDeps()));
+
+  // Room-finish scan for the scanner — same /api/ai prefix and key rule; the
+  // camera still arrives as base64 so no key or upload service is in the app.
+  app.use('/api/ai', createRoomMaterialRouter(defaultRoomMaterialDeps()));
 
   // 3D model generation for the mobile app — same reasoning as /api/ai:
   // Tripo is pay-as-you-go, so the relay is authenticated and the key stays

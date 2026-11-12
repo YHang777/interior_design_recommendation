@@ -8,6 +8,8 @@ import 'package:interior_design_recommendation/features/auth/data/models/app_use
 import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/supabase_room_design_datasource.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
+import 'package:interior_design_recommendation/features/customer/scanner/data/room_fit.dart';
+import 'package:interior_design_recommendation/features/customer/scanner/presentation/scene3d_view.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/presentation/screens/room_scanner_screen.dart';
 import 'package:interior_design_recommendation/models/room_design.dart';
 import 'package:interior_design_recommendation/shared/widgets/float_button.dart';
@@ -91,152 +93,252 @@ void main() {
         height: 90,
       );
 
-  Finder sofaTile() => find.descendant(
-        of: find.byKey(const ValueKey('sofa-1')),
-        matching: find.text('Sofa'),
-      );
+  Finder selectionBar() => find.byKey(const ValueKey('planner-selection-bar'));
 
-  Finder canvas() => find.byWidgetPredicate(
-        (w) => w is Listener && w.onPointerMove != null,
-      );
+  dynamic stateOf(WidgetTester tester) =>
+      tester.state(find.byType(RoomScannerScreen));
 
-  Future<Offset> dragAndHold(
+  List<FurniturePlacement> furnitureOf(WidgetTester tester) =>
+      (stateOf(tester).debugFurniture as List).cast<FurniturePlacement>();
+
+  List<Offset> wallsOf(WidgetTester tester) =>
+      (stateOf(tester).debugWalls as List).cast<Offset>();
+
+  Offset sceneTopLeft(WidgetTester tester) =>
+      tester.getTopLeft(find.byType(Scene3DView));
+
+  // One-finger scene drag through the real canvas recognizer: press the
+  // piece's projected box center and move to the screen point of the target
+  // floor delta. The grab offset cancels, so the piece lands at exactly
+  // start + deltaCm before the commit settle.
+  // Select first so the selection bar's layout is settled before the drag —
+  // and re-measure the press point afterwards: the bar's appearance resizes
+  // the scene, and every projection must use that one settled viewport.
+  Future<List<FurniturePlacement>> dragPieceBy(
     WidgetTester tester,
-    Finder finder,
-    Offset delta,
-  ) async {
-    final gesture = await tester.startGesture(tester.getCenter(finder));
-    await gesture.moveBy(delta / 2);
+    FurniturePlacement f,
+    Offset deltaCm, {
+    bool cancel = false,
+  }) async {
+    final dynamic state = stateOf(tester);
+    final origin = sceneTopLeft(tester);
+    await tester.tapAt(origin + (state.debugPieceToScreen(f) as Offset));
     await tester.pump();
-    await gesture.moveBy(delta / 2);
+    final start = (state.debugPieceToScreen(f) as Offset?)!;
+    final floorStart = (state.debugFloorAt(start) as Offset?)!;
+    final end = (state.debugFloorToScreen(
+            Offset(floorStart.dx + deltaCm.dx, floorStart.dy + deltaCm.dy))
+        as Offset?)!;
+    final gesture = await tester.startGesture(origin + start);
+    // A plan-space delta projects to only a few screen px (the axes partly
+    // cancel), so clear the 18 px drag slop in screen space first — the
+    // final position still comes from the last move alone.
+    await gesture.moveBy(const Offset(24, 0));
     await tester.pump();
-    final during = tester.getCenter(finder);
-    await gesture.up();
+    await gesture.moveTo(origin + end);
     await tester.pump();
-    return during;
+    final mid = furnitureOf(tester);
+    if (cancel) {
+      await gesture.cancel();
+    } else {
+      await gesture.up();
+    }
+    await tester.pump();
+    return mid;
   }
 
-  testWidgets('furniture tile is placed and rendered on the plan',
+  Future<void> tapFloor(WidgetTester tester, Offset planCm) async {
+    final dynamic state = stateOf(tester);
+    final screen =
+        (state.debugFloorToScreen(planCm) as Offset?)!;
+    await tester.tapAt(sceneTopLeft(tester) + screen);
+    await tester.pump();
+  }
+
+  Future<void> longPressFloor(WidgetTester tester, Offset planCm) async {
+    final dynamic state = stateOf(tester);
+    final screen =
+        (state.debugFloorToScreen(planCm) as Offset?)!;
+    final gesture = await tester.startGesture(sceneTopLeft(tester) + screen);
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
+    await tester.pump();
+  }
+
+  testWidgets('furniture is placed in the 3D scene and tapped to select',
       (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    expect(sofaTile(), findsOneWidget);
+
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(sofa()) as Offset));
+    await tester.pump();
+
+    expect(selectionBar(), findsOneWidget);
+    expect(
+        find.descendant(
+            of: selectionBar(), matching: find.textContaining('Sofa')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: selectionBar(), matching: find.byType(Image)),
+        findsOneWidget,
+        reason: 'the selection bar shows the product photo');
   });
 
-  testWidgets('drag moves the tile and commits it on release', (tester) async {
+  testWidgets('tap on empty floor deselects the piece', (tester) async {
+    await pumpPlanner(tester, furniture: [sofa()]);
+
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(sofa()) as Offset));
+    await tester.pump();
+    expect(selectionBar(), findsOneWidget);
+
+    await tapFloor(tester, const Offset(20, 20));
+    expect(selectionBar(), findsNothing);
+  });
+
+  testWidgets('drag moves the piece and commits it exactly on release',
+      (tester) async {
     await pumpPlanner(tester, furniture: [sofa(x: 40, y: 40)]);
 
-    final before = tester.getCenter(sofaTile());
-    final during = await dragAndHold(
-        tester, sofaTile(), const Offset(200, 160));
-    final after = tester.getCenter(sofaTile());
+    final mid = await dragPieceBy(tester, sofa(), const Offset(30, 20));
 
-    expect(during.dx - before.dx, greaterThan(80));
-    expect(during.dy - before.dy, greaterThan(60));
+    expect(mid.single.x, moreOrLessEquals(70, epsilon: 0.01));
+    expect(mid.single.y, moreOrLessEquals(60, epsilon: 0.01));
 
-    expect(after.dx, moreOrLessEquals(during.dx, epsilon: 1));
-    expect(after.dy, moreOrLessEquals(during.dy, epsilon: 1));
+    final after = furnitureOf(tester).single;
+    expect(after.x, moreOrLessEquals(70, epsilon: 0.01),
+        reason: 'a valid drop must not snap on release');
+    expect(after.y, moreOrLessEquals(60, epsilon: 0.01));
   });
 
   testWidgets('drag is clamped to the room rectangle', (tester) async {
     await pumpPlanner(tester, furniture: [sofa(x: 200, y: 400)]);
 
-    await dragAndHold(tester, sofaTile(), const Offset(2000, 2000));
+    await dragPieceBy(tester, sofa(x: 200, y: 400), const Offset(100, 50));
 
-    final bounds = tester.getRect(canvas());
-    final dropped = tester.getRect(sofaTile());
-    expect(dropped.left, greaterThanOrEqualTo(bounds.left - 1));
-    expect(dropped.top, greaterThanOrEqualTo(bounds.top - 1));
-    expect(dropped.right, lessThanOrEqualTo(bounds.right + 1));
-    expect(dropped.bottom, lessThanOrEqualTo(bounds.bottom + 1));
+    final placed = furnitureOf(tester).single;
+    expect(placed.x, moreOrLessEquals(220, epsilon: 0.01));
+    expect(placed.y, moreOrLessEquals(410, epsilon: 0.01));
+    expect(placed.x + footprintW(placed), moreOrLessEquals(400, epsilon: 0.01));
+    expect(placed.y + footprintH(placed), moreOrLessEquals(500, epsilon: 0.01));
   });
 
-  testWidgets('a tile at the room edge sits flush inside the canvas frame',
+  testWidgets('a piece at the room edge sits flush inside the bounds',
       (tester) async {
     await pumpPlanner(tester, furniture: [sofa(x: 220, y: 410)]);
 
-    final bounds = tester.getRect(canvas());
-    final tile = tester.getRect(
-      find.descendant(
-        of: find.byKey(const ValueKey('sofa-1')),
-        matching: find.byType(Container),
-      ).first,
-    );
-    expect(tile.right, moreOrLessEquals(bounds.right, epsilon: 1));
-    expect(tile.bottom, moreOrLessEquals(bounds.bottom, epsilon: 1));
-    expect(tile.left, greaterThanOrEqualTo(bounds.left - 1));
-    expect(tile.top, greaterThanOrEqualTo(bounds.top - 1));
+    final placed = furnitureOf(tester).single;
+    expect(placed.x, 220, reason: 'a flush piece is kept, never re-settled');
+    expect(placed.y, 410);
+    expect(
+        placementFits(placed, roomW: 400, roomH: 500, walls: const []),
+        isTrue);
+    expect(placed.x + footprintW(placed), moreOrLessEquals(400, epsilon: 0.01));
+    expect(placed.y + footprintH(placed), moreOrLessEquals(500, epsilon: 0.01));
+    expect(clampAllPlacements([placed], roomW: 400, roomH: 500, walls: const []),
+        [placed]);
   });
 
-  testWidgets('a cancelled drag still commits where the tile was left',
+  testWidgets('a cancelled drag still commits where the piece was left',
       (tester) async {
     await pumpPlanner(tester, furniture: [sofa(x: 40, y: 40)]);
 
-    final before = tester.getCenter(sofaTile());
-    final gesture = await tester.startGesture(before);
-    await gesture.moveBy(const Offset(120, 80));
-    await tester.pump();
-    await gesture.moveBy(const Offset(120, 80));
-    await tester.pump();
-    final during = tester.getCenter(sofaTile());
-    await gesture.cancel();
-    await tester.pump();
+    final mid =
+        await dragPieceBy(tester, sofa(), const Offset(60, 40), cancel: true);
 
-    final after = tester.getCenter(sofaTile());
-    expect(after.dx, moreOrLessEquals(during.dx, epsilon: 1));
-    expect(after.dy, moreOrLessEquals(during.dy, epsilon: 1));
-    expect(after.dx, greaterThan(before.dx + 40));
+    expect(mid.single.x, moreOrLessEquals(100, epsilon: 0.01));
+    final after = furnitureOf(tester).single;
+    expect(after.x, moreOrLessEquals(100, epsilon: 0.01),
+        reason: 'a cancelled drag commits, it does not snap back');
+    expect(after.y, moreOrLessEquals(80, epsilon: 0.01));
   });
 
-  Finder selectionBar() => find.byKey(const ValueKey('planner-selection-bar'));
-
-  testWidgets('long-press removes a tile', (tester) async {
+  testWidgets('long-press removes the piece', (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    expect(sofaTile(), findsOneWidget);
+    final dynamic state = stateOf(tester);
+    final screen = (state.debugPieceToScreen(sofa()) as Offset);
 
-    await tester.longPress(sofaTile());
+    final gesture = await tester.startGesture(sceneTopLeft(tester) + screen);
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
     await tester.pump();
-    expect(sofaTile(), findsNothing);
+
+    expect(furnitureOf(tester), isEmpty);
   });
 
-  testWidgets('removing a tile can be undone from the snackbar',
+  testWidgets('removing a piece can be undone from the snackbar',
       (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
+    final dynamic state = stateOf(tester);
+    final screen = (state.debugPieceToScreen(sofa()) as Offset);
 
-    await tester.longPress(sofaTile());
+    final gesture = await tester.startGesture(sceneTopLeft(tester) + screen);
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
     await tester.pump();
-    expect(sofaTile(), findsNothing);
+    expect(furnitureOf(tester), isEmpty);
 
     await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(find.text('Undo'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(sofaTile(), findsOneWidget);
+    expect(furnitureOf(tester), hasLength(1));
   });
 
-  testWidgets('tap selects a tile and shows the selection bar', (tester) async {
+  testWidgets('the selection bar offers Size, Rotate and Remove',
+      (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    await tester.tap(sofaTile());
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(sofa()) as Offset));
     await tester.pump();
+
     expect(selectionBar(), findsOneWidget);
-    expect(find.descendant(of: selectionBar(), matching: find.text('Rotate')),
+    expect(
+        find.descendant(of: selectionBar(), matching: find.text('Size')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: selectionBar(), matching: find.text('Rotate')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: selectionBar(), matching: find.byTooltip('Remove')),
         findsOneWidget);
   });
 
-  testWidgets('rotate turns the tile footprint on its side', (tester) async {
-    await pumpPlanner(tester, furniture: [sofa()]);
-    await tester.tap(sofaTile());
+  testWidgets('rotate swaps the footprint, settles it and shows the badge',
+      (tester) async {
+    // Rotated footprint overhangs the bottom wall — rotate must settle.
+    await pumpPlanner(
+      tester,
+      furniture: [sofa(x: 100, y: 300)],
+      walls: const [
+        Offset(50, 50),
+        Offset(350, 50),
+        Offset(350, 450),
+        Offset(50, 450),
+      ],
+    );
+    expect(find.byKey(const ValueKey('rotation-badge')), findsNothing);
+
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(furnitureOf(tester).single)
+            as Offset));
     await tester.pump();
-
-    final before = tester.getRect(find.byKey(const ValueKey('sofa-1')));
-    expect(before.width, greaterThan(before.height));
-
     await tester.tap(find.text('Rotate'));
     await tester.pump();
 
-    final after = tester.getRect(find.byKey(const ValueKey('sofa-1')));
-    expect(after.width, lessThan(after.height));
-    expect(after.width, moreOrLessEquals(before.height, epsilon: 1));
-    expect(after.height, moreOrLessEquals(before.width, epsilon: 1));
+    final placed = furnitureOf(tester).single;
+    expect(placed.rotation, 90);
+    expect(footprintW(placed), 90, reason: 'the footprint swaps on its side');
+    expect(footprintH(placed), 180);
+    expect(placed.x, moreOrLessEquals(100, epsilon: 0.5));
+    expect(placed.y, moreOrLessEquals(270, epsilon: 0.5),
+        reason: 'settles just inside the bottom wall, not at the center');
+    expect(
+        placementFits(placed,
+            roomW: 400, roomH: 500, walls: wallsOf(tester)),
+        isTrue);
+    expect(find.byKey(const ValueKey('rotation-badge')), findsOneWidget);
   });
 
   testWidgets('removing an earlier item keeps the later selection',
@@ -253,70 +355,135 @@ void main() {
         height: 90,
       ),
     ]);
+    final dynamic state = stateOf(tester);
+    final items = furnitureOf(tester);
+    final armchair = items.firstWhere((f) => f.id == 'chair-1');
 
-    Finder armchairTile() => find.descendant(
-          of: find.byKey(const ValueKey('chair-1')),
-          matching: find.text('Armchair'),
-        );
-
-    await tester.tap(armchairTile());
+    await tester.tapAt(sceneTopLeft(tester) +
+        (state.debugPieceToScreen(armchair) as Offset));
     await tester.pump();
     expect(selectionBar(), findsOneWidget);
 
-    await tester.longPress(sofaTile());
+    final theSofa = items.firstWhere((f) => f.id == 'sofa-1');
+    final gesture = await tester.startGesture(
+        sceneTopLeft(tester) + (state.debugPieceToScreen(theSofa) as Offset));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.up();
     await tester.pump();
 
     expect(selectionBar(), findsOneWidget);
-    expect(sofaTile(), findsNothing);
-    expect(armchairTile(), findsOneWidget);
+    expect(
+        find.descendant(
+            of: selectionBar(), matching: find.textContaining('Armchair')),
+        findsOneWidget);
+    expect(furnitureOf(tester).map((f) => f.id), ['chair-1']);
   });
 
-  testWidgets('dragging furniture does not drag a nearby wall corner',
+  testWidgets('furniture drags never touch wall corners', (tester) async {
+    const savedWalls = [
+      Offset(30, 30),
+      Offset(370, 30),
+      Offset(200, 450),
+    ];
+    await pumpPlanner(tester, furniture: [sofa()], walls: savedWalls);
+
+    // Mode separation: corners only exist behind wall mode.
+    expect(find.byKey(const ValueKey('wall-handle-0')), findsNothing);
+
+    final wallsBefore = wallsOf(tester);
+    final theSofa = furnitureOf(tester).single;
+    final mid = await dragPieceBy(tester, theSofa, const Offset(30, 15));
+
+    expect(mid.single.x, moreOrLessEquals(theSofa.x + 30, epsilon: 0.01),
+        reason: 'the drag itself must have moved the piece');
+
+    final wallsAfter = wallsOf(tester);
+    expect(wallsAfter, hasLength(3));
+    for (var i = 0; i < 3; i++) {
+      expect((wallsAfter[i] - wallsBefore[i]).distance, lessThan(0.01),
+          reason: 'wall corner $i must not follow the furniture drag');
+    }
+  });
+
+  testWidgets('wall-mode taps add corners and reject ones too close together',
       (tester) async {
-    await pumpPlanner(tester, furniture: [sofa(x: 40, y: 40)]);
+    await pumpPlanner(tester);
 
     await tester.tap(find.text('Walls'));
     await tester.pump();
 
-    final canvasRect = tester.getRect(canvas());
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
+    await tapFloor(tester, const Offset(30, 30));
+    await tapFloor(tester, const Offset(35, 35));
+    expect(wallsOf(tester), hasLength(1),
+        reason: 'a corner within 12 cm of an existing one is rejected');
 
-    Future<void> tapRoomCm(Offset roomCm) async {
-      final s = canvasRect.width / 400;
-      await tester
-          .tapAt(canvasRect.topLeft + Offset(roomCm.dx * s, roomCm.dy * s));
+    await tapFloor(tester, const Offset(370, 30));
+    await tapFloor(tester, const Offset(200, 250));
+
+    final walls = wallsOf(tester);
+    expect(walls, hasLength(3));
+    expect(walls[0], moreOrLessEqualsPoint(const Offset(30, 30)));
+    expect(walls[1], moreOrLessEqualsPoint(const Offset(370, 30)));
+    expect(walls[2], moreOrLessEqualsPoint(const Offset(200, 250)));
+  });
+
+  testWidgets('wall handles move corners to new floor points', (tester) async {
+    await pumpPlanner(tester, walls: const [
+      Offset(50, 50),
+      Offset(350, 50),
+      Offset(350, 450),
+      Offset(50, 450),
+    ]);
+    await tester.tap(find.text('Walls'));
+    await tester.pump();
+
+    final handle = find.byKey(const ValueKey('wall-handle-0'));
+    expect(handle, findsOneWidget);
+    final dynamic state = stateOf(tester);
+    final target = sceneTopLeft(tester) +
+        (state.debugFloorToScreen(const Offset(120, 110)) as Offset);
+    final startPt = tester.getCenter(handle);
+
+    final gesture = await tester.startGesture(startPt);
+    final step = (target - startPt) / 3;
+    for (var i = 0; i < 3; i++) {
+      await gesture.moveBy(step);
       await tester.pump();
     }
-
-    await tapRoomCm(const Offset(30, 30));
-    await tapRoomCm(const Offset(370, 30));
-    await tapRoomCm(const Offset(200, 450));
-    expect(state.debugWalls.length, 3);
-
-    await tester.tap(find.text('Add Corners'));
-    await tester.pump();
-
-    final wallsBefore = List<Offset>.from(state.debugWalls as List<Offset>);
-
-    // Press on the sofa's top-left corner, within grab range of the
-    // wall corner at (30, 30) — the old code grabbed the corner here
-    // and dragged it along with the tile. Re-measure the canvas: it
-    // grows again once the wall-mode hint row disappears.
-    final dragCanvas = tester.getRect(canvas());
-    final s = dragCanvas.width / 400;
-    final gesture = await tester.startGesture(
-        dragCanvas.topLeft + const Offset(42, 42) * s);
-    await gesture.moveBy(const Offset(60, 40));
-    await tester.pump();
-    await gesture.moveBy(const Offset(60, 40));
-    await tester.pump();
     await gesture.up();
     await tester.pump();
 
-    for (var i = 0; i < 3; i++) {
-      expect((state.debugWalls[i] - wallsBefore[i]).distance, lessThan(0.5),
-          reason: 'wall corner $i must not follow the furniture drag');
-    }
+    final walls = wallsOf(tester);
+    expect(walls[0], moreOrLessEqualsPoint(const Offset(120, 110)));
+    expect(walls[1], moreOrLessEqualsPoint(const Offset(350, 50)));
+    expect(walls[2], moreOrLessEqualsPoint(const Offset(350, 450)));
+    expect(walls[3], moreOrLessEqualsPoint(const Offset(50, 450)));
+  });
+
+  testWidgets('wall-mode long-press clears the outline and undo restores it',
+      (tester) async {
+    await pumpPlanner(tester, walls: const [
+      Offset(50, 50),
+      Offset(350, 50),
+      Offset(350, 450),
+      Offset(50, 450),
+    ]);
+    await tester.tap(find.text('Walls'));
+    await tester.pump();
+
+    await longPressFloor(tester, const Offset(200, 250));
+
+    expect(wallsOf(tester), isEmpty);
+    expect(find.text('Walls cleared'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.text('Undo'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final walls = wallsOf(tester);
+    expect(walls, hasLength(4));
+    expect(walls.first, moreOrLessEqualsPoint(const Offset(50, 50)));
   });
 
   testWidgets('opening a saved design restores its wall outline',
@@ -328,10 +495,10 @@ void main() {
     ];
     await pumpPlanner(tester, walls: savedWalls);
 
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
-    expect(state.debugWalls, hasLength(3));
+    final walls = wallsOf(tester);
+    expect(walls, hasLength(3));
     for (var i = 0; i < savedWalls.length; i++) {
-      expect(state.debugWalls[i], moreOrLessEqualsPoint(savedWalls[i]));
+      expect(walls[i], moreOrLessEqualsPoint(savedWalls[i]));
     }
     expect(find.text('Room: 400 × 500 cm  •  3-wall shape'), findsOneWidget);
   });
@@ -377,72 +544,62 @@ void main() {
     expect(payload['userId'], 'u1');
   });
 
-  const squareWalls = [
-    Offset(50, 50),
-    Offset(350, 50),
-    Offset(350, 450),
-    Offset(50, 450),
-  ];
-
-  List<FurniturePlacement> furnitureOf(WidgetTester tester) {
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
-    return (state.debugFurniture as List).cast<FurniturePlacement>();
-  }
-
-  testWidgets(
-      'drop overlapping a wall outline settles just inside, not at center',
+  testWidgets('a drop fully inside the outline stays exactly where released',
       (tester) async {
-    // Sofa starts straddling the left wall (x=30 < wall at 50).
     await pumpPlanner(
       tester,
-      furniture: [sofa(x: 30, y: 100)],
-      walls: squareWalls,
+      furniture: [sofa(x: 80, y: 120)],
+      walls: const [
+        Offset(50, 50),
+        Offset(350, 50),
+        Offset(350, 450),
+        Offset(50, 450),
+      ],
     );
 
-    final canvasRect = tester.getRect(canvas());
-    final s = canvasRect.width / 400;
-    // Nudge it so the commit path runs _resolveDrop.
-    await dragAndHold(tester, sofaTile(), Offset(4 * s, 0));
+    final mid = await dragPieceBy(tester, furnitureOf(tester).single,
+        const Offset(30, 0));
 
+    expect(mid.single.x, moreOrLessEquals(110, epsilon: 0.01));
+    final placed = furnitureOf(tester).single;
+    expect(placed.x, moreOrLessEquals(110, epsilon: 0.01),
+        reason: 'a valid drop must not snap on release');
+    expect(placed.y, moreOrLessEquals(120, epsilon: 0.01));
+  });
+
+  testWidgets('a drop straddling a wall settles just inside, not at the center',
+      (tester) async {
+    // Dragged left through the wall line — the drop point itself is invalid.
+    await pumpPlanner(
+      tester,
+      furniture: [sofa(x: 80, y: 100)],
+      walls: const [
+        Offset(50, 50),
+        Offset(350, 50),
+        Offset(350, 450),
+        Offset(50, 450),
+      ],
+    );
+
+    final mid = await dragPieceBy(
+        tester, furnitureOf(tester).single, const Offset(-50, 5));
+
+    // The drag itself must have reached the straddling point — otherwise the
+    // settle assertions below would hold even for a drag that never moved.
+    expect(mid.single.x, moreOrLessEquals(30, epsilon: 0.01),
+        reason: 'the drag itself must have moved the piece to the wall');
     final placed = furnitureOf(tester).single;
     expect(placed.x, greaterThanOrEqualTo(50),
         reason: 'sofa must end up inside the left wall');
     expect(placed.x + placed.width, lessThanOrEqualTo(350.1),
         reason: 'sofa must end up inside the right wall');
     expect(placed.x, lessThan(90),
-        reason: 'settle near the drop — the old code yanked it to the '
-            'room center (x=110)');
+        reason: 'settle near the drop — never yanked to the room center');
     expect(placed.y, inInclusiveRange(80, 120),
         reason: 'no vertical drift on a horizontal settle');
   });
 
-  testWidgets('a drop fully inside the outline stays exactly where released',
-      (tester) async {
-    await pumpPlanner(
-      tester,
-      furniture: [sofa(x: 80, y: 120)],
-      walls: squareWalls,
-    );
-
-    final before = tester.getCenter(sofaTile());
-    // 80px clears the 36px pan slop so the drag is actually accepted.
-    final during = await dragAndHold(tester, sofaTile(), const Offset(80, 0));
-    final after = tester.getCenter(sofaTile());
-
-    expect(during.dx - before.dx, greaterThan(20),
-        reason: 'the pan must have moved the tile');
-    // A resolve snap would show up as the tile shifting on release.
-    expect(after.dx, moreOrLessEquals(during.dx, epsilon: 1));
-    expect(after.dy, moreOrLessEquals(during.dy, epsilon: 1));
-
-    final placed = furnitureOf(tester).single;
-    expect(placed.x, greaterThanOrEqualTo(50));
-    expect(placed.x + placed.width, lessThanOrEqualTo(350.1));
-    expect(placed.y, moreOrLessEquals(120, epsilon: 0.5));
-  });
-
-  testWidgets(
-      'planner as a pushed route has the unified circled back button',
+  testWidgets('planner as a pushed route has the unified circled back button',
       (tester) async {
     await pumpPlanner(tester);
     // Main page (MaterialApp home, nothing to pop) — no back button.
@@ -478,7 +635,7 @@ void main() {
   testWidgets('scan auto-place drops junk labels and packs a tidy grid',
       (tester) async {
     await pumpPlanner(tester);
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
+    final dynamic state = stateOf(tester);
 
     final added = state.debugAutoPlace(
         ['sofa', 'floor', 'sofa', 'bed', 'zzz unknown label']) as int;
@@ -499,7 +656,7 @@ void main() {
   testWidgets('scan guesses the room type from what it recognized',
       (tester) async {
     await pumpPlanner(tester);
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
+    final dynamic state = stateOf(tester);
 
     expect(state.debugGuessRoomType(['Bed']), 'bedroom');
     expect(state.debugGuessRoomType(['Refrigerator']), 'kitchen');
@@ -510,7 +667,7 @@ void main() {
 
   testWidgets('scan maps ML Kit aliases onto catalog items', (tester) async {
     await pumpPlanner(tester);
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
+    final dynamic state = stateOf(tester);
 
     final added = state
         .debugAutoPlace(['Couch', 'Carpet', 'Bookcase', 'Television']) as int;
@@ -520,35 +677,15 @@ void main() {
         ['Sofa', 'Rug', 'Bookshelf', 'TV Stand']);
   });
 
-  testWidgets('long-press on the wall outline clears it and offers undo',
-      (tester) async {
-    await pumpPlanner(tester, walls: squareWalls);
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
-    expect(state.debugWalls, hasLength(4));
-
-    final canvasRect = tester.getRect(canvas());
-    final s = canvasRect.width / 400;
-    // Press on the top edge of the square outline (room coords 200,50).
-    final gesture = await tester.startGesture(
-        canvasRect.topLeft + const Offset(200, 50) * s);
-    await tester.pump(const Duration(milliseconds: 700));
-    await gesture.up();
-    await tester.pump();
-
-    expect(state.debugWalls, isEmpty);
-    expect(find.text('Walls cleared'), findsOneWidget);
-
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.tap(find.text('Undo'));
-    await tester.pump();
-    expect(state.debugWalls, hasLength(4));
-    expect(state.debugWalls.first, const Offset(50, 50));
-  });
-
   testWidgets('Clear removes the wall outline when there is no furniture',
       (tester) async {
-    await pumpPlanner(tester, walls: squareWalls);
-    final dynamic state = tester.state(find.byType(RoomScannerScreen));
+    await pumpPlanner(tester, walls: const [
+      Offset(50, 50),
+      Offset(350, 50),
+      Offset(350, 450),
+      Offset(50, 450),
+    ]);
+    final dynamic state = stateOf(tester);
 
     final clearBtn = find.widgetWithText(OutlinedButton, 'Clear');
     expect(tester.widget<OutlinedButton>(clearBtn).onPressed, isNotNull,
@@ -559,14 +696,15 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Clear'));
     await tester.pumpAndSettle();
 
-    expect(state.debugWalls, isEmpty);
+    expect(wallsOf(tester), isEmpty);
     expect(furnitureOf(tester), isEmpty);
     expect(find.text('Plan cleared'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(find.text('Undo'));
     await tester.pump();
-    expect(state.debugWalls, hasLength(4));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect((state.debugWalls as List), hasLength(4));
   });
 
   testWidgets('a save timeout shows the mapped connection notice',
@@ -582,7 +720,12 @@ void main() {
     await pumpPlanner(
       tester,
       furniture: [sofa()],
-      walls: squareWalls,
+      walls: const [
+        Offset(50, 50),
+        Offset(350, 50),
+        Offset(350, 450),
+        Offset(50, 450),
+      ],
       overrides: [
         currentUserProvider.overrideWithValue(user),
         roomDesignDatasourceProvider
@@ -609,20 +752,10 @@ void main() {
     );
   });
 
-  testWidgets('placed tile renders the product photo', (tester) async {
-    await pumpPlanner(tester, furniture: [sofa()]);
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('sofa-1')),
-        matching: find.byType(Image),
-      ),
-      findsOneWidget,
-    );
-  });
-
   testWidgets('size dialog applies a precise width', (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    await tester.tap(sofaTile());
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(sofa()) as Offset));
     await tester.pump();
 
     await tester.tap(find.widgetWithText(TextButton, 'Size'));
@@ -641,38 +774,39 @@ void main() {
     expect(furnitureOf(tester).single.width, 210);
   });
 
-  testWidgets('resize handle grows the piece', (tester) async {
+  testWidgets('size dialog resizes the piece height', (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    await tester.tap(sofaTile());
+    await tester.tapAt(sceneTopLeft(tester) +
+        (stateOf(tester).debugPieceToScreen(sofa()) as Offset));
     await tester.pump();
 
-    final handle = find.byKey(const ValueKey('resize-handle'));
-    expect(handle, findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Size'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
-    final gesture = await tester.startGesture(tester.getCenter(handle));
-    await gesture.moveBy(const Offset(30, 0));
+    final heightField = find
+        .descendant(
+            of: find.byType(AlertDialog), matching: find.byType(TextField))
+        .last;
+    await tester.enterText(heightField, '120');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Apply'));
     await tester.pump();
-    await gesture.moveBy(const Offset(30, 0));
-    await tester.pump();
-    await gesture.up();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
-    expect(furnitureOf(tester).single.width, greaterThan(180));
+    expect(furnitureOf(tester).single.height, 120);
   });
 
-  testWidgets('rotation badge appears only after rotate', (tester) async {
+  testWidgets('the camera reset button never moves the plan', (tester) async {
     await pumpPlanner(tester, furniture: [sofa()]);
-    final badge = find.descendant(
-      of: find.byKey(const ValueKey('sofa-1')),
-      matching: find.byIcon(Icons.rotate_90_degrees_cw),
-    );
-    expect(badge, findsNothing);
+    final before = furnitureOf(tester).single;
 
-    await tester.tap(sofaTile());
+    await tester.tap(find.byKey(const ValueKey('planner-camera-reset')));
     await tester.pump();
-    await tester.tap(find.text('Rotate'));
-    await tester.pump();
-    expect(badge, findsOneWidget);
+
+    final after = furnitureOf(tester).single;
+    expect(after.x, before.x);
+    expect(after.y, before.y);
+    expect(after.rotation, before.rotation);
   });
 }
 

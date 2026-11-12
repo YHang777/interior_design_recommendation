@@ -225,6 +225,11 @@ class ArFurnitureLibrary {
     return _byIconName[iconName.toLowerCase()] ?? _fallback;
   }
 
+  // True only for an explicit library entry — unknown names fall back to a
+  // stand-in shape, so callers that care about shape ask this first.
+  static bool hasModelFor(String? iconName) =>
+      iconName != null && _byIconName.containsKey(iconName.toLowerCase());
+
   static List<ArFurnitureItem> fromIconNames(List<String> iconNames) {
     final result = <ArFurnitureItem>[];
     final seen = <String>{};

@@ -291,6 +291,27 @@ void main() {
         'default',
       );
     });
+
+    test('marketplace-style product names map onto shape families', () {
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Loveseat'),
+          'sofa');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Recliner'),
+          'sofa');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Ottoman'),
+          'chair');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Bench'), 'chair');
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Mattress'), 'bed');
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Shoe Rack'), 'cabinet');
+      expect(resolveShapeFamily(category: 'Furniture', name: 'Refrigerator'),
+          'cabinet');
+      expect(
+          resolveShapeFamily(category: 'Furniture', name: 'Chandelier'), 'lamp');
+      // A screen is thin wall art; the furniture phrase still wins.
+      expect(resolveShapeFamily(category: 'media', name: '55-inch TV'), 'mirror');
+      expect(resolveShapeFamily(category: 'media', name: 'TV Stand'), 'cabinet');
+    });
   });
 
   group('real bundled GLB (regression)', () {

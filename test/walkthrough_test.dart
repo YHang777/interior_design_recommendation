@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,8 +10,11 @@ import 'package:interior_design_recommendation/features/auth/data/models/app_use
 import 'package:interior_design_recommendation/features/auth/presentation/providers/auth_providers.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/data/datasources/supabase_room_design_datasource.dart';
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
+import 'package:interior_design_recommendation/features/customer/scanner/data/camera_rig.dart';
+import 'package:interior_design_recommendation/features/customer/scanner/presentation/scene3d_view.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_controller.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_painter.dart';
+import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_scene.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_screen.dart';
 import 'package:interior_design_recommendation/models/room_design.dart';
 
@@ -48,6 +52,10 @@ RoomDesign design({
   String id = 'd1',
   String name = 'Test Walk',
   List<Offset> walls = const [],
+  String? floorFinishType,
+  int? floorFinishColor,
+  String? wallFinishType,
+  int? wallFinishColor,
 }) =>
     RoomDesign(
       id: id,
@@ -56,6 +64,10 @@ RoomDesign design({
       widthCm: 400,
       heightCm: 500,
       walls: walls,
+      floorFinishType: floorFinishType,
+      floorFinishColor: floorFinishColor,
+      wallFinishType: wallFinishType,
+      wallFinishColor: wallFinishColor,
       createdAt: DateTime(2026, 1, 1),
       updatedAt: DateTime(2026, 1, 1),
       userId: 'u1',
@@ -197,6 +209,19 @@ void main() {
       await tester.pump();
     }
 
+    Future<void> pumpShowroom(
+      WidgetTester tester, {
+      List<Override> overrides = const [],
+    }) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: overrides,
+          child: const MaterialApp(home: WalkthroughScreen()),
+        ),
+      );
+      await tester.pump();
+    }
+
     List<Override> standardOverrides({_CapturingDatasource? ds}) => [
           currentUserProvider.overrideWithValue(user()),
           roomDesignDatasourceProvider.overrideWithValue(
@@ -205,6 +230,9 @@ void main() {
 
     dynamic walkState(WidgetTester tester) =>
         tester.state(find.byType(WalkthroughScreen));
+
+    dynamic sceneState(WidgetTester tester) =>
+        tester.state(find.byType(WalkthroughScene));
 
     testWidgets('arrow up walks forward in the facing direction',
         (tester) async {
@@ -217,6 +245,36 @@ void main() {
 
       expect(after.dx, before.dx + 30);
       expect(after.dy, before.dy);
+    });
+
+    testWidgets('the live plan keeps the scanned finishes through the walk',
+        (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: standardOverrides(),
+          child: MaterialApp(
+            home: WalkthroughScreen(
+              design: design(
+                walls: squareWalls,
+                floorFinishType: 'woodPlanks',
+                floorFinishColor: 0xFF6B4A32,
+                wallFinishType: 'brick',
+                wallFinishColor: 0xFFA8442F,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+
+      final d = walkState(tester).debugDesign as RoomDesign;
+      expect(d.floorFinishType, 'woodPlanks');
+      expect(d.floorFinishColor, 0xFF6B4A32);
+      expect(d.wallFinishType, 'brick');
+      expect(d.wallFinishColor, 0xFFA8442F);
     });
 
     testWidgets('arrow right turns in place', (tester) async {
@@ -248,17 +306,126 @@ void main() {
           moreOrLessEquals(WalkthroughController.turnStepRad));
     });
 
-    testWidgets('dragging the view looks around', (tester) async {
+    testWidgets('the walk renders the native 3D scene', (tester) async {
+      await pumpWalk(tester, overrides: standardOverrides());
+      expect(find.byType(WalkthroughScene), findsOneWidget);
+      expect(find.byType(Scene3DView), findsOneWidget);
+      expect(
+          find.byWidgetPredicate(
+              (w) => w is CustomPaint && w.painter is WalkthroughPainter),
+          findsNothing);
+    });
+
+    testWidgets('the 3D camera rides the walker', (tester) async {
       await pumpWalk(tester, overrides: standardOverrides());
 
-      await tester.drag(
-        find.byWidgetPredicate(
-            (w) => w is CustomPaint && w.painter is WalkthroughPainter),
-        const Offset(-80, 0),
-      );
+      final before = sceneState(tester).debugLastCamera as ScenePose;
+      expect(before.eyeX, moreOrLessEquals(2.0, epsilon: 0.01));
+      expect(before.eyeY, moreOrLessEquals(1.5, epsilon: 0.01));
+      expect(before.eyeZ, moreOrLessEquals(2.5, epsilon: 0.01));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
       await tester.pump();
 
-      expect(walkState(tester).debugHeading as double, greaterThan(0));
+      final after = sceneState(tester).debugLastCamera as ScenePose;
+      expect(after.eyeX, moreOrLessEquals(2.3, epsilon: 0.01),
+          reason: 'one 30 cm step along the initial east heading');
+      expect(after.eyeZ, moreOrLessEquals(2.5, epsilon: 0.01));
+    });
+
+    testWidgets('dragging the 3D view turns and tilts the camera',
+        (tester) async {
+      await pumpWalk(tester, overrides: standardOverrides());
+
+      await tester.drag(find.byType(Scene3DView), const Offset(-80, 20));
+      await tester.pump();
+
+      expect(walkState(tester).debugHeading as double, greaterThan(0),
+          reason: 'grab-the-world: dragging left looks right');
+      final pose = sceneState(tester).debugLastCamera as ScenePose;
+      // The view opens pitched slightly down; the downward drag levelled it.
+      expect(pose.targetY - pose.eyeY, greaterThan(-0.07));
+    });
+
+    testWidgets('zoom buttons narrow the lens, never move the eye',
+        (tester) async {
+      await pumpWalk(tester, overrides: standardOverrides());
+
+      final before = sceneState(tester).debugLastCamera as ScenePose;
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pump();
+
+      final after = sceneState(tester).debugLastCamera as ScenePose;
+      expect(after.fovDeg, lessThan(before.fovDeg));
+      expect(after.eyeX, before.eyeX);
+      expect(after.eyeY, before.eyeY);
+      expect(after.eyeZ, before.eyeZ);
+    });
+
+    testWidgets('pinching zooms the lens like the zoom buttons', (tester) async {
+      await pumpWalk(tester, overrides: standardOverrides());
+
+      final center = tester.getCenter(find.byType(Scene3DView));
+      final a = await tester.startGesture(center + const Offset(-30, 0));
+      final b = await tester.startGesture(center + const Offset(30, 0));
+      await tester.pump();
+      await a.moveTo(center + const Offset(-60, 0));
+      await b.moveTo(center + const Offset(60, 0));
+      await tester.pump();
+      await a.up();
+      await b.up();
+      await tester.pump();
+
+      final pose = sceneState(tester).debugLastCamera as ScenePose;
+      expect(pose.fovDeg, lessThan(70),
+          reason: 'spreading the fingers zooms in');
+    });
+
+    testWidgets('the placement ghost tracks the walker', (tester) async {
+      await pumpWalk(tester, overrides: standardOverrides());
+
+      await tester.tap(find.byTooltip('Add furniture'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sofa'));
+      await tester.pumpAndSettle();
+
+      final first = sceneState(tester).debugLastGhost as FurniturePlacement?;
+      expect(first, isNotNull);
+      expect(first!.x, moreOrLessEquals(110, epsilon: 0.01),
+          reason: '180 cm sofa centered on the 200 cm walker');
+      expect(first.y, moreOrLessEquals(205, epsilon: 0.01));
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+
+      final walked = sceneState(tester).debugLastGhost as FurniturePlacement?;
+      expect(walked!.x, moreOrLessEquals(140, epsilon: 0.01),
+          reason: 'the preview follows the walker');
+    });
+
+    testWidgets('the painter fallback still turns on drag', (tester) async {
+      // iOS has no SceneView — the painter renders and keeps its own look
+      // drag, so the flows stay identical across platforms.
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await pumpWalk(tester, overrides: standardOverrides());
+        expect(
+            find.byWidgetPredicate(
+                (w) => w is CustomPaint && w.painter is WalkthroughPainter),
+            findsOneWidget);
+
+        await tester.drag(
+          find.byWidgetPredicate(
+              (w) => w is CustomPaint && w.painter is WalkthroughPainter),
+          const Offset(-80, 0),
+        );
+        await tester.pump();
+
+        expect(walkState(tester).debugHeading as double, greaterThan(0));
+      } finally {
+        // Foundation debug vars must be restored before the test ends.
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets('pick a piece, then place it at the walker', (tester) async {
@@ -438,6 +605,175 @@ void main() {
       expect(popped!.heightCm, 500);
       expect(popped!.furniture, hasLength(1));
       expect(popped!.furniture.single.name, 'Sofa');
+    });
+
+    testWidgets('no design opens the showroom gallery', (tester) async {
+      await pumpShowroom(tester, overrides: standardOverrides());
+
+      expect(walkState(tester).debugInGallery as bool, isTrue);
+      expect(find.text('Modern Living Room'), findsOneWidget);
+      expect(find.text('Walk this room'), findsOneWidget);
+      expect(find.byTooltip('Add furniture'), findsNothing);
+      expect(find.byTooltip('Rooms'), findsNothing);
+    });
+
+    testWidgets('arrow keys flip between showroom rooms', (tester) async {
+      await pumpShowroom(tester, overrides: standardOverrides());
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(walkState(tester).debugGalleryIndex, 1);
+      expect(find.text('Cozy Bedroom'), findsOneWidget);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(walkState(tester).debugGalleryIndex, 0);
+      expect(find.text('Modern Living Room'), findsOneWidget);
+    });
+
+    testWidgets('tapping a room walks it at the room center', (tester) async {
+      await pumpShowroom(tester, overrides: standardOverrides());
+
+      await tester.tap(find.text('Walk this room'));
+      await tester.pumpAndSettle();
+
+      expect(walkState(tester).debugInGallery as bool, isFalse);
+      expect(walkState(tester).debugShowroomId, 'showroom-living');
+      expect(walkState(tester).debugWalker as Offset, const Offset(250, 200));
+    });
+
+    testWidgets('a showroom walk rides the 3D camera at its spawn',
+        (tester) async {
+      await pumpShowroom(tester, overrides: standardOverrides());
+
+      await tester.tap(find.text('Walk this room'));
+      await tester.pumpAndSettle();
+
+      final pose = sceneState(tester).debugLastCamera as ScenePose;
+      expect(pose.eyeX, moreOrLessEquals(2.5, epsilon: 0.01));
+      expect(pose.eyeY, moreOrLessEquals(1.5, epsilon: 0.01));
+      expect(pose.eyeZ, moreOrLessEquals(2.0, epsilon: 0.01));
+    });
+
+    testWidgets('back from a showroom walk returns to the gallery first',
+        (tester) async {
+      var popCount = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: standardOverrides(),
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  await Navigator.push<RoomDesign>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const WalkthroughScreen()),
+                  );
+                  popCount++;
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Walk this room'));
+      await tester.pumpAndSettle();
+      expect(walkState(tester).debugInGallery as bool, isFalse);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(popCount, 0);
+      expect(walkState(tester).debugInGallery as bool, isTrue);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(popCount, 1);
+    });
+
+    testWidgets('leaving my design for the showroom keeps the plan in hand',
+        (tester) async {
+      RoomDesign? popped;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: standardOverrides(),
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  popped = await Navigator.push<RoomDesign>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          WalkthroughScreen(design: design(walls: squareWalls)),
+                    ),
+                  );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add furniture'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sofa'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Place'));
+      await tester.pumpAndSettle();
+      // The snackbar only dismisses if its entrance settled before fake
+      // time jumps past the duration; otherwise it lingers and swallows taps.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Rooms'));
+      await tester.pumpAndSettle();
+      expect(walkState(tester).debugInGallery as bool, isTrue);
+      expect(find.text('Back to my design'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(popped, isNotNull);
+      expect(popped!.walls, squareWalls);
+      expect(popped!.furniture, hasLength(1));
+      expect(popped!.furniture.single.name, 'Sofa');
+    });
+
+    testWidgets('Back to my design resumes the live plan', (tester) async {
+      await pumpWalk(
+        tester,
+        walls: squareWalls,
+        overrides: standardOverrides(),
+      );
+
+      await tester.tap(find.byTooltip('Add furniture'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sofa'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Place'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Rooms'));
+      await tester.pumpAndSettle();
+      expect(walkState(tester).debugInGallery as bool, isTrue);
+
+      await tester.tap(find.text('Back to my design'));
+      await tester.pumpAndSettle();
+
+      expect(walkState(tester).debugInGallery as bool, isFalse);
+      expect(walkState(tester).debugShowroomId, isNull);
+      expect(walkState(tester).debugFurniture, hasLength(1));
+      expect((walkState(tester).debugDesign as RoomDesign).walls, squareWalls);
     });
   });
 }

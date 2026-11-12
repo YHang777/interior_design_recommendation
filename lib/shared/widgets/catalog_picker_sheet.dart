@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -113,24 +115,36 @@ class _CatalogPickerSheetState<T> extends State<_CatalogPickerSheet<T>> {
           ],
           const SizedBox(height: 12),
           Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 0.78,
-              ),
-              itemCount: visible.length,
-              itemBuilder: (context, i) {
-                final item = visible[i];
-                return _PickerCard(
-                  label: widget.labelOf(item),
-                  onTap: () => Navigator.of(context).pop(item),
-                  child: widget.tileBuilder(context, item),
-                );
-              },
-            ),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final width = constraints.maxWidth - 40;
+              const gap = 12.0;
+              final cols = width < 480 ? 2 : 3;
+              final cardW = (width - gap * (cols - 1)) / cols;
+              // Cards scale with width but a whole row (label included) must
+              // fit the viewport, or wide surfaces push the name off-screen.
+              final maxCardH =
+                  math.max(160.0, constraints.maxHeight * 0.75);
+              final cardH = (cardW / 0.82).clamp(160.0, maxCardH);
+              return GridView.builder(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  crossAxisSpacing: gap,
+                  mainAxisSpacing: gap,
+                  childAspectRatio: cardW / cardH,
+                ),
+                itemCount: visible.length,
+                itemBuilder: (context, i) {
+                  final item = visible[i];
+                  return _PickerCard(
+                    label: widget.labelOf(item),
+                    sublabel: widget.categoryOf?.call(item),
+                    onTap: () => Navigator.of(context).pop(item),
+                    child: widget.tileBuilder(context, item),
+                  );
+                },
+              );
+            }),
           ),
         ],
       ),
@@ -143,9 +157,11 @@ class _PickerCard extends StatelessWidget {
     required this.label,
     required this.onTap,
     required this.child,
+    this.sublabel,
   });
 
   final String label;
+  final String? sublabel;
   final VoidCallback onTap;
   final Widget child;
 
@@ -153,30 +169,51 @@ class _PickerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
           ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: Center(child: child)),
-              const SizedBox(height: 4),
+              Expanded(
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(child: child),
+                ),
+              ),
+              const SizedBox(height: 8),
               Text(label,
                   textAlign: TextAlign.center,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
+                      height: 1.25,
                       color: AppColors.textPrimary)),
+              if (sublabel != null) ...[
+                const SizedBox(height: 2),
+                Text(sublabel!,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textSecondary)),
+              ],
             ],
           ),
         ),

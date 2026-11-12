@@ -99,6 +99,12 @@ class RoomDesign {
   final List<Offset> walls;
   final List<String> detectedItems;
   final String? imagePath;
+  // Finish fields hold RoomFinishCatalog enum names + palette argbs (the AI
+  // material scan and the AR finish picker write them); null = not set.
+  final String? floorFinishType;
+  final int? floorFinishColor;
+  final String? wallFinishType;
+  final int? wallFinishColor;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String userId;
@@ -113,6 +119,10 @@ class RoomDesign {
     this.walls = const [],
     this.detectedItems = const [],
     this.imagePath,
+    this.floorFinishType,
+    this.floorFinishColor,
+    this.wallFinishType,
+    this.wallFinishColor,
     required this.createdAt,
     required this.updatedAt,
     required this.userId,
@@ -129,6 +139,10 @@ class RoomDesign {
     List<String>? detectedItems,
     String? imagePath,
     bool clearImagePath = false,
+    String? floorFinishType,
+    int? floorFinishColor,
+    String? wallFinishType,
+    int? wallFinishColor,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? userId,
@@ -143,6 +157,10 @@ class RoomDesign {
       walls: walls ?? this.walls,
       detectedItems: detectedItems ?? this.detectedItems,
       imagePath: clearImagePath ? null : (imagePath ?? this.imagePath),
+      floorFinishType: floorFinishType ?? this.floorFinishType,
+      floorFinishColor: floorFinishColor ?? this.floorFinishColor,
+      wallFinishType: wallFinishType ?? this.wallFinishType,
+      wallFinishColor: wallFinishColor ?? this.wallFinishColor,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       userId: userId ?? this.userId,
@@ -159,24 +177,40 @@ class RoomDesign {
         'walls': [for (final w in walls) [w.dx, w.dy]],
         'detectedItems': detectedItems,
         if (imagePath != null) 'imagePath': imagePath,
+        if (floorFinishType != null) 'floorFinishType': floorFinishType,
+        if (floorFinishColor != null) 'floorFinishColor': floorFinishColor,
+        if (wallFinishType != null) 'wallFinishType': wallFinishType,
+        if (wallFinishColor != null) 'wallFinishColor': wallFinishColor,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'updatedAt': updatedAt.toUtc().toIso8601String(),
         'userId': userId,
       };
 
   factory RoomDesign.fromJson(Map<String, dynamic> json) {
-    // The Supabase row stores furniture + walls together in the furniture
-    // JSONB column ({items, walls}) to avoid a schema migration; the flat
-    // model shape (and legacy rows that are plain arrays) must both load.
+    // The Supabase row stores furniture + walls + finishes together in the
+    // furniture JSONB column ({items, walls, finishes}) to avoid a schema
+    // migration; the flat model shape (and legacy rows that are plain
+    // arrays) must both load.
     var furnitureRaw = json['furniture'];
     var walls = const <Offset>[];
+    Map? finishesRaw;
     if (furnitureRaw is Map) {
       walls = _parseWalls(furnitureRaw['walls']);
+      if (furnitureRaw['finishes'] is Map) {
+        finishesRaw = furnitureRaw['finishes'] as Map;
+      }
       furnitureRaw = furnitureRaw['items'];
     }
     if (walls.isEmpty && json['walls'] is List) {
       walls = _parseWalls(json['walls']);
     }
+    String? finishType(String flatKey, String nestedKey) =>
+        json[flatKey]?.toString() ?? finishesRaw?[nestedKey]?.toString();
+    int? finishColor(String flatKey, String nestedKey) {
+      final v = json[flatKey] ?? finishesRaw?[nestedKey];
+      return v is num ? v.toInt() : null;
+    }
+
     return RoomDesign(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Untitled Design',
@@ -200,6 +234,10 @@ class RoomDesign {
               .toList()
           : [],
       imagePath: json['imagePath']?.toString(),
+      floorFinishType: finishType('floorFinishType', 'floorType'),
+      floorFinishColor: finishColor('floorFinishColor', 'floorColor'),
+      wallFinishType: finishType('wallFinishType', 'wallType'),
+      wallFinishColor: finishColor('wallFinishColor', 'wallColor'),
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),

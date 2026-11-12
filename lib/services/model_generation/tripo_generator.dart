@@ -543,6 +543,11 @@ class Tripo3DGenerator {
   static String describeHttpFailure(int status, String body) {
     final proxied = _proxySentence(body);
     if (proxied != null) return proxied;
+    // Tripo answers 403 for BOTH a dead key and an empty account — only the
+    // body says which. The seller sentence must name the real cause or
+    // "Retry" reads like it can help (it billed five Sofa Bed attempts).
+    final upstream = _upstreamReason(body);
+    if (upstream != null) return upstream;
     if (status == 401 || status == 403) {
       return '3D generation is not authorized right now. Try again later.';
     }
@@ -571,6 +576,34 @@ class Tripo3DGenerator {
     if (error is! Map<String, dynamic>) return null;
     final message = error['message']?.toString().trim();
     return (message == null || message.isEmpty) ? null : message;
+  }
+
+  // Tripo's own `{code, message}` envelope — only the two causes where the
+  // sentence must beat the status map (both arrive as HTTP 403): an empty
+  // account (code 2010) and a dead key. Everything else keeps the status
+  // mapping so 429/5xx still say busy/unavailable.
+  static String? _upstreamReason(String body) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map<String, dynamic>) return null;
+    final message = decoded['message']?.toString().toLowerCase() ?? '';
+    if (decoded['code'] == 2010 ||
+        message.contains('credit') ||
+        message.contains('insufficient')) {
+      return '3D generation is out of credit. Top up the Tripo account and '
+          'tap Retry.';
+    }
+    if (message.contains('unauthorized') ||
+        message.contains('forbidden') ||
+        message.contains('api key') ||
+        message.contains('apikey')) {
+      return '3D generation is not authorized right now. Try again later.';
+    }
+    return null;
   }
 
   static bool isTransientHttpStatus(int status) =>

@@ -34,6 +34,13 @@ class ArFlutterPlugin: FlutterPlugin, ActivityAware {
                     lifecycle = lifecycle!!
                 )
             )
+            flutterBinding.platformViewRegistry.registerViewFactory(
+                "ar_flutter_plugin_2/scene",
+                Scene3DViewFactory(
+                    messenger = flutterBinding.binaryMessenger,
+                    lifecycle = lifecycle!!
+                )
+            )
         }
     }
 
@@ -53,6 +60,13 @@ class ArFlutterPlugin: FlutterPlugin, ActivityAware {
                 ArViewFactory(
                     messenger = flutterBinding.binaryMessenger,
                     activity = activity!!,
+                    lifecycle = lifecycle!!
+                )
+            )
+            flutterBinding.platformViewRegistry.registerViewFactory(
+                "ar_flutter_plugin_2/scene",
+                Scene3DViewFactory(
+                    messenger = flutterBinding.binaryMessenger,
                     lifecycle = lifecycle!!
                 )
             )

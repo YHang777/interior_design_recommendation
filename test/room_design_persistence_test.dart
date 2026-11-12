@@ -50,6 +50,26 @@ void main() {
     expect(restored.name, 'My Room');
   });
 
+  test('finish fields round-trip through JSON and stay null when unset', () {
+    final scanned = design().copyWith(
+      floorFinishType: 'woodPlanks',
+      floorFinishColor: 0xFF6B4A32,
+      wallFinishType: 'brick',
+      wallFinishColor: 0xFFA8442F,
+    );
+    final restored = RoomDesign.fromJson(scanned.toJson());
+    expect(restored.floorFinishType, 'woodPlanks');
+    expect(restored.floorFinishColor, 0xFF6B4A32);
+    expect(restored.wallFinishType, 'brick');
+    expect(restored.wallFinishColor, 0xFFA8442F);
+
+    final plain = RoomDesign.fromJson(design().toJson());
+    expect(plain.floorFinishType, isNull);
+    expect(plain.floorFinishColor, isNull);
+    expect(plain.wallFinishType, isNull);
+    expect(plain.wallFinishColor, isNull);
+  });
+
   test('legacy rows with a plain furniture array load with no walls', () {
     final restored = RoomDesign.fromJson({
       'id': 'd2',
@@ -109,6 +129,34 @@ void main() {
     expect(restored.furniture.single.name, 'Dining Table');
     expect(restored.walls.length, 4);
     expect(restored.walls.first, const Offset(15, 15));
+  });
+
+  test('embedded furniture JSONB carries finishes alongside walls', () {
+    final restored = RoomDesign.fromJson({
+      'id': 'd4',
+      'name': 'Embedded Finishes',
+      'roomType': 'living_room',
+      'furniture': {
+        'items': <dynamic>[],
+        'walls': [
+          [15, 15],
+          [335, 15],
+        ],
+        'finishes': {
+          'floorType': 'ceramicTiles',
+          'floorColor': 0xFFA95F45,
+          'wallType': 'paint',
+          'wallColor': 0xFFBCD2CE,
+        },
+      },
+      'userId': 'u1',
+    });
+
+    expect(restored.floorFinishType, 'ceramicTiles');
+    expect(restored.floorFinishColor, 0xFFA95F45);
+    expect(restored.wallFinishType, 'paint');
+    expect(restored.wallFinishColor, 0xFFBCD2CE);
+    expect(restored.walls.length, 2);
   });
 
   group('SupabaseRoomDesignDatasource', () {
@@ -227,6 +275,68 @@ void main() {
       expect(loaded.furniture.single.name, 'Desk');
       expect(loaded.walls.length, 3);
       expect(loaded.walls[1], const Offset(310, 10));
+    });
+
+    test('finishes ride inside the furniture JSONB on write and read',
+        () async {
+      final scanned = design().copyWith(
+        floorFinishType: 'parquet',
+        floorFinishColor: 0xFFD9B076,
+        wallFinishType: 'woodPanels',
+        wallFinishColor: 0xFF6B4A32,
+      );
+      await ds.createDesign(designId: 'd1', data: scanned.toJson());
+
+      final body = jsonDecode(sent.single.body) as Map<String, dynamic>;
+      // No new columns — the table shape is fixed (PostgREST rejects
+      // unknown ones), so finishes must nest with walls and items.
+      expect(body.containsKey('floorFinishType'), isFalse);
+      expect(body.containsKey('floor_finish_type'), isFalse);
+      final furniture = body['furniture'] as Map<String, dynamic>;
+      expect(furniture['finishes'], {
+        'floorType': 'parquet',
+        'floorColor': 0xFFD9B076,
+        'wallType': 'woodPanels',
+        'wallColor': 0xFF6B4A32,
+      });
+
+      ds = SupabaseRoomDesignDatasource(
+        client: MockClient((request) async {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'd1',
+                'name': 'My Room',
+                'room_type': 'living_room',
+                'width_cm': 400,
+                'height_cm': 500,
+                'furniture': {
+                  'items': <dynamic>[],
+                  'walls': <dynamic>[],
+                  'finishes': {
+                    'floorType': 'parquet',
+                    'floorColor': 0xFFD9B076,
+                    'wallType': 'woodPanels',
+                    'wallColor': 0xFF6B4A32,
+                  },
+                },
+                'detected_items': <dynamic>[],
+                'image_path': null,
+                'created_at': '2026-01-01T00:00:00Z',
+                'updated_at': '2026-01-02T00:00:00Z',
+                'user_id': 'u1',
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final loaded = await ds.getDesign('d1');
+      expect(loaded!.floorFinishType, 'parquet');
+      expect(loaded.floorFinishColor, 0xFFD9B076);
+      expect(loaded.wallFinishType, 'woodPanels');
+      expect(loaded.wallFinishColor, 0xFF6B4A32);
     });
 
     test('network errors propagate as typed exceptions for userMessage',

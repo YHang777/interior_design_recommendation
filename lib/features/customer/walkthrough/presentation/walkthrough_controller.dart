@@ -3,11 +3,12 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../../../models/room_design.dart';
+import '../../scanner/data/furniture_catalog.dart';
 import '../../scanner/data/room_fit.dart';
 
-// Pose + movement + placement for the 2D walkthrough. Deliberately pure
-// data behind ChangeNotifier: position/heading is the stream a future 3D/VR
-// renderer will consume — only the painter changes when VR arrives.
+// Pose + movement + placement for the walkthrough. Deliberately pure data
+// behind ChangeNotifier: position/heading is the stream the 3D renderer
+// consumes — only the rendering layer changes when VR arrives.
 class WalkthroughController extends ChangeNotifier {
   WalkthroughController({required RoomDesign design})
       : roomW = design.widthCm,
@@ -30,22 +31,38 @@ class WalkthroughController extends ChangeNotifier {
   static const stepCm = 30.0;
   static const walkerRadiusCm = 18.0;
   static const turnStepRad = pi / 12; // 15° per press — Street View feel
+  static const walkOverHeightCm = 30.0; // rugs etc. — stepped on, not around
 
-  bool _validSpot(Offset p) {
+  bool _validSpot(Offset p, {Offset? escapeFrom}) {
     if (p.dx < walkerRadiusCm ||
         p.dy < walkerRadiusCm ||
         p.dx > roomW - walkerRadiusCm ||
         p.dy > roomH - walkerRadiusCm) {
       return false;
     }
-    if (walls.length < 3) return true;
-    if (!pointInPolygon(p, walls)) return false;
-    for (var i = 0; i < walls.length; i++) {
-      final a = walls[i];
-      final b = walls[(i + 1) % walls.length];
-      if (distToSegment(p, a, b) < walkerRadiusCm) return false;
+    if (walls.length >= 3) {
+      if (!pointInPolygon(p, walls)) return false;
+      for (var i = 0; i < walls.length; i++) {
+        final a = walls[i];
+        final b = walls[(i + 1) % walls.length];
+        if (distToSegment(p, a, b) < walkerRadiusCm) return false;
+      }
     }
-    return true;
+    return !_furnitureBlocked(p, escapeFrom);
+  }
+
+  // Standing inside a placed piece (it was just placed at your feet) always
+  // lets you leave it — otherwise the piece traps the camera.
+  bool _furnitureBlocked(Offset p, Offset? escapeFrom) {
+    for (final f in furniture) {
+      if (heightCmForFurniture(f.iconName) < walkOverHeightCm) continue;
+      final r = furnitureRect(f);
+      if (escapeFrom != null && distToRect(escapeFrom, r) < walkerRadiusCm) {
+        continue;
+      }
+      if (distToRect(p, r) < walkerRadiusCm) return true;
+    }
+    return false;
   }
 
   Offset _findSpawn() {
@@ -83,11 +100,11 @@ class WalkthroughController extends ChangeNotifier {
     if (dir == Offset.zero) return;
     final target = walker + dir * stepCm;
     Offset? next;
-    if (_validSpot(target)) {
+    if (_validSpot(target, escapeFrom: walker)) {
       next = target;
-    } else if (_validSpot(Offset(target.dx, walker.dy))) {
+    } else if (_validSpot(Offset(target.dx, walker.dy), escapeFrom: walker)) {
       next = Offset(target.dx, walker.dy);
-    } else if (_validSpot(Offset(walker.dx, target.dy))) {
+    } else if (_validSpot(Offset(walker.dx, target.dy), escapeFrom: walker)) {
       next = Offset(walker.dx, target.dy);
     }
     final turned = atan2(dir.dy, dir.dx) != heading;

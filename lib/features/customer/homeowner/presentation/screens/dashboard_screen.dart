@@ -192,6 +192,18 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _ActionCard(
+                      icon: Icons.view_carousel,
+                      label: 'Showroom Walks',
+                      gradientColors: const [Color(0xFF00838F), Color(0xFF26C6DA)],
+                      onTap: () => context.push('/walkthrough')),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
 
             Text('Recent Activity',

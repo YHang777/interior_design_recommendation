@@ -1,3 +1,4 @@
+import '../../../../models/room_design.dart';
 import 'glb_generator.dart' show FloorFinishType, WallFinishType;
 
 class FinishColor {
@@ -160,6 +161,73 @@ class RoomFinishCatalog {
     }
     return 'Custom';
   }
+
+  // ─── Scan matching (AI material scan snaps onto the palettes) ─────────────
+
+  static FinishColor nearestColorForFloor(FloorFinishType type, int? argb) =>
+      _nearest(colorsForFloor(type), argb, defaultArgbForFloor(type));
+
+  static FinishColor nearestColorForWall(WallFinishType type, int? argb) =>
+      _nearest(colorsForWall(type), argb, defaultArgbForWall(type));
+
+  static FinishColor _nearest(
+      List<FinishColor> palette, int? argb, int fallback) {
+    if (argb == null) {
+      for (final c in palette) {
+        if (c.argb == fallback) return c;
+      }
+      return palette.first;
+    }
+    var best = palette.first;
+    var bestDist = _colorDistance(best.argb, argb);
+    for (final c in palette.skip(1)) {
+      final d = _colorDistance(c.argb, argb);
+      if (d < bestDist) {
+        best = c;
+        bestDist = d;
+      }
+    }
+    return best;
+  }
+
+  static int _colorDistance(int a, int b) {
+    final dr = ((a >> 16) & 0xFF) - ((b >> 16) & 0xFF);
+    final dg = ((a >> 8) & 0xFF) - ((b >> 8) & 0xFF);
+    final db = (a & 0xFF) - (b & 0xFF);
+    return dr * dr + dg * dg + db * db;
+  }
+}
+
+/// A design's stored finishes as a selection; missing/unknown fields fall
+/// back to the catalog defaults (the same look a fresh session starts with).
+FinishSelection finishSelectionFrom(RoomDesign? design) {
+  var floorType = RoomFinishCatalog.defaultFloorType;
+  var floorColor = RoomFinishCatalog.defaultFloorColorArgb;
+  var wallType = RoomFinishCatalog.defaultWallType;
+  var wallColor = RoomFinishCatalog.defaultWallColorArgb;
+
+  final d = design;
+  if (d != null) {
+    final name = d.floorFinishType;
+    final ft = name == null ? null : FloorFinishType.values.asNameMap()[name];
+    if (ft != null) {
+      floorType = ft;
+      floorColor = d.floorFinishColor ?? RoomFinishCatalog.defaultArgbForFloor(ft);
+    }
+    final wName = d.wallFinishType;
+    final wt = wName == null ? null : WallFinishType.values.asNameMap()[wName];
+    if (wt != null) {
+      wallType = wt;
+      wallColor = d.wallFinishColor ?? RoomFinishCatalog.defaultArgbForWall(wt);
+    }
+  }
+
+  return FinishSelection(
+    floorType: floorType,
+    floorColorArgb: floorColor,
+    wallType: wallType,
+    wallColorArgb: wallColor,
+  );
 }
 
 class FinishSelection {

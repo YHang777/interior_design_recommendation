@@ -788,6 +788,52 @@ void main() {
       );
       expect(withWallBaseAt(wall, refY: 0), same(wall));
     });
+
+    test('a furniture-scale fragment stretches down past maxDropM', () {
+      // A misdetected desk/console/sofa face 0.7 m off the floor — cover
+      // the under-gap or the gap reads as placeable floor.
+      final low = rectWall(y: 1.2, height: 1.0); // bottom = 0.7
+      final out = withWallBaseAt(low, refY: 0);
+      expect(out, isNot(same(low)));
+      expect(out.center.y - out.extentZ / 2, closeTo(0, 1e-9));
+      expect(out.extentZ, closeTo(1.7, 1e-9), reason: 'top stays at 1.7');
+    });
+
+    test('a wall-scale fragment at the same drop stays untouched', () {
+      // Same 0.7 m gap but a 2 m face — a shelf must never paint a phantom
+      // sheet of wall over real floor below itself.
+      final tall = rectWall(y: 1.7, height: 2); // bottom = 0.7
+      expect(withWallBaseAt(tall, refY: 0), same(tall));
+    });
+
+    test('a furniture-scale fragment past the drop cap is untouched', () {
+      final far = rectWall(y: 1.55, height: 1.0); // bottom = 1.05 > 0.75
+      expect(withWallBaseAt(far, refY: 0), same(far));
+    });
+
+    test('a low polygon fragment stretches its bottom row to the floor', () {
+      final wall = PlaneQuad(
+        center: Vector3(0, 1.2, 2),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 1,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-1, 0.7, 2),
+          Vector3(1, 0.7, 2),
+          Vector3(1, 1.7, 2),
+          Vector3(-1, 1.7, 2),
+        ],
+      );
+      final out = withWallBaseAt(wall, refY: 0);
+      expect(out, isNot(same(wall)));
+      expect(out.polygon[0].y, closeTo(0, 1e-9));
+      expect(out.polygon[1].y, closeTo(0, 1e-9));
+      expect(out.polygon[2].y, closeTo(1.7, 1e-9));
+      expect(out.polygon[3].y, closeTo(1.7, 1e-9));
+      expect(out.center.y, closeTo(0.5, 1e-9), reason: '1.2 + (0 − 0.7)');
+    });
   });
 
   group('mergeWallQuads', () {
@@ -1656,6 +1702,157 @@ void main() {
     });
   });
 
+  group('footprintStraddlesWall', () {
+    // Wall plane at z = 0, run x ∈ [−1, 1], height y ∈ [0, 2].
+    PlaneQuad wall() => PlaneQuad(
+          center: Vector3(0, 1, 0),
+          yaw: 0,
+          extentX: 2,
+          extentZ: 2,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+        );
+
+    test('a body crossing the plane straddles', () {
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          walls: [wall()],
+        ),
+        isTrue,
+      );
+    });
+
+    test('flush wall hugging is legal', () {
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0.5),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          walls: [wall()],
+        ),
+        isFalse,
+        reason: 'corners land ON the plane — hugging a real wall must '
+            'never bounce off it',
+      );
+    });
+
+    test('a crossing past the detected run is ignored except its margin',
+        () {
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(1.05, 0, 0),
+          yaw: 0,
+          widthM: 0.2,
+          depthM: 1,
+          walls: [wall()],
+        ),
+        isTrue,
+        reason: 'corners x ∈ [0.95, 1.15] overlap the run + the 0.1 m '
+            'margin — ARCore stops where scanning stopped',
+      );
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(2, 0, 0),
+          yaw: 0,
+          widthM: 0.5,
+          depthM: 1,
+          walls: [wall()],
+        ),
+        isFalse,
+        reason: 'corners x ∈ [1.75, 2.25] are past the run + margin',
+      );
+    });
+
+    test('a quad floating above the body reach is ignored', () {
+      final shelf = PlaneQuad(
+        center: Vector3(0, 3.1, 0),
+        yaw: 0,
+        extentX: 2,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+      );
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          walls: [shelf],
+        ),
+        isFalse,
+        reason: 'base at 2.1 m is above the 1.8 m body reach',
+      );
+    });
+
+    test('a polygon-bearing wall gates by its outline, not its rect', () {
+      final narrow = PlaneQuad(
+        center: Vector3(0, 1, 0),
+        yaw: 0,
+        extentX: 3,
+        extentZ: 2,
+        vertical: true,
+        kind: PlaneQuadKind.wall,
+        polygon: [
+          Vector3(-0.3, 0, 0),
+          Vector3(0.3, 0, 0),
+          Vector3(0.3, 2, 0),
+          Vector3(-0.3, 2, 0),
+        ],
+      );
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(1, 0, 0),
+          yaw: 0,
+          widthM: 0.4,
+          depthM: 1,
+          walls: [narrow],
+        ),
+        isFalse,
+        reason: 'the outline stops at x = 0.3 — the rect alone would '
+            'have covered this crossing',
+      );
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 0.4,
+          depthM: 1,
+          walls: [narrow],
+        ),
+        isTrue,
+      );
+    });
+
+    test('no walls or no body never straddles', () {
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          walls: const [],
+        ),
+        isFalse,
+      );
+      expect(
+        footprintStraddlesWall(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 0,
+          depthM: 1,
+          walls: [wall()],
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('footprintFitsInZones', () {
     PlaneQuad floor(double ex, double ez,
             {Vector3? at, double yaw = 0}) =>
@@ -1836,6 +2033,71 @@ void main() {
         isFalse,
       );
     });
+
+    // Wall plane at z = 0, run x ∈ [−1, 1], height y ∈ [0, 2].
+    PlaneQuad wall() => PlaneQuad(
+          center: Vector3(0, 1, 0),
+          yaw: 0,
+          extentX: 2,
+          extentZ: 2,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+        );
+
+    test('a body crossing a wall-kind plane does not fit', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          floorZones: [floor(6, 6)],
+          walls: [wall()],
+        ),
+        isFalse,
+        reason: 'the straddle gate runs even when every floor sample passes',
+      );
+    });
+
+    test('flush wall hugging still fits', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0, 0, 0.5),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          floorZones: [floor(6, 6)],
+          walls: [wall()],
+        ),
+        isTrue,
+      );
+    });
+
+    test('walls gate placement even with no detected floor', () {
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0, 0, 0),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          floorZones: const [],
+          walls: [wall()],
+        ),
+        isFalse,
+        reason: 'fail-open covers a missing floor, not a body inside a wall',
+      );
+      expect(
+        footprintFitsInZones(
+          center: Vector3(0, 0, 0.5),
+          yaw: 0,
+          widthM: 2,
+          depthM: 1,
+          floorZones: const [],
+          walls: [wall()],
+        ),
+        isTrue,
+      );
+    });
   });
 
   group('pushIntoFloorZone with footprint', () {
@@ -1915,6 +2177,131 @@ void main() {
         halfWidthM: 1.5,
         halfDepthM: 0.3,
         footprintYaw: 0.0,
+      );
+      expect(out, same(point));
+    });
+  });
+
+  group('pushIntoFloorZone wall stage', () {
+    final camera = Vector3(0, 1.5, 3);
+
+    PlaneQuad openFloor() => PlaneQuad(
+          center: Vector3.zero(),
+          yaw: 0,
+          extentX: 6,
+          extentZ: 6,
+          vertical: false,
+          kind: PlaneQuadKind.floor,
+        );
+
+    // Wall plane at z = 0, run x ∈ [−1, 1], height y ∈ [0, 2].
+    PlaneQuad wall() => PlaneQuad(
+          center: Vector3(0, 1, 0),
+          yaw: 0,
+          extentX: 2,
+          extentZ: 2,
+          vertical: true,
+          kind: PlaneQuadKind.wall,
+        );
+
+    test('a straddling body slides onto the tap side of the plane', () {
+      final out = pushIntoFloorZone(
+        point: Vector3(0, 0, 0),
+        masks: const [],
+        floorZones: [openFloor()],
+        walls: [wall()],
+        cameraPos: camera,
+        halfWidthM: 0.5,
+        halfDepthM: 0.5,
+        footprintYaw: 0,
+      );
+      expect(out.x, closeTo(0, 1e-9));
+      expect(out.z, closeTo(0.52, 1e-9),
+          reason: 'far corner (−0.5) leaves the plane band by tol 0.02');
+    });
+
+    test('the slide follows the tap side — negative too', () {
+      final out = pushIntoFloorZone(
+        point: Vector3(0, 0, -0.3),
+        masks: const [],
+        floorZones: [openFloor()],
+        walls: [wall()],
+        cameraPos: camera,
+        halfWidthM: 0.5,
+        halfDepthM: 0.5,
+        footprintYaw: 0,
+      );
+      expect(out.z, closeTo(-0.52, 1e-9),
+          reason: 'near corner (0.2) leaves the band on the other side');
+    });
+
+    test('flush wall hugging and near-wall taps are untouched', () {
+      final hug = Vector3(0, 0, 0.5);
+      expect(
+        pushIntoFloorZone(
+          point: hug,
+          masks: const [],
+          floorZones: [openFloor()],
+          walls: [wall()],
+          cameraPos: camera,
+          halfWidthM: 0.5,
+          halfDepthM: 0.5,
+          footprintYaw: 0,
+        ),
+        same(hug),
+        reason: 'corners land ON the plane — hugging is legal',
+      );
+      final near = Vector3(0, 0, 0.1);
+      expect(
+        pushIntoFloorZone(
+          point: near,
+          masks: const [],
+          floorZones: [openFloor()],
+          walls: [wall()],
+          cameraPos: camera,
+        ),
+        same(near),
+        reason: 'a body-less tap 0.1 m off the wall hugs; only a tap ON '
+            'the plane is wedged',
+      );
+    });
+
+    test('a body-less tap on the plane slides onto the tap side', () {
+      final out = pushIntoFloorZone(
+        point: Vector3(0.3, 0, 0),
+        masks: const [],
+        floorZones: [openFloor()],
+        walls: [wall()],
+        cameraPos: camera,
+      );
+      expect(out.x, closeTo(0.3, 1e-9));
+      expect(out.z, closeTo(0.02, 1e-9),
+          reason: 'off the plane by exactly the band tolerance');
+    });
+
+    test('a slide off the detected floor keeps the raw tap', () {
+      // The push direction is valid but its landing falls past the floor
+      // zone edge — never trade a bad landing for one off the scan. The
+      // caller's straddle refusal handles the raw tap afterwards.
+      final point = Vector3(0, 0, 0);
+      final out = pushIntoFloorZone(
+        point: point,
+        masks: const [],
+        floorZones: [
+          PlaneQuad(
+            center: Vector3(0, 0, 1.8),
+            yaw: 0,
+            extentX: 6,
+            extentZ: 2.4,
+            vertical: false,
+            kind: PlaneQuadKind.floor,
+          ),
+        ],
+        walls: [wall()],
+        cameraPos: camera,
+        halfWidthM: 0.5,
+        halfDepthM: 0.5,
+        footprintYaw: 0,
       );
       expect(out, same(point));
     });

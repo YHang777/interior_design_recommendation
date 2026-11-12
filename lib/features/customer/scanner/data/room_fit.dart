@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart' show Offset;
+import 'package:flutter/material.dart' show Offset, Rect;
 
 import '../../../../models/room_design.dart';
 
@@ -125,3 +125,37 @@ FurniturePlacement resolveDrop(
   }
   return f;
 }
+
+// ── placement guards ──
+
+Rect furnitureRect(FurniturePlacement f) =>
+    Rect.fromLTWH(f.x, f.y, footprintW(f), footprintH(f));
+
+double distToRect(Offset p, Rect r) {
+  final dx = max(max(r.left - p.dx, 0.0), p.dx - r.right);
+  final dy = max(max(r.top - p.dy, 0.0), p.dy - r.bottom);
+  return sqrt(dx * dx + dy * dy);
+}
+
+bool placementFits(
+  FurniturePlacement f, {
+  required double roomW,
+  required double roomH,
+  required List<Offset> walls,
+}) =>
+    fitsAt(f: f, tl: Offset(f.x, f.y), roomW: roomW, roomH: roomH, walls: walls);
+
+// Render clamp for legacy/round-tripped designs: keep valid placements,
+// settle the rest next to where they are — never drawn inside a wall.
+List<FurniturePlacement> clampAllPlacements(
+  List<FurniturePlacement> items, {
+  required double roomW,
+  required double roomH,
+  required List<Offset> walls,
+}) =>
+    [
+      for (final f in items)
+        placementFits(f, roomW: roomW, roomH: roomH, walls: walls)
+            ? f
+            : resolveDrop(f, roomW: roomW, roomH: roomH, walls: walls),
+    ];

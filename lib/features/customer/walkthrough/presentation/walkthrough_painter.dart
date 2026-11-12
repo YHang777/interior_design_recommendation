@@ -7,6 +7,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../models/room_design.dart';
+import '../../ar/data/glb_generator.dart' show FloorFinishType;
+import '../../ar/data/room_finishes.dart' show FinishSelection;
 import '../../scanner/data/furniture_catalog.dart';
 import '../../scanner/data/room_fit.dart';
 import 'walkthrough_controller.dart';
@@ -64,6 +66,7 @@ class WalkthroughPainter extends CustomPainter {
     required this.controller,
     this.ghost,
     this.sprites = const {},
+    this.finishes,
   });
 
   final WalkthroughController controller;
@@ -75,6 +78,10 @@ class WalkthroughPainter extends CustomPainter {
   /// imageAsset path → decoded photo, loaded by the screen. Missing entries
   /// fall back to an icon card (or a box when too close to project).
   final Map<String, ui.Image> sprites;
+
+  /// The design's matched finishes (AI material scan / planner). Null keeps
+  /// the classic cream look — showroom rooms and pre-finish designs.
+  final FinishSelection? finishes;
 
   static const eyeHeight = 150.0;
   static const wallHeight = 250.0;
@@ -457,7 +464,10 @@ class WalkthroughPainter extends CustomPainter {
     // ── Floor + grid ──
     final floorPath = polyPath(clipNear([for (final w in outline) toCam(w, 0.0)]));
     if (floorPath != null) {
-      canvas.drawPath(floorPath, Paint()..color = const Color(0xFFFFFBF5));
+      final floorBase = finishes == null
+          ? const Color(0xFFFFFBF5)
+          : Color(finishes!.floorColorArgb);
+      canvas.drawPath(floorPath, Paint()..color = floorBase);
       canvas.save();
       canvas.clipPath(floorPath);
       // Light pooling under the room centre, drawn before the grid so the
@@ -480,10 +490,14 @@ class WalkthroughPainter extends CustomPainter {
         );
       }
       final minor = Paint()
-        ..color = const Color(0xFFE8E4DB)
+        ..color = finishes == null
+            ? const Color(0xFFE8E4DB)
+            : Color.lerp(floorBase, Colors.black, 0.10)!
         ..strokeWidth = 0.6;
       final major = Paint()
-        ..color = const Color(0xFFD4CFC4)
+        ..color = finishes == null
+            ? const Color(0xFFD4CFC4)
+            : Color.lerp(floorBase, Colors.black, 0.18)!
         ..strokeWidth = 1;
       void worldLine(Offset a, Offset b, Paint paint) {
         final seg = clipSegment(toCam(a, 0.0), toCam(b, 0.0));
@@ -494,13 +508,40 @@ class WalkthroughPainter extends CustomPainter {
         canvas.drawLine(p1, p2, paint);
       }
 
-      for (var x = 0.0; x <= ctl.roomW; x += 50) {
-        worldLine(Offset(x, 0), Offset(x, ctl.roomH),
-            x % 100 == 0 ? major : minor);
-      }
-      for (var y = 0.0; y <= ctl.roomH; y += 50) {
-        worldLine(Offset(0, y), Offset(ctl.roomW, y),
-            y % 100 == 0 ? major : minor);
+      final finish = finishes;
+      if (finish == null) {
+        for (var x = 0.0; x <= ctl.roomW; x += 50) {
+          worldLine(Offset(x, 0), Offset(x, ctl.roomH),
+              x % 100 == 0 ? major : minor);
+        }
+        for (var y = 0.0; y <= ctl.roomH; y += 50) {
+          worldLine(Offset(0, y), Offset(ctl.roomW, y),
+              y % 100 == 0 ? major : minor);
+        }
+      } else {
+        // Finished floors trade the metric grid for their own seams.
+        switch (finish.floorType) {
+          case FloorFinishType.woodPlanks:
+            for (var y = 0.0; y <= ctl.roomH; y += 80) {
+              worldLine(Offset(0, y), Offset(ctl.roomW, y), major);
+            }
+          case FloorFinishType.parquet:
+            for (var x = 0.0; x <= ctl.roomW; x += 60) {
+              worldLine(Offset(x, 0), Offset(x, ctl.roomH), minor);
+            }
+            for (var y = 0.0; y <= ctl.roomH; y += 60) {
+              worldLine(Offset(0, y), Offset(ctl.roomW, y), minor);
+            }
+          case FloorFinishType.ceramicTiles:
+            for (var x = 0.0; x <= ctl.roomW; x += 100) {
+              worldLine(Offset(x, 0), Offset(x, ctl.roomH), major);
+            }
+            for (var y = 0.0; y <= ctl.roomH; y += 100) {
+              worldLine(Offset(0, y), Offset(ctl.roomW, y), major);
+            }
+          case FloorFinishType.cement:
+            break; // polished cement — no seams
+        }
       }
       // Contact shadow along the wall line — the inner half of this stroke
       // survives the clip and reads as the dark seam where floor meets wall.
@@ -527,7 +568,9 @@ class WalkthroughPainter extends CustomPainter {
     );
 
     // ── Walls (each segment as a quad, lit by orientation + floor AO) ──
-    const wallBase = Color(0xFFE9E3D6);
+    final wallBase = finishes == null
+        ? const Color(0xFFE9E3D6)
+        : Color(finishes!.wallColorArgb);
     for (var i = 0; i < outline.length; i++) {
       final a = outline[i];
       final b = outline[(i + 1) % outline.length];

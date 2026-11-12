@@ -401,6 +401,9 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   void initState() {
     super.initState();
     BootTrace.log('ar-screen: initState product=${widget.product != null}');
+    // The design's stored finishes (AI material scan / planner) open the
+    // finish overlays already matched; no design keeps the default look.
+    _selection = finishSelectionFrom(widget.design);
     _resolveProductModel();
     _checkArCore();
   }
@@ -1502,18 +1505,29 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     final cameraPos = cameraPose?.getTranslation();
 
     // Furniture between the camera and the tap (seat tops, counter slabs):
-    // refuse instead of sinking the item behind the real object.
+    // refuse instead of sinking the item behind the real object. Wall-kind
+    // quads block the same way — a tap into the gap below a misdetected
+    // furniture-wall reads the under-space floor as placeable, and the
+    // model lands inside the wall plane.
     final overlayMasks = _overlay.value?.masks ?? const <PlaneQuad>[];
-    if (cameraPos != null &&
-        overlayMasks.any((q) => segmentBlockedByQuad(
-              origin: cameraPos,
-              target: seed,
-              quad: q,
-            ))) {
-      BootTrace.log('ar-screen: refuse behind-furniture masks=${overlayMasks.length}');
-      _showMessage('That spot is behind furniture — tap an open area.',
-          color: AppColors.primaryLight);
-      return null;
+    final wallQuads = _wallZoneQuads;
+    if (cameraPos != null) {
+      final behindFurniture = overlayMasks
+          .any((q) => segmentBlockedByQuad(origin: cameraPos, target: seed, quad: q));
+      final behindWall = !behindFurniture &&
+          wallQuads
+              .any((q) => segmentBlockedByQuad(origin: cameraPos, target: seed, quad: q));
+      if (behindFurniture || behindWall) {
+        BootTrace.log('ar-screen: refuse behind-'
+            '${behindFurniture ? 'furniture' : 'wall'} '
+            'masks=${overlayMasks.length} walls=${wallQuads.length}');
+        _showMessage(
+            behindFurniture
+                ? 'That spot is behind furniture — tap an open area.'
+                : 'That spot is behind the wall — tap the open floor.',
+            color: AppColors.primaryLight);
+        return null;
+      }
     }
 
     // A floor tap grazing a detected object would hug its edge (the item
@@ -1529,6 +1543,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         point: seed,
         masks: overlayMasks,
         floorZones: _floorZoneQuads,
+        walls: wallQuads,
         cameraPos: cameraPos,
         clearanceM: 0.3,
         minDistanceM: ArPlacementPolicy.minPlacementDistanceM,
@@ -1591,6 +1606,26 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         t.y,
         t.z - cx * math.sin(yaw) + cz * math.cos(yaw),
       );
+      // A body crossing a wall-kind plane is stuck in it on landing —
+      // refuse with the specific reason before the generic floor gate.
+      final bodyWalls = isFinish ? const <PlaneQuad>[] : wallQuads;
+      if (footprintStraddlesWall(
+        center: center,
+        yaw: yaw,
+        widthM: footprintDims.widthM,
+        depthM: footprintDims.depthM,
+        walls: bodyWalls,
+      )) {
+        BootTrace.log('ar-screen: refuse wall-straddle walls=${bodyWalls.length} '
+            'w=${footprintDims.widthM.toStringAsFixed(2)} '
+            'd=${footprintDims.depthM.toStringAsFixed(2)} '
+            'center=(${center.x.toStringAsFixed(2)},'
+            '${center.z.toStringAsFixed(2)}) '
+            'yaw=${yaw.toStringAsFixed(2)}');
+        _showMessage('Too close to the wall — tap in front of it.',
+            color: AppColors.primaryLight);
+        return null;
+      }
       if (!footprintFitsInZones(
         center: center,
         yaw: yaw,
@@ -1599,6 +1634,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         floorZones: _floorZoneQuads,
         // Finishes are cut around objects, not refused by them.
         masks: isFinish ? const [] : overlayMasks,
+        walls: bodyWalls,
       )) {
         BootTrace.log(
             'ar-screen: refuse footprint zones=${_floorZoneQuads.length} '
@@ -1716,6 +1752,11 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   List<PlaneQuad> get _floorZoneQuads => [
         for (final q in _overlay.value?.quads ?? const <PlaneQuad>[])
           if (q.kind == PlaneQuadKind.floor) q,
+      ];
+
+  List<PlaneQuad> get _wallZoneQuads => [
+        for (final q in _overlay.value?.quads ?? const <PlaneQuad>[])
+          if (q.kind == PlaneQuadKind.wall) q,
       ];
 
   ARNode _buildNode(_BarEntry entry,

@@ -21,11 +21,38 @@ void main() {
       );
     });
 
-    test('falls back to the status mapping for a Tripo body', () {
-      const body = '{"code":1200,"message":"insufficient credit"}';
+    test('maps 402 to the out-of-credit sentence even without a hint', () {
+      const body = '{"code":1200,"message":"quota"}';
       expect(
         Tripo3DGenerator.describeHttpFailure(402, body),
         '3D generation is out of credit. Top up the Tripo account and tap Retry.',
+      );
+    });
+
+    test('reads the real reason out of a Tripo 403 (code 2010)', () {
+      const body =
+          '{"code":2010,"status":"error","message":"You don\'t have enough credit to create this task","suggestion":"Please purchase more credit","request_id":"20a56bd7"}';
+      expect(
+        Tripo3DGenerator.describeHttpFailure(403, body),
+        '3D generation is out of credit. Top up the Tripo account and tap Retry.',
+        reason: 'a 403 must not read as "not authorized" when the account '
+            'is simply empty — sellers retried five times into that wall',
+      );
+    });
+
+    test('a dead-key 403 still reads as not authorized', () {
+      const body = '{"code":4011,"status":"error","message":"invalid api key"}';
+      expect(
+        Tripo3DGenerator.describeHttpFailure(403, body),
+        '3D generation is not authorized right now. Try again later.',
+      );
+    });
+
+    test('a 403 with an unknown Tripo reason keeps the status sentence', () {
+      const body = '{"code":2099,"status":"error","message":"content rejected"}';
+      expect(
+        Tripo3DGenerator.describeHttpFailure(403, body),
+        '3D generation is not authorized right now. Try again later.',
       );
     });
 

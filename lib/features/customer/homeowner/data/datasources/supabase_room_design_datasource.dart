@@ -55,19 +55,36 @@ class SupabaseRoomDesignDatasource {
   }
 
   // PostgREST rejects unknown columns, so the model's camelCase toJson
-  // keys must be mapped to the table's snake_case columns. Walls live
-  // inside the furniture JSONB ({items, walls}) — the table has no walls
-  // column and anon cannot migrate the schema.
+  // keys must be mapped to the table's snake_case columns. Walls and the
+  // finish fields live inside the furniture JSONB ({items, walls, finishes})
+  // — the table has no columns for them and anon cannot migrate the schema.
   Map<String, dynamic> _toRow(Map<String, dynamic> data) {
+    final hasFinishes = data.containsKey('floorFinishType') ||
+        data.containsKey('floorFinishColor') ||
+        data.containsKey('wallFinishType') ||
+        data.containsKey('wallFinishColor');
     return {
       if (data.containsKey('name')) 'name': data['name'],
       if (data.containsKey('roomType')) 'room_type': data['roomType'],
       if (data.containsKey('widthCm')) 'width_cm': data['widthCm'],
       if (data.containsKey('heightCm')) 'height_cm': data['heightCm'],
-      if (data.containsKey('furniture') || data.containsKey('walls'))
+      if (data.containsKey('furniture') ||
+          data.containsKey('walls') ||
+          hasFinishes)
         'furniture': {
           'items': data['furniture'] ?? [],
           'walls': data['walls'] ?? [],
+          if (hasFinishes)
+            'finishes': {
+              if (data['floorFinishType'] != null)
+                'floorType': data['floorFinishType'],
+              if (data['floorFinishColor'] != null)
+                'floorColor': data['floorFinishColor'],
+              if (data['wallFinishType'] != null)
+                'wallType': data['wallFinishType'],
+              if (data['wallFinishColor'] != null)
+                'wallColor': data['wallFinishColor'],
+            },
         },
       if (data.containsKey('detectedItems'))
         'detected_items': data['detectedItems'],
