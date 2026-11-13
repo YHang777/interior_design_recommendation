@@ -43,7 +43,7 @@ const roomCatalog = [
       'assets/images/furniture_rug_modern.png', 2),
   RoomCatalogItem('Bookshelf', 'bookshelf', Icons.menu_book, 'storage', 108, 37,
       'assets/images/furniture_ph_wooden_display_shelves_01.png', 156),
-  // CC0 models from Poly Haven (polyhaven.com) — see assets/models/CREDITS.md.
+  // Models from Poly Haven and the Khronos glTF samples — see assets/models/CREDITS.md.
   RoomCatalogItem('Lounge Chair', 'lounge_chair', Icons.event_seat, 'seating', 101, 119,
       'assets/images/furniture_ph_mid_century_lounge_chair.png', 117),
   RoomCatalogItem('Accent Chair', 'accent_chair', Icons.chair_alt, 'seating', 82, 99,
@@ -64,6 +64,26 @@ const roomCatalog = [
       'assets/images/furniture_ph_vintage_wooden_drawer_01.png', 109),
   RoomCatalogItem('Office Desk', 'office_desk', Icons.desk, 'office', 200, 95,
       'assets/images/furniture_ph_metal_office_desk.png', 79),
+  RoomCatalogItem('Velvet Sofa', 'velvet_sofa', Icons.weekend, 'seating', 219, 102,
+      'assets/images/furniture_kh_glam_velvet_sofa.png', 79),
+  RoomCatalogItem('Velvet Chair', 'velvet_chair', Icons.chair, 'seating', 83, 57,
+      'assets/images/furniture_kh_sheen_chair.png', 69),
+  RoomCatalogItem('Round Dining Table', 'round_dining_table', Icons.table_restaurant, 'tables', 140, 140,
+      'assets/images/furniture_ph_round_wooden_table_01.png', 75),
+  RoomCatalogItem('Industrial Shelf', 'industrial_shelf', Icons.shelves, 'storage', 110, 50,
+      'assets/images/furniture_ph_steel_frame_shelves_01.png', 214),
+  RoomCatalogItem('Plant Stand', 'plant_stand', Icons.local_florist, 'decor', 38, 38,
+      'assets/images/furniture_ph_side_table_tall_01.png', 76),
+  RoomCatalogItem('Succulent Pot', 'succulent', Icons.spa, 'decor', 17, 18,
+      'assets/images/furniture_ph_potted_plant_04.png', 27),
+  RoomCatalogItem('Nightstand', 'nightstand', Icons.table_bar, 'bedroom', 57, 42,
+      'assets/images/furniture_ph_classicnightstand_01.png', 70),
+  RoomCatalogItem('Stove', 'stove', Icons.kitchen, 'kitchen', 50, 65,
+      'assets/images/furniture_ph_electric_stove.png', 86),
+  RoomCatalogItem('Storage Basket', 'basket', Icons.shopping_basket, 'decor', 38, 27,
+      'assets/images/furniture_ph_wicker_basket_02.png', 22),
+  RoomCatalogItem('Tall Plant', 'small_plant', Icons.local_florist, 'decor', 59, 63,
+      'assets/images/furniture_ph_potted_plant_01.png', 135),
 ];
 
 IconData iconForFurniture(String iconName) {

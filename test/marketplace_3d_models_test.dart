@@ -94,9 +94,10 @@ void main() {
   group('showroom furnishing', () {
     test('a matching marketplace GLB replaces the sofa; footprint kept', () {
       final room = showroomRooms.firstWhere((r) => r.name == 'Modern Living Room');
-      final sofa = room.design.furniture.firstWhere((f) => f.iconName == 'sofa');
-      expect(sofa.modelUrl, 'assets/models/tuxedo_sofa.glb',
-          reason: 'bundled variant is the default');
+      final sofa =
+          room.design.furniture.firstWhere((f) => f.iconName == 'velvet_sofa');
+      expect(sofa.modelUrl, isNull,
+          reason: 'the catalogue velvet sofa model is the default');
       final furnished = furnishWithMarketplace(room.design, [product()]);
       final s = furnished.furniture.firstWhere((f) => f.id == sofa.id);
       expect(s.modelUrl, 'https://cdn.example.com/sofa-bed.glb');
@@ -106,6 +107,17 @@ void main() {
       expect(s.height, sofa.height);
       final lamp = furnished.furniture.firstWhere((f) => f.iconName == 'floor_lamp');
       expect(lamp.modelUrl, isNull, reason: 'no lamp product — catalog model');
+    });
+
+    test('a marketplace sofa also replaces a bundled sofa variant', () {
+      final studio =
+          showroomRooms.firstWhere((r) => r.name == 'Minimalist Studio');
+      final sofa = studio.design.furniture.firstWhere((f) => f.iconName == 'sofa');
+      expect(sofa.modelUrl, 'assets/models/apartment_sofa.glb');
+      final s = furnishWithMarketplace(studio.design, [product()])
+          .furniture
+          .firstWhere((f) => f.id == sofa.id);
+      expect(s.modelUrl, 'https://cdn.example.com/sofa-bed.glb');
     });
 
     test('no ready products leaves the curated design untouched', () {

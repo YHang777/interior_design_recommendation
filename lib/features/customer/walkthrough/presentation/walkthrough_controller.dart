@@ -63,7 +63,12 @@ class WalkthroughController extends ChangeNotifier {
   // lets you leave it — otherwise the piece traps the camera.
   bool _furnitureBlocked(Offset p, Offset? escapeFrom) {
     for (final f in furniture) {
-      if (heightCmForFurniture(f.iconName) < walkOverHeightCm) continue;
+      // Raised pieces (wall art, pendant lamps, tabletop decor) are above
+      // the walker; rugs and other low pieces are stepped on.
+      if (f.isRaised) continue;
+      if ((f.heightCm ?? heightCmForFurniture(f.iconName)) < walkOverHeightCm) {
+        continue;
+      }
       final r = furnitureRect(f);
       if (escapeFrom != null && distToRect(escapeFrom, r) < walkerRadiusCm) {
         continue;

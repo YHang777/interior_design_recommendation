@@ -196,6 +196,66 @@ class ArFurnitureLibrary {
         widthMeters: 2.0,
         icon: Icons.desk,
         placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Velvet Sofa',
+        modelFile: 'kh_glam_velvet_sofa.glb',
+        widthMeters: 2.19,
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Velvet Chair',
+        modelFile: 'kh_sheen_chair.glb',
+        widthMeters: 0.83,
+        icon: Icons.chair,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Round Dining Table',
+        modelFile: 'ph_round_wooden_table_01.glb',
+        widthMeters: 1.4,
+        icon: Icons.table_restaurant,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Industrial Shelf',
+        modelFile: 'ph_steel_frame_shelves_01.glb',
+        widthMeters: 1.1,
+        icon: Icons.shelves,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Plant Stand',
+        modelFile: 'ph_side_table_tall_01.glb',
+        widthMeters: 0.38,
+        icon: Icons.local_florist,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Succulent Pot',
+        modelFile: 'ph_potted_plant_04.glb',
+        widthMeters: 0.17,
+        icon: Icons.spa,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Nightstand',
+        modelFile: 'ph_classicnightstand_01.glb',
+        widthMeters: 0.57,
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Stove',
+        modelFile: 'ph_electric_stove.glb',
+        widthMeters: 0.5,
+        icon: Icons.kitchen,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Storage Basket',
+        modelFile: 'ph_wicker_basket_02.glb',
+        widthMeters: 0.38,
+        icon: Icons.shopping_basket,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Tall Plant',
+        modelFile: 'ph_potted_plant_01.glb',
+        widthMeters: 0.59,
+        icon: Icons.local_florist,
+        placement: PlacementType.floor),
   ];
 
   static const ArFurnitureItem _fallback = ArFurnitureItem(
@@ -337,6 +397,66 @@ class ArFurnitureLibrary {
         modelFile: 'ph_metal_office_desk.glb',
         widthMeters: 2.0,
         icon: Icons.desk,
+        placement: PlacementType.floor),
+    'velvet_sofa': ArFurnitureItem(
+        name: 'Velvet Sofa',
+        modelFile: 'kh_glam_velvet_sofa.glb',
+        widthMeters: 2.19,
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
+    'velvet_chair': ArFurnitureItem(
+        name: 'Velvet Chair',
+        modelFile: 'kh_sheen_chair.glb',
+        widthMeters: 0.83,
+        icon: Icons.chair,
+        placement: PlacementType.floor),
+    'round_dining_table': ArFurnitureItem(
+        name: 'Round Dining Table',
+        modelFile: 'ph_round_wooden_table_01.glb',
+        widthMeters: 1.4,
+        icon: Icons.table_restaurant,
+        placement: PlacementType.floor),
+    'industrial_shelf': ArFurnitureItem(
+        name: 'Industrial Shelf',
+        modelFile: 'ph_steel_frame_shelves_01.glb',
+        widthMeters: 1.1,
+        icon: Icons.shelves,
+        placement: PlacementType.floor),
+    'plant_stand': ArFurnitureItem(
+        name: 'Plant Stand',
+        modelFile: 'ph_side_table_tall_01.glb',
+        widthMeters: 0.38,
+        icon: Icons.local_florist,
+        placement: PlacementType.floor),
+    'succulent': ArFurnitureItem(
+        name: 'Succulent Pot',
+        modelFile: 'ph_potted_plant_04.glb',
+        widthMeters: 0.17,
+        icon: Icons.spa,
+        placement: PlacementType.floor),
+    'nightstand': ArFurnitureItem(
+        name: 'Nightstand',
+        modelFile: 'ph_classicnightstand_01.glb',
+        widthMeters: 0.57,
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
+    'stove': ArFurnitureItem(
+        name: 'Stove',
+        modelFile: 'ph_electric_stove.glb',
+        widthMeters: 0.5,
+        icon: Icons.kitchen,
+        placement: PlacementType.floor),
+    'basket': ArFurnitureItem(
+        name: 'Storage Basket',
+        modelFile: 'ph_wicker_basket_02.glb',
+        widthMeters: 0.38,
+        icon: Icons.shopping_basket,
+        placement: PlacementType.floor),
+    'small_plant': ArFurnitureItem(
+        name: 'Tall Plant',
+        modelFile: 'ph_potted_plant_01.glb',
+        widthMeters: 0.59,
+        icon: Icons.local_florist,
         placement: PlacementType.floor),
   };
 

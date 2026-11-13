@@ -62,13 +62,17 @@ void main() {
     expect(b.minY, closeTo(0, 1e-6));
   });
 
-  test('cabinet generates at true catalog height', () async {
-    final src = await resolver().resolve(item('cabinet'));
+  test('floor lamp (no suitable bundled model) generates at catalog size',
+      () async {
+    final src = await resolver().resolve(item('floor_lamp'));
     expect(src.sourceType, 'file');
+    expect(src.isBundled, isFalse);
     final b = GlbBounds.fromGlbBytes(src.file!.readAsBytesSync());
-    expect(b.heightM, closeTo(1.8, 0.02), reason: '180 cm tall');
-    expect(b.widthM, closeTo(0.9, 0.02));
-    expect(b.depthM, closeTo(0.5, 0.02));
+    // The lamp generator tops out at 95% of the requested height (see
+    // glb_furniture_test); the 3D scene scales it to the full 160 cm.
+    expect(b.heightM, closeTo(1.6 * 0.95, 0.02));
+    expect(b.widthM, closeTo(0.25, 0.03));
+    expect(b.depthM, closeTo(0.25, 0.03));
   });
 
   test('an unknown icon generates instead of borrowing a bundled shape',

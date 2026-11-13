@@ -12,6 +12,7 @@ import 'package:interior_design_recommendation/features/customer/homeowner/data/
 import 'package:interior_design_recommendation/features/customer/homeowner/presentation/providers/design_providers.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/camera_rig.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/presentation/scene3d_view.dart';
+import 'package:interior_design_recommendation/features/customer/walkthrough/data/showroom_designs.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_controller.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_painter.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_scene.dart';
@@ -636,7 +637,12 @@ void main() {
       expect(find.text('Modern Living Room'), findsOneWidget);
     });
 
-    testWidgets('tapping a room walks it at the room center', (tester) async {
+    // The walker starts at the clear spot nearest the room centre — the
+    // controller's own spawn search, not a hard-coded point.
+    Offset livingSpawn() =>
+        WalkthroughController(design: showroomRooms.first.design).walker;
+
+    testWidgets('tapping a room walks it at its spawn point', (tester) async {
       await pumpShowroom(tester, overrides: standardOverrides());
 
       await tester.tap(find.text('Walk this room'));
@@ -644,7 +650,7 @@ void main() {
 
       expect(walkState(tester).debugInGallery as bool, isFalse);
       expect(walkState(tester).debugShowroomId, 'showroom-living');
-      expect(walkState(tester).debugWalker as Offset, const Offset(250, 200));
+      expect(walkState(tester).debugWalker as Offset, livingSpawn());
     });
 
     testWidgets('a showroom walk rides the 3D camera at its spawn',
@@ -655,9 +661,10 @@ void main() {
       await tester.pumpAndSettle();
 
       final pose = sceneState(tester).debugLastCamera as ScenePose;
-      expect(pose.eyeX, moreOrLessEquals(2.5, epsilon: 0.01));
+      final spawn = livingSpawn();
+      expect(pose.eyeX, moreOrLessEquals(spawn.dx / 100, epsilon: 0.01));
       expect(pose.eyeY, moreOrLessEquals(1.5, epsilon: 0.01));
-      expect(pose.eyeZ, moreOrLessEquals(2.0, epsilon: 0.01));
+      expect(pose.eyeZ, moreOrLessEquals(spawn.dy / 100, epsilon: 0.01));
     });
 
     testWidgets('back from a showroom walk returns to the gallery first',

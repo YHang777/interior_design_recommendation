@@ -19,8 +19,9 @@ RoomDesign furnishWithMarketplace(RoomDesign design, List<Product> market) {
     for (final f in design.furniture)
       () {
         Product? match;
+        final family = _familyOf(f.iconName);
         for (final p in ready) {
-          if (iconNameForProduct(p) == f.iconName) {
+          if (iconNameForProduct(p) == family) {
             match = p;
             break;
           }
@@ -39,3 +40,23 @@ RoomDesign furnishWithMarketplace(RoomDesign design, List<Product> market) {
   ];
   return changed ? design.copyWith(furniture: furniture) : design;
 }
+
+// Marketplace products are typed coarsely (sofa, armchair, …); catalogue
+// pieces are specific. A product may stand in for any piece of its family.
+const _families = <String, String>{
+  'velvet_sofa': 'sofa',
+  'chesterfield_sofa': 'sofa',
+  'lounge_chair': 'armchair',
+  'accent_chair': 'armchair',
+  'velvet_chair': 'armchair',
+  'dining_chair': 'armchair',
+  'round_coffee_table': 'coffee_table',
+  'round_dining_table': 'dining_table',
+  'office_desk': 'desk',
+  'chest_of_drawers': 'cabinet',
+  'nightstand': 'cabinet',
+  'industrial_shelf': 'bookshelf',
+  'small_plant': 'plant',
+};
+
+String _familyOf(String iconName) => _families[iconName] ?? iconName;

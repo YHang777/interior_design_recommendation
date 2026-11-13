@@ -153,6 +153,7 @@ bool isFloorCovering(FurniturePlacement f) =>
 // Two footprints share real floor (touching edges is fine).
 bool footprintsOverlap(FurniturePlacement a, FurniturePlacement b) {
   if (isFloorCovering(a) || isFloorCovering(b)) return false;
+  if (a.isRaised || b.isRaised) return false;
   final ra = furnitureRect(a).deflate(0.5);
   final rb = furnitureRect(b).deflate(0.5);
   return ra.overlaps(rb);

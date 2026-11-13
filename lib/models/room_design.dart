@@ -41,6 +41,9 @@ class FurniturePlacement {
   // True vertical size; null = the catalog height for [iconName].
   final double? heightCm;
   final String? imageUrl;
+  // Height of the piece's base above the floor: wall art, a pendant lamp,
+  // a vase on a table. Raised pieces never occupy floor space.
+  final double? elevationCm;
 
   const FurniturePlacement({
     required this.id,
@@ -56,7 +59,10 @@ class FurniturePlacement {
     this.modelUrl,
     this.heightCm,
     this.imageUrl,
+    this.elevationCm,
   });
+
+  bool get isRaised => (elevationCm ?? 0) > 0;
 
   FurniturePlacement copyWith({
     String? id,
@@ -73,6 +79,7 @@ class FurniturePlacement {
     String? modelUrl,
     double? heightCm,
     String? imageUrl,
+    double? elevationCm,
   }) {
     return FurniturePlacement(
       id: id ?? this.id,
@@ -88,6 +95,7 @@ class FurniturePlacement {
       modelUrl: modelUrl ?? this.modelUrl,
       heightCm: heightCm ?? this.heightCm,
       imageUrl: imageUrl ?? this.imageUrl,
+      elevationCm: elevationCm ?? this.elevationCm,
     );
   }
 
@@ -107,6 +115,7 @@ class FurniturePlacement {
     if (modelUrl != null) m['modelUrl'] = modelUrl;
     if (heightCm != null) m['heightCm'] = heightCm;
     if (imageUrl != null) m['imageUrl'] = imageUrl;
+    if (elevationCm != null) m['elevationCm'] = elevationCm;
     return m;
   }
 
@@ -129,6 +138,9 @@ class FurniturePlacement {
           ? (json['heightCm'] as num).toDouble()
           : null,
       imageUrl: json['imageUrl']?.toString(),
+      elevationCm: (json['elevationCm'] is num)
+          ? (json['elevationCm'] as num).toDouble()
+          : null,
     );
   }
 }

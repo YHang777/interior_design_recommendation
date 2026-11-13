@@ -55,11 +55,14 @@ void main() {
         cacheRootProvider: () async => cacheRoot,
       );
 
-  FurniturePlacement cabinet({double x = 100, double y = 200, double rotation = 0}) =>
+  // An icon with no catalog entry and no bundled model: the generator builds
+  // a plain box at exactly the placement's size, so the transform maths can
+  // be pinned without depending on which catalog pieces have real GLBs.
+  FurniturePlacement block({double x = 100, double y = 200, double rotation = 0}) =>
       FurniturePlacement(
         id: 'f1',
-        name: 'Cabinet',
-        iconName: 'cabinet',
+        name: 'Mystery Block',
+        iconName: 'mystery_block',
         x: x,
         y: y,
         width: 90,
@@ -152,7 +155,7 @@ void main() {
 
   test('furniture syncs add, update and remove by diff', () async {
     final bridge = makeBridge();
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
 
     final add = log.single;
     expect(add.method, 'addModel');
@@ -172,11 +175,11 @@ void main() {
     expect(scale[2], moreOrLessEquals(1.0, epsilon: 0.02));
 
     log.clear();
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(log, isEmpty, reason: 'an unchanged placement must not churn');
 
     log.clear();
-    await bridge.syncFurniture([cabinet(x: 150)]);
+    await bridge.syncFurniture([block(x: 150)]);
     expect(log.map((c) => c.method), ['updateModel']);
     final upd = argsOf(log.single);
     expect(upd.containsKey('source'), isFalse,
@@ -191,7 +194,7 @@ void main() {
 
   test('rotation turns the model the opposite of the plan angle', () async {
     final bridge = makeBridge();
-    await bridge.syncFurniture([cabinet(rotation: 90)]);
+    await bridge.syncFurniture([block(rotation: 90)]);
 
     final args = argsOf(log.single);
     expect(args['yawDeg'], -90);
@@ -203,13 +206,14 @@ void main() {
   test('models scale per-axis to fill the validated footprint', () async {
     final bridge = makeBridge();
     await bridge.syncFurniture([
+      // Floor lamp: still procedurally generated (25×25 cm, 160 cm tall).
       FurniturePlacement(
         id: 'f1',
-        name: 'Cabinet',
-        iconName: 'cabinet',
+        name: 'Floor Lamp',
+        iconName: 'floor_lamp',
         x: 0,
         y: 0,
-        width: 45,
+        width: 20,
         height: 100,
       ),
     ]);
@@ -222,14 +226,14 @@ void main() {
     final nat = GlbBounds.fromGlbBytes(
         File(args['source']! as String).readAsBytesSync());
     final scale = args['scale']! as List;
-    expect(scale[0], moreOrLessEquals(0.45 / nat.widthM, epsilon: 1e-6));
-    expect(scale[1], moreOrLessEquals(1.8 / nat.heightM, epsilon: 1e-6));
+    expect(scale[0], moreOrLessEquals(0.20 / nat.widthM, epsilon: 1e-6));
+    expect(scale[1], moreOrLessEquals(1.6 / nat.heightM, epsilon: 1e-6));
     expect(scale[2], moreOrLessEquals(1.0 / nat.depthM, epsilon: 1e-6));
     // Per-axis, not uniform: squashed in x, stretched in z.
     expect(scale[0], lessThan(scale[1]));
     expect(scale[2], greaterThan(scale[1]));
     // XZ-centered model: origin lands on the placement center.
-    expect(args['x'], moreOrLessEquals(0.225, epsilon: 0.02));
+    expect(args['x'], moreOrLessEquals(0.10, epsilon: 0.02));
     expect(args['z'], moreOrLessEquals(0.5, epsilon: 0.02));
   });
 
@@ -241,14 +245,14 @@ void main() {
         roomHCm: 500,
         floor: floor,
         wall: wall);
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     log.clear();
 
     await bridge.clearAll();
     expect(log.map((c) => c.method), ['clearModels']);
 
     log.clear();
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(log.map((c) => c.method), ['addModel']);
     await bridge.syncShell(
         wallsCm: const [],
@@ -292,7 +296,7 @@ void main() {
       controller: Scene3DController(viewId: 7),
       catalogResolver: _BrokenResolver(broken),
     );
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
 
     final add = log.where((c) => c.method == 'addModel').toList();
     expect(add, hasLength(1), reason: 'the piece must still reach the scene');
@@ -312,14 +316,14 @@ void main() {
     );
     await bridge.syncShell(
         wallsCm: const [], roomWCm: 400, roomHCm: 500, floor: floor, wall: wall);
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(log, isEmpty, reason: 'no view is bound yet — the pushes are dropped');
 
     bridge.controller.bindTo(7);
     log.clear();
     await bridge.syncShell(
         wallsCm: const [], roomWCm: 400, roomHCm: 500, floor: floor, wall: wall);
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(log.map((c) => c.method), ['addModel', 'addModel'],
         reason: 'dropped pushes must not read as already-synced');
   });
@@ -344,7 +348,7 @@ void main() {
     bridge.controller.bindTo(7);
     await bridge.syncShell(
         wallsCm: const [], roomWCm: 400, roomHCm: 500, floor: floor, wall: wall);
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(log.map((c) => c.method), ['addModel', 'addModel']);
 
     // The view is recreated (stage switch, remount) → a fresh empty native
@@ -355,7 +359,7 @@ void main() {
     expect(bound, 1);
     await bridge.syncShell(
         wallsCm: const [], roomWCm: 400, roomHCm: 500, floor: floor, wall: wall);
-    await bridge.syncFurniture([cabinet()]);
+    await bridge.syncFurniture([block()]);
     expect(otherLog.map((c) => c.method), ['addModel', 'addModel'],
         reason: 'the new view starts empty — everything must re-push');
   });

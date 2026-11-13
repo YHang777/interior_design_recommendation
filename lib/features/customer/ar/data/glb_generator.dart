@@ -93,10 +93,20 @@ int _mix(int a, int b, double t) {
 
 const int _kGrey = 0xFFA0A0A0;
 
+// glTF COLOR_0 is linear; palette values are sRGB. Writing them raw made the
+// renderer brighten everything (walnut walls came out light tan, orange brick
+// pale pink), so convert with the standard sRGB transfer curve.
+double _srgbToLinear(int c8) {
+  final c = c8 / 255.0;
+  return c <= 0.04045
+      ? c / 12.92
+      : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+}
+
 List<double> _rgb(int argb) => [
-      ((argb >> 16) & 0xFF) / 255.0,
-      ((argb >> 8) & 0xFF) / 255.0,
-      (argb & 0xFF) / 255.0,
+      _srgbToLinear((argb >> 16) & 0xFF),
+      _srgbToLinear((argb >> 8) & 0xFF),
+      _srgbToLinear(argb & 0xFF),
     ];
 
 // num.clamp throws when lo > hi and would crash the generator on absurdly

@@ -177,6 +177,7 @@ double? rayBoxHit(
   required double halfWidthM,
   required double halfDepthM,
   required double yawRad,
+  double bottomYM = 0,
 }) {
   final c = math.cos(-yawRad);
   final s = math.sin(-yawRad);
@@ -204,7 +205,7 @@ double? rayBoxHit(
   }
 
   if (!slabs(lox, ldx, -halfWidthM, halfWidthM)) return null;
-  if (!slabs(ray.oy, ray.dy, 0, topYM)) return null;
+  if (!slabs(ray.oy, ray.dy, bottomYM, topYM)) return null;
   if (!slabs(loz, ldz, -halfDepthM, halfDepthM)) return null;
   return tMin;
 }
@@ -225,7 +226,8 @@ String? pickPlacementId(
       ray,
       centerXCm: f.x + footprintW(f) / 2,
       centerZCm: f.y + footprintH(f) / 2,
-      topYM: heightMOf(f),
+      bottomYM: (f.elevationCm ?? 0) / 100,
+      topYM: (f.elevationCm ?? 0) / 100 + heightMOf(f),
       halfWidthM: f.width / 200,
       halfDepthM: f.height / 200,
       yawRad: -f.rotation * math.pi / 180.0,

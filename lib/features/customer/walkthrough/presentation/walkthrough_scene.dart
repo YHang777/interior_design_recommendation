@@ -115,7 +115,7 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
         '${c.interiorWalls.map((ch) => ch.map((p) => '${p.dx},${p.dy}').join(';')).join('|')}#'
         '${sel.floorType},${sel.floorColorArgb},${sel.floorSizeM}#'
         '${sel.wallType},${sel.wallColorArgb}#'
-        '${c.furniture.map((f) => '${f.id}:${f.x},${f.y},${f.rotation},${f.width},${f.height}').join('|')}';
+        '${c.furniture.map((f) => '${f.id}:${f.x},${f.y},${f.rotation},${f.width},${f.height},${f.elevationCm},${f.heightCm},${f.modelUrl}').join('|')}';
     if (!force && sig == _sig) return;
     _sig = sig;
     _bridge.syncShell(

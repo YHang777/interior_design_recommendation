@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/planner_scene_bridge.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/room_fit.dart';
+import 'package:interior_design_recommendation/features/customer/scanner/data/room_shell.dart';
 import 'package:interior_design_recommendation/features/customer/walkthrough/presentation/walkthrough_controller.dart';
 import 'package:interior_design_recommendation/models/room_design.dart';
 
@@ -124,6 +125,42 @@ void main() {
     test('designs without interior walls keep their JSON shape', () {
       expect(_design(interior: const []).toJson().containsKey('interiorWalls'),
           isFalse);
+    });
+  });
+
+  group('dollhouse cutaway hides art on cut walls', () {
+    final shell = ShellGeometry(
+        ringCm: shellRing(wallsCm: const [], roomWCm: 400, roomHCm: 500));
+    FurniturePlacement art(String id, double x, double y,
+            {double elev = 175, double h = 32, double d = 4.7}) =>
+        FurniturePlacement(
+            id: id,
+            name: id,
+            iconName: 'decor',
+            x: x,
+            y: y,
+            width: 32,
+            height: d,
+            heightCm: h,
+            elevationCm: elev);
+
+    test('a clock on the cut north wall is hidden; the rest stays', () {
+      // Camera north of the room → the north wall (y = 0) is cut.
+      final mask = cutawayMask(shell, const Offset(200, -600));
+      final northClock = art('north', 184, 0);
+      final southClock = art('south', 184, 495.3);
+      final vase = art('vase', 190, 240, elev: 75, h: 40, d: 20);
+      final lowArt = art('low', 100, 0, elev: 40, h: 50);
+      final out = piecesVisibleWithCutaway(
+          [northClock, southClock, vase, lowArt],
+          shell: shell, mask: mask);
+      expect(out.map((f) => f.id), ['south', 'vase', 'low'],
+          reason: 'only raised art reaching above the cut height disappears');
+    });
+
+    test('no mask (first-person walk) hides nothing', () {
+      final items = [art('north', 184, 0)];
+      expect(piecesVisibleWithCutaway(items, shell: shell, mask: null), items);
     });
   });
 

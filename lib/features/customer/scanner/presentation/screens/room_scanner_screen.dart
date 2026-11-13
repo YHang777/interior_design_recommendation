@@ -2879,8 +2879,9 @@ class _SelectionBoxPainter extends CustomPainter {
     final fh = footprintH(item) / 100;
     final x0 = item.x / 100;
     final z0 = item.y / 100;
+    final base = (item.elevationCm ?? 0) / 100;
     final pts = <Offset?>[
-      for (final y in [0.0, heightM])
+      for (final y in [base, base + heightM])
         for (final xz in [
           [x0, z0],
           [x0 + fw, z0],

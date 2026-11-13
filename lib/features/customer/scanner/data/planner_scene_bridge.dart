@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data' show Uint8List;
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:flutter/material.dart' show Icons, Offset;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
@@ -20,8 +20,10 @@ import '../../ar/data/glb_generator.dart'
         generateRoomShellGlb;
 import 'camera_rig.dart' show ScenePose;
 import 'furniture_catalog.dart';
-import 'room_fit.dart' show footprintH, footprintW, interiorWallSegments;
-import 'room_shell.dart' show ShellGeometry, cutawayMask, shellRing;
+import 'room_fit.dart'
+    show distToSegment, footprintH, footprintW, furnitureRect, interiorWallSegments;
+import 'room_shell.dart'
+    show ShellGeometry, cutawayMask, kShellCutawayHeightCm, shellRing;
 import 'scene3d_controller.dart';
 
 // Keeps a Scene3D scene in lockstep with the planner state: one shell node
@@ -112,6 +114,11 @@ class PlannerSceneBridge {
     // The cutaway mask is a discrete bitstring in the key: the camera may move
     // freely inside one mask without regenerating the shell.
     final mask = cutawayCameraCm == null ? null : cutawayMask(shell, cutawayCameraCm);
+    // Wall-hung pieces follow their wall: a newly cut wall hides its art.
+    final cutChanged = !listEquals(mask, _cutMask);
+    _cutShell = shell;
+    _cutMask = mask;
+    if (cutChanged && _lastItems.isNotEmpty) syncFurniture(_lastItems);
     final maskKey =
         mask == null ? '-' : mask.map((cut) => cut ? '1' : '0').join();
     final key = _fnv1a([
@@ -202,6 +209,8 @@ class PlannerSceneBridge {
   // ── furniture ──
 
   List<FurniturePlacement> _lastItems = const [];
+  ShellGeometry? _cutShell;
+  List<bool>? _cutMask;
   final Set<String> _pendingRefs = {};
 
   Future<void> _syncChain = Future<void>.value();
@@ -211,7 +220,8 @@ class PlannerSceneBridge {
   Future<void> syncFurniture(List<FurniturePlacement> items) {
     _lastItems = List.of(items);
     final snapshot = _lastItems;
-    final next = _syncChain.then((_) => _syncFurnitureNow(snapshot));
+    final next = _syncChain.then((_) => _syncFurnitureNow(
+        piecesVisibleWithCutaway(snapshot, shell: _cutShell, mask: _cutMask)));
     _syncChain = next.catchError((_) {});
     return next;
   }
@@ -330,7 +340,7 @@ class PlannerSceneBridge {
       source: src.source,
       fromAsset: src.sourceType == 'asset',
       xM: cxM - rx,
-      yM: 0,
+      yM: (f.elevationCm ?? 0) / 100,
       zM: czM - rz,
       yawDeg: yawDeg,
       scaleX: sx,
@@ -457,4 +467,34 @@ List<DraftWall> interiorWallDrafts({
     out.add(DraftWall(a, b, cut: cut));
   }
   return out;
+}
+
+// Dollhouse cutaway: a wall between the camera and the room is cut to
+// kShellCutawayHeightCm, so art hung on it above that height would float in
+// mid-air. Such pieces are left out until the camera moves round and the wall
+// stands full height again. Without a mask (first-person walk) nothing is cut.
+List<FurniturePlacement> piecesVisibleWithCutaway(
+  List<FurniturePlacement> items, {
+  ShellGeometry? shell,
+  List<bool>? mask,
+  double cutHeightCm = kShellCutawayHeightCm,
+}) {
+  if (shell == null || mask == null || !mask.contains(true)) return items;
+  final segs = shell.wallSegments;
+  bool hidden(FurniturePlacement f) {
+    if (!f.isRaised) return false;
+    final top = (f.elevationCm ?? 0) + (f.heightCm ?? 0);
+    if (top <= cutHeightCm) return false;
+    final c = furnitureRect(f).center;
+    for (var i = 0; i < segs.length && i < mask.length; i++) {
+      if (!mask[i]) continue;
+      if (distToSegment(c, segs[i].a, segs[i].b) < 8) return true;
+    }
+    return false;
+  }
+
+  return [
+    for (final f in items)
+      if (!hidden(f)) f,
+  ];
 }
