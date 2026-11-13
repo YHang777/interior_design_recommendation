@@ -10,6 +10,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/user_errors.dart';
+import '../../../../../core/utils/formatters.dart';
+import '../../../../../models/product.dart';
 import '../../../../../models/room_design.dart';
 import '../../../../../services/material_scan_service.dart';
 import '../../../../../shared/widgets/app_feedback.dart';
@@ -96,6 +98,12 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   List<FurniturePlacement> get debugFurniture => List.of(_furniture);
 
   @visibleForTesting
+  double get debugCameraDistanceM => _rig.distanceM;
+
+  @visibleForTesting
+  void debugAddFromCatalog(RoomCatalogItem item) => _addFromCatalog(item);
+
+  @visibleForTesting
   int debugAutoPlace(List<String> labels) {
     _found
       ..clear()
@@ -104,8 +112,18 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   }
 
   final List<Offset> _walls = [];
+  // Interior wall chains drawn in wall mode; the room itself never changes.
+  final List<List<Offset>> _interior = [];
+  bool _chainOpen = false;
   final ValueNotifier<int> _wallsRev = ValueNotifier(0);
   bool _wallMode = false;
+  bool _sceneExpanded = false;
+
+  // Timestamp + counter: two adds in the same microsecond used to share an
+  // id, and the overlap check skips a piece's own id.
+  int _pieceSeq = 0;
+  String _nextPieceId(String prefix) =>
+      '$prefix-${DateTime.now().microsecondsSinceEpoch}-${_pieceSeq++}';
   String _catalogCategory = 'All';
 
   // ── native 3D scene ──
@@ -161,12 +179,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         roomHCm: _roomH,
         floor: _floorFinish,
         wall: _wallFinish,
-        cutawayCameraCm: cam);
+        cutawayCameraCm: cam,
+        interiorWallsCm: _interior);
   }
 
   void _syncFurnitureNow() {
     _furniture = clampAllPlacements(_furniture,
-        roomW: _roomW, roomH: _roomH, walls: _walls);
+        roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior);
     _bridge.syncFurniture(_furniture);
   }
 
@@ -255,6 +274,10 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     super.initState();
     _furniture = widget.existingDesign?.furniture.toList() ?? [];
     _walls.addAll(widget.existingDesign?.walls ?? const []);
+    _interior.addAll([
+      for (final c in widget.existingDesign?.interiorWalls ?? const <List<Offset>>[])
+        List<Offset>.of(c),
+    ]);
     if (widget.existingDesign != null) {
       _roomW = widget.existingDesign!.widthCm;
       _roomH = widget.existingDesign!.heightCm;
@@ -276,7 +299,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     // Render clamp: legacy/round-tripped placements settle instead of
     // drawing inside a wall.
     _furniture = clampAllPlacements(_furniture,
-        roomW: _roomW, roomH: _roomH, walls: _walls);
+        roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior);
     _rig = OrbitRig.frameRoom(roomWCm: _roomW, roomHCm: _roomH);
     _reframeRig();
 
@@ -304,6 +327,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     if (placements.isEmpty) return;
     var slot = _furniture.length;
     final added = <FurniturePlacement>[];
+    final tooBig = <String>[];
     for (final p in placements) {
       final maxX = max(1.0, _roomW - p.width);
       final maxY = max(1.0, _roomH - p.height);
@@ -313,15 +337,29 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       final y = (40.0 + ((slot ~/ 3) % 3) * 130.0)
           .clamp(5.0, max(5.0, maxY - 5))
           .toDouble();
-      added.add(p.copyWith(x: x, y: y));
+      // Wall- and piece-aware: settle on clear floor; a piece bigger than
+      // the room is reported instead of being parked inside a wall.
+      final fitted = fitInRoom(p.copyWith(x: x, y: y),
+          roomW: _roomW,
+          roomH: _roomH,
+          walls: _walls,
+          interiorWalls: _interior,
+          others: [..._furniture, ...added]);
+      if (fitted == null) {
+        tooBig.add(p.name);
+      } else {
+        added.add(fitted);
+      }
       slot++;
     }
     if (!mounted) return;
-    // Wall-aware: grid drops may land on a scanned outline — clamp settles
-    // them instead of letting chat furniture sit inside a wall.
-    setState(() => _furniture = clampAllPlacements([..._furniture, ...added],
-        roomW: _roomW, roomH: _roomH, walls: _walls));
+    setState(() => _furniture = [..._furniture, ...added]);
     _bridge.syncFurniture(_furniture);
+    if (tooBig.isNotEmpty) {
+      showAppSnackbar(
+          context, '${tooBig.join(', ')} is too big for this room.',
+          isError: true);
+    }
   }
 
   Future<void> _setupCam() async {
@@ -674,7 +712,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         height: cat.defaultHeight,
         imageAsset: cat.imageAsset,
       );
-      item = _resolveDrop(item);
+      final fitted = fitInRoom(item,
+          roomW: _roomW,
+          roomH: _roomH,
+          walls: _walls,
+          interiorWalls: _interior,
+          others: [..._furniture, ...items]);
+      if (fitted == null) continue; // bigger than the room — never parked in a wall
+      item = fitted;
       items.add(item);
       cursorX += cat.defaultWidth + 25;
       rowH = max(rowH, cat.defaultHeight);
@@ -709,7 +754,34 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   double _footprintH(FurniturePlacement f) => footprintH(f);
 
   FurniturePlacement _resolveDrop(FurniturePlacement f) => resolveDrop(f,
-      roomW: _roomW, roomH: _roomH, walls: _walls);
+      roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior, others: _furniture);
+
+  FurniturePlacement? _fitInRoom(FurniturePlacement f) => fitInRoom(f,
+      roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior, others: _furniture);
+
+  String _sizeLabel(FurniturePlacement f) =>
+      '${f.width.toInt()}×${f.height.toInt()} cm';
+
+  // After the room shrinks or the outline changes: say which pieces can no
+  // longer fit anywhere (once per distinct set — no snackbar spam).
+  String _lastUnfitSig = '';
+
+  void _warnUnfit() {
+    final unfit = unfitPlacements(_furniture,
+        roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior);
+    final sig = unfit.map((f) => f.id).join(',');
+    if (sig == _lastUnfitSig) return;
+    _lastUnfitSig = sig;
+    if (unfit.isEmpty || !mounted) return;
+    final names = unfit.map((f) => f.name).toSet().join(', ');
+    showAppSnackbar(
+      context,
+      unfit.length == 1
+          ? '$names no longer fits this room. Resize or remove it.'
+          : '${unfit.length} pieces no longer fit this room ($names).',
+      isError: true,
+    );
+  }
 
   // ─── 3D scene interactions (screen ↔ floor plane) ───
 
@@ -736,8 +808,29 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         sqrt(rect.width * rect.width + rect.height * rect.height) / 100.0;
     _rig.targetXm = rect.center.dx / 100;
     _rig.targetZm = rect.center.dy / 100;
-    _rig.distanceM = max(2.2, diag * 0.85);
-    _rig.maxDistanceM = max(6.0, diag * 2.5);
+    final aspect = _viewport.height > 0 ? _viewport.width / _viewport.height : 0.0;
+    _rig.distanceM = aspect > 0
+        ? fitRoomDistanceM(
+            roomWCm: rect.width,
+            roomHCm: rect.height,
+            fovDeg: _rig.fovDeg,
+            aspect: aspect)
+        : max(2.2, diag * 0.85);
+    _rig.maxDistanceM = max(max(6.0, diag * 2.5), _rig.distanceM * 1.6);
+  }
+
+  // First real layout: reframe once for the true viewport aspect. Later size
+  // changes (selection bar, fullscreen) keep the user's camera.
+  bool _framedForViewport = false;
+
+  void _frameForViewportOnce() {
+    if (_framedForViewport || _viewport.isEmpty) return;
+    _framedForViewport = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _reframeRig();
+      _pushCamera();
+    });
   }
 
   void _pushCamera() {
@@ -763,13 +856,10 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     if (_wallMode) {
       final p = floorPointAt(_rig.pose, _viewport, local);
       if (p == null) return;
-      final clamped = Offset(
+      _addInteriorCorner(Offset(
         p.dx.clamp(0.0, _roomW).toDouble(),
         p.dy.clamp(0.0, _roomH).toDouble(),
-      );
-      if (_walls.any((w) => (w - clamped).distance < 12)) return;
-      setState(() => _walls.add(clamped));
-      _touchWalls();
+      ));
       return;
     }
     final id = _pickAt(local);
@@ -781,7 +871,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   void _onSceneLongPress(Offset local) {
     if (_wallMode) {
-      _clearWalls();
+      _clearInteriorWalls();
       return;
     }
     final id = _pickAt(local);
@@ -859,9 +949,52 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   // Wall-mode corner handles: projected chips, draggable in place. Wall
   // editing lives behind wall mode so a furniture drag can never grab one.
   List<Widget> _wallHandles() {
-    if (!_wallMode || _walls.isEmpty) return const [];
+    if (!_wallMode) return const [];
     final pose = _rig.pose;
     return [
+      for (var c = 0; c < _interior.length; c++)
+        for (var i = 0; i < _interior[c].length; i++)
+          Builder(builder: (ctx) {
+            final pt = _interior[c][i];
+            final pos =
+                projectWorldPoint(pose, _viewport, pt.dx / 100, 0, pt.dy / 100);
+            if (pos == null) return const SizedBox.shrink();
+            return Positioned(
+              left: pos.dx - 14,
+              top: pos.dy - 14,
+              child: GestureDetector(
+                key: ValueKey('interior-handle-$c-$i'),
+                onPanUpdate: (d) {
+                  final p = floorPointAt(
+                      _rig.pose, _viewport, _sceneLocal(d.globalPosition));
+                  if (p == null) return;
+                  setState(() {
+                    _interior[c][i] = Offset(
+                      p.dx.clamp(0.0, _roomW).toDouble(),
+                      p.dy.clamp(0.0, _roomH).toDouble(),
+                    );
+                  });
+                  _touchWalls();
+                },
+                onPanEnd: (_) => _syncFurnitureNow(),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.accent, width: 3),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+      if (_walls.length >= 3) ...[
       for (var i = 0; i < _walls.length; i++)
         Builder(
           builder: (ctx) {
@@ -903,6 +1036,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             );
           },
         ),
+      ],
     ];
   }
 
@@ -941,26 +1075,62 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         (f.y + _footprintH(f) / 2) / 100,
       );
 
-  void _clearWalls() {
-    if (_walls.isEmpty) return;
-    final snapshot = List<Offset>.of(_walls);
+  // Each tap extends the open chain with a real wall (the first tap of a
+  // chain is a post); "Finish wall" closes it so the next tap starts a new,
+  // separate wall. Pieces the new wall cuts through settle beside it.
+  void _addInteriorCorner(Offset p) {
+    if (_chainOpen && _interior.isNotEmpty) {
+      final chain = _interior.last;
+      if ((chain.last - p).distance < 12) return;
+      setState(() => chain.add(p));
+    } else {
+      setState(() {
+        _interior.add([p]);
+        _chainOpen = true;
+      });
+    }
+    _touchWalls();
+    _syncFurnitureNow();
+  }
+
+  void _finishInteriorWall() {
+    if (!_chainOpen) return;
     setState(() {
-      _walls.clear();
+      _chainOpen = false;
+      // A chain that never got a second corner is a stray post - drop it.
+      if (_interior.isNotEmpty && _interior.last.length < 2) {
+        _interior.removeLast();
+      }
+    });
+    _touchWalls();
+  }
+
+  void _clearInteriorWalls() {
+    if (_interior.isEmpty) return;
+    final snapshot = [for (final c in _interior) List<Offset>.of(c)];
+    setState(() {
+      _interior.clear();
+      _chainOpen = false;
     });
     _touchWalls();
     if (!mounted) return;
     showAppSnackbar(
       context,
-      'Walls cleared',
+      'Interior walls cleared',
       duration: const Duration(seconds: 4),
       actionLabel: 'Undo',
       onAction: () {
-        if (!mounted || _walls.isNotEmpty) return;
-        setState(() => _walls.addAll(snapshot));
+        if (!mounted || _interior.isNotEmpty) return;
+        setState(() => _interior.addAll(snapshot));
         _touchWalls();
+        _syncFurnitureNow();
       },
     );
   }
+
+  @visibleForTesting
+  List<List<Offset>> get debugInteriorWalls =>
+      [for (final c in _interior) List.of(c)];
 
   // ─── Furniture actions ───
 
@@ -1016,13 +1186,16 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     if (ok != true || !mounted) return;
     final furniture = _furniture.toList();
     final walls = List<Offset>.of(_walls);
+    final interior = [for (final c in _interior) List<Offset>.of(c)];
     setState(() {
       _furniture.clear();
       _walls.clear();
+      _interior.clear();
+      _chainOpen = false;
       _selectedIdx = -1;
     });
     _bridge.syncFurniture(_furniture);
-    if (walls.isNotEmpty) _touchWalls();
+    if (walls.isNotEmpty || interior.isNotEmpty) _touchWalls();
     showAppSnackbar(
       context,
       'Plan cleared',
@@ -1033,21 +1206,28 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         setState(() {
           _furniture = furniture;
           _walls.addAll(walls);
+          _interior.addAll(interior);
         });
         _bridge.syncFurniture(_furniture);
-        if (walls.isNotEmpty) _touchWalls();
+        if (walls.isNotEmpty || interior.isNotEmpty) _touchWalls();
       },
     );
   }
 
   void _rotateSelected() {
     if (_selectedIdx < 0 || _selectedIdx >= _furniture.length) return;
-    setState(() {
-      final f = _furniture[_selectedIdx];
-      // Swapping the footprint can push the piece into a wall — settle.
-      _furniture[_selectedIdx] =
-          _resolveDrop(f.copyWith(rotation: (f.rotation + 90) % 360));
-    });
+    final f = _furniture[_selectedIdx];
+    // Swapping the footprint can push the piece into a wall — settle, and
+    // refuse the turn when the turned piece fits nowhere.
+    final turned =
+        _resolveDrop(f.copyWith(rotation: (f.rotation + 90) % 360));
+    if (!placementFits(turned,
+        roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior)) {
+      showAppSnackbar(context, 'No room to turn ${f.name} here.',
+          isError: true);
+      return;
+    }
+    setState(() => _furniture[_selectedIdx] = turned);
     _bridge.syncFurniture(_furniture);
   }
 
@@ -1077,8 +1257,19 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
     );
     if (result == null || !mounted) return;
     if (_selectedIdx < 0 || _selectedIdx >= _furniture.length) return;
-    _commitFurniture(
-        _furniture[_selectedIdx].copyWith(width: result.w, height: result.h));
+    final resized =
+        _furniture[_selectedIdx].copyWith(width: result.w, height: result.h);
+    final fitted = _fitInRoom(resized);
+    if (fitted == null) {
+      showAppSnackbar(
+          context,
+          '${resized.name} at ${_sizeLabel(resized)} is bigger than this '
+          'room (${_roomW.toInt()}×${_roomH.toInt()} cm).',
+          isError: true);
+      return;
+    }
+    setState(() => _furniture[_selectedIdx] = fitted);
+    _bridge.syncFurniture(_furniture);
   }
 
   void _openDimensionEdit() {
@@ -1095,6 +1286,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       if (h != null && h > 50) _roomH = h;
       _isEditingDimensions = false;
     });
+    _warnUnfit();
     _touchWalls();
     _syncFurnitureNow();
     _reframeRig();
@@ -1112,7 +1304,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   void _addFromCatalog(_Cat cat) {
     final id =
-        DateTime.now().microsecondsSinceEpoch.toString();
+        _nextPieceId('cat');
     final maxX = max(1, (_roomW - cat.defaultWidth).toInt());
     final maxY = max(1, (_roomH - cat.defaultHeight).toInt());
     var x = ((20 + _furniture.length * 30) % maxX)
@@ -1133,8 +1325,22 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       height: cat.defaultHeight,
       imageAsset: cat.imageAsset,
     );
-    item = _resolveDrop(item);
-    setState(() => _furniture.add(item));
+    // Refuse pieces bigger than the room (either way round) instead of
+    // parking them through a wall; otherwise land on clear floor and select
+    // the new piece so it is easy to spot.
+    final fitted = _fitInRoom(item);
+    if (fitted == null) {
+      showAppSnackbar(
+          context,
+          '${item.name} (${_sizeLabel(item)}) is bigger than this room '
+          '(${_roomW.toInt()}×${_roomH.toInt()} cm).',
+          isError: true);
+      return;
+    }
+    setState(() {
+      _furniture.add(fitted);
+      _selectedIdx = _furniture.length - 1;
+    });
     _bridge.syncFurniture(_furniture);
   }
 
@@ -1162,6 +1368,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         heightCm: _roomH,
         furniture: List.of(_furniture),
         walls: List.of(_walls),
+        interiorWalls: [for (final c in _interior) List.of(c)],
         detectedItems: _found.map((f) => f.label).toList(),
         floorFinishType: _floorFinishType,
         floorFinishColor: _floorFinishColor,
@@ -1185,10 +1392,14 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       _walls
         ..clear()
         ..addAll(d.walls);
+      _interior
+        ..clear()
+        ..addAll([for (final c in d.interiorWalls) List.of(c)]);
+      _chainOpen = false;
       // Render clamp: round-tripped placements settle instead of drawing
       // inside a wall.
       _furniture = clampAllPlacements(List.of(d.furniture),
-          roomW: _roomW, roomH: _roomH, walls: _walls);
+          roomW: _roomW, roomH: _roomH, walls: _walls, interiorWalls: _interior);
       _floorFinishType = d.floorFinishType;
       _floorFinishColor = d.floorFinishColor;
       _wallFinishType = d.wallFinishType;
@@ -1254,6 +1465,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       heightCm: _roomH,
       furniture: _furniture,
       walls: List.of(_walls),
+      interiorWalls: [for (final c in _interior) List.of(c)],
       detectedItems: _found.map((f) => f.label).toList(),
       floorFinishType: _floorFinishType,
       floorFinishColor: _floorFinishColor,
@@ -1650,10 +1862,31 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
   // ─── Floor plan editor ───
   Widget _planEditor() {
+    // Short screens (or large text) can't fit the fixed panels plus a usable
+    // 3D view. The scene always keeps the leftover space (and its gestures —
+    // a scrolling page stole wall-handle drags); only the bottom panels
+    // scroll, capped at half the height, and the preset chips step aside.
+    return LayoutBuilder(builder: (context, constraints) {
+      final ts = MediaQuery.textScalerOf(context).scale(1);
+      final compact = !_sceneExpanded &&
+          constraints.maxHeight.isFinite &&
+          constraints.maxHeight < 600 * ts;
+      return _planEditorColumn(
+          compact: compact,
+          bottomMax: constraints.maxHeight.isFinite
+              ? constraints.maxHeight * 0.5
+              : double.infinity);
+    });
+  }
+
+  Widget _planEditorColumn({required bool compact, required double bottomMax}) {
     final bottomClearance = MediaQuery.paddingOf(context).bottom + 8;
     return Column(
       children: [
-        if (_furniture.isEmpty && widget.existingDesign == null)
+        if (!compact &&
+            !_sceneExpanded &&
+            _furniture.isEmpty &&
+            widget.existingDesign == null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             color: AppColors.surface,
@@ -1695,6 +1928,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             _roomW = p.$2.toDouble();
                             _roomH = p.$3.toDouble();
                           });
+                          _warnUnfit();
                           _touchWalls();
                           _syncFurnitureNow();
                           _reframeRig();
@@ -1735,10 +1969,13 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
 
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: _sceneExpanded
+                ? const EdgeInsets.fromLTRB(6, 4, 6, 6)
+                : const EdgeInsets.all(16),
             child: LayoutBuilder(
               builder: (ctx, constraints) {
                 _viewport = constraints.biggest;
+                _frameForViewportOnce();
                 return Stack(
                   key: _sceneKey,
                   children: [
@@ -1827,6 +2064,11 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       right: 0,
                       child: _cameraResetButton(),
                     ),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: _zoomControls(),
+                    ),
                   ],
                 );
               },
@@ -1834,6 +2076,10 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           ),
         ),
 
+        _BottomPanels(
+          compact: compact,
+          maxHeight: bottomMax,
+          children: [
         if (_selectedIdx >= 0 &&
             _selectedIdx < _furniture.length)
           Container(
@@ -1918,8 +2164,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             ),
           ),
 
-        _catalogPanel(),
+        if (!_sceneExpanded) _catalogPanel(),
 
+        if (!_sceneExpanded)
         Container(
           padding:
               const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -2033,15 +2280,19 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                     ),
                   ),
                   GestureDetector(
-                    onLongPress: _walls.isEmpty ? null : _clearWalls,
+                    onLongPress:
+                        _interior.isEmpty ? null : _clearInteriorWalls,
                     child: OutlinedButton.icon(
-                      onPressed: () => setState(
-                          () => _wallMode = !_wallMode),
+                      key: const ValueKey('planner-walls-toggle'),
+                      onPressed: () {
+                        if (_wallMode) _finishInteriorWall();
+                        setState(() => _wallMode = !_wallMode);
+                      },
                       icon: Icon(
-                        _wallMode ? Icons.polyline : Icons.polyline_outlined,
+                        _wallMode ? Icons.check : Icons.polyline_outlined,
                         size: 18,
                       ),
-                      label: Text(_wallMode ? 'Add Corners' : 'Walls'),
+                      label: Text(_wallMode ? 'Done' : 'Walls'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 12),
@@ -2056,8 +2307,22 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       ),
                     ),
                   ),
+                  if (_wallMode && _chainOpen)
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('planner-finish-wall'),
+                      onPressed: _finishInteriorWall,
+                      icon: const Icon(Icons.done_all, size: 18),
+                      label: const Text('Finish wall'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 12),
+                        minimumSize: Size.zero,
+                      ),
+                    ),
                   OutlinedButton.icon(
-                    onPressed: (_furniture.isEmpty && _walls.isEmpty)
+                    onPressed: (_furniture.isEmpty &&
+                            _walls.isEmpty &&
+                            _interior.isEmpty)
                         ? null
                         : _confirmClearAll,
                     icon: const Icon(Icons.clear_all, size: 18),
@@ -2073,9 +2338,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
               if (_wallMode) ...[
                 const SizedBox(height: 6),
                 Text(
-                  _walls.length < 3
-                      ? 'Tap the plan to add wall corners — at least 3 outline your room.'
-                      : 'Tap to add corners · drag a corner to adjust · long-press the outline to clear',
+                  _chainOpen
+                      ? 'Tap to continue this wall · Finish wall to start another · drag a corner to adjust'
+                      : 'Tap the floor to start an interior wall — each tap adds a corner. Long-press to clear walls.',
                   style: GoogleFonts.poppins(
                       fontSize: 11, color: AppColors.accent),
                 ),
@@ -2084,6 +2349,8 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
           ),
         ),
         SizedBox(height: bottomClearance),
+          ],
+        ),
       ],
     );
   }
@@ -2123,6 +2390,66 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
         spin: false,
       );
 
+  // Zoom = dolly the orbit camera toward / away from the room center; the
+  // expand toggle gives the 3D view the whole screen.
+  void _zoomBy(double factor) {
+    _rig.dolly(factor);
+    _pushCamera();
+  }
+
+  Widget _roundSceneButton({
+    required Key key,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.surface.withValues(alpha: 0.92),
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          key: key,
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
+            child: Icon(icon, size: 20, color: AppColors.textPrimary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _zoomControls() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _roundSceneButton(
+          key: const ValueKey('planner-expand'),
+          icon: _sceneExpanded ? Icons.fullscreen_exit : Icons.fullscreen,
+          tooltip: _sceneExpanded ? 'Exit full view' : 'Full view',
+          onTap: () => setState(() => _sceneExpanded = !_sceneExpanded),
+        ),
+        const SizedBox(height: 10),
+        _roundSceneButton(
+          key: const ValueKey('planner-zoom-in'),
+          icon: Icons.add,
+          tooltip: 'Zoom in',
+          onTap: () => _zoomBy(0.8),
+        ),
+        const SizedBox(height: 8),
+        _roundSceneButton(
+          key: const ValueKey('planner-zoom-out'),
+          icon: Icons.remove,
+          tooltip: 'Zoom out',
+          onTap: () => _zoomBy(1.25),
+        ),
+      ],
+    );
+  }
+
   Widget _cameraResetButton() {
     return GestureDetector(
       key: const ValueKey('planner-camera-reset'),
@@ -2149,6 +2476,11 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       color: AppColors.accent.withValues(alpha: 0.08),
       child: Icon(_iconFor(item.iconName), size: 18, color: AppColors.accent),
     );
+    final url = item.imageUrl;
+    if (url != null && url.startsWith('http')) {
+      return Image.network(url,
+          fit: BoxFit.cover, errorBuilder: (_, __, ___) => fallback);
+    }
     if (path == null) return fallback;
     return Image.asset(
       path,
@@ -2168,14 +2500,25 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       ? 'All'
       : category[0].toUpperCase() + category.substring(1);
 
+  static const _marketCategory = 'Marketplace';
+
+  // Live marketplace products with a ready 3D model sit first under "All" and
+  // in their own tab; they place at the seller's size with their own GLB.
   Widget _catalogPanel() {
+    final market = ref.watch(marketplace3dProductsProvider);
     final categories = <String>[
       'All',
+      if (market.isNotEmpty) _marketCategory,
       ...{for (final c in _catalog) c.category},
     ];
-    final visible = [
-      for (final c in _catalog)
-        if (_catalogCategory == 'All' || c.category == _catalogCategory) c,
+    if (!categories.contains(_catalogCategory)) _catalogCategory = 'All';
+    final tiles = <Widget>[
+      if (_catalogCategory == 'All' || _catalogCategory == _marketCategory)
+        for (final p in market) _productTile(p),
+      if (_catalogCategory != _marketCategory)
+        for (final c in _catalog)
+          if (_catalogCategory == 'All' || c.category == _catalogCategory)
+            _photoTile(c),
     ];
     return Container(
       key: const ValueKey('planner-catalog-panel'),
@@ -2199,9 +2542,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.only(right: 16),
-              itemCount: visible.length,
+              itemCount: tiles.length,
               separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => _photoTile(visible[i]),
+              itemBuilder: (_, i) => tiles[i],
             ),
           ),
         ],
@@ -2247,6 +2590,107 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
       ),
     );
   }
+
+  Widget _productTile(Product p) {
+    final dims = p.dimensions;
+    return GestureDetector(
+      key: ValueKey('catalog-product-${p.id}'),
+      onTap: () => _addFromProduct(p),
+      child: SizedBox(
+        width: 84,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.accent),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: p.image.isEmpty
+                          ? Icon(_iconFor(iconNameForProduct(p)),
+                              color: AppColors.accent)
+                          : Image.network(
+                              p.image,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(
+                                  _iconFor(iconNameForProduct(p)),
+                                  color: AppColors.accent),
+                            ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppColors.accent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(Icons.view_in_ar,
+                          size: 11, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              p.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary),
+            ),
+            Text(
+              dims == null
+                  ? Formatters.myr(p.price)
+                  : '${Formatters.myr(p.price)} · ${(dims.widthM * 100).round()}×${(dims.depthM * 100).round()}',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                  fontSize: 9, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addFromProduct(Product product) {
+    final item = placementForProduct(product,
+            id: _nextPieceId('market-${product.id}'))
+        .copyWith(x: 20, y: 15);
+    final fitted = _fitInRoom(item);
+    if (fitted == null) {
+      showAppSnackbar(
+          context,
+          '${item.name} (${_sizeLabel(item)}) is bigger than this room '
+          '(${_roomW.toInt()}×${_roomH.toInt()} cm).',
+          isError: true);
+      return;
+    }
+    setState(() {
+      _furniture.add(fitted);
+      _selectedIdx = _furniture.length - 1;
+    });
+    _bridge.syncFurniture(_furniture);
+  }
+
+  @visibleForTesting
+  void debugAddFromProduct(Product p) => _addFromProduct(p);
 
   // ─── Icon lookup ───
 }
@@ -2481,4 +2925,26 @@ class _Found {
   final String label;
   final double confidence;
   const _Found({required this.label, required this.confidence});
+}
+
+// Selection bar + catalogue + toolbar. Normally they lay out at natural
+// height; on short screens they scroll inside a capped box so the 3D scene
+// above keeps a usable height and its own gestures.
+class _BottomPanels extends StatelessWidget {
+  const _BottomPanels(
+      {required this.compact, required this.maxHeight, required this.children});
+
+  final bool compact;
+  final double maxHeight;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final column = Column(mainAxisSize: MainAxisSize.min, children: children);
+    if (!compact) return column;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: SingleChildScrollView(child: column),
+    );
+  }
 }

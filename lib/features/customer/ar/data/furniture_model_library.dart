@@ -120,8 +120,8 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
     ArFurnitureItem(
         name: 'Coffee Table',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.0,
+        modelFile: 'ph_modern_coffee_table_01.glb',
+        widthMeters: 1.2,
         icon: Icons.table_bar,
         placement: PlacementType.floor),
     ArFurnitureItem(
@@ -134,6 +134,66 @@ class ArFurnitureLibrary {
         name: 'Standing Desk',
         modelFile: 'standing_desk.glb',
         widthMeters: 1.4,
+        icon: Icons.desk,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Lounge Chair',
+        modelFile: 'ph_mid_century_lounge_chair.glb',
+        widthMeters: 1.01,
+        icon: Icons.event_seat,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Accent Chair',
+        modelFile: 'ph_modern_arm_chair_01.glb',
+        widthMeters: 0.82,
+        icon: Icons.chair_alt,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Dining Chair',
+        modelFile: 'ph_dining_chair_02.glb',
+        widthMeters: 0.43,
+        icon: Icons.chair,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Ottoman',
+        modelFile: 'ph_ottoman_01.glb',
+        widthMeters: 0.88,
+        icon: Icons.crop_square,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Chesterfield Sofa',
+        modelFile: 'ph_sofa_02.glb',
+        widthMeters: 1.81,
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Bar Stool',
+        modelFile: 'ph_bar_chair_round_01.glb',
+        widthMeters: 0.48,
+        icon: Icons.chair_alt,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Side Table',
+        modelFile: 'ph_side_table_01.glb',
+        widthMeters: 0.55,
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Round Coffee Table',
+        modelFile: 'ph_coffee_table_round_01.glb',
+        widthMeters: 1.3,
+        icon: Icons.circle_outlined,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Chest of Drawers',
+        modelFile: 'ph_vintage_wooden_drawer_01.glb',
+        widthMeters: 1.72,
+        icon: Icons.inventory,
+        placement: PlacementType.floor),
+    ArFurnitureItem(
+        name: 'Office Desk',
+        modelFile: 'ph_metal_office_desk.glb',
+        widthMeters: 2.0,
         icon: Icons.desk,
         placement: PlacementType.floor),
   ];
@@ -160,8 +220,8 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
     'coffee_table': ArFurnitureItem(
         name: 'Coffee Table',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.0,
+        modelFile: 'ph_modern_coffee_table_01.glb',
+        widthMeters: 1.2,
         icon: Icons.table_bar,
         placement: PlacementType.floor),
     'dining_table': ArFurnitureItem(
@@ -184,14 +244,14 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
     'cabinet': ArFurnitureItem(
         name: 'Cabinet',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.0,
+        modelFile: 'ph_drawer_cabinet.glb',
+        widthMeters: 1.14,
         icon: Icons.inventory_2,
         placement: PlacementType.floor),
     'bookshelf': ArFurnitureItem(
         name: 'Bookshelf',
-        modelFile: 'standing_desk.glb',
-        widthMeters: 1.4,
+        modelFile: 'ph_wooden_display_shelves_01.glb',
+        widthMeters: 1.08,
         icon: Icons.menu_book,
         placement: PlacementType.floor),
     'floor_lamp': ArFurnitureItem(
@@ -202,14 +262,14 @@ class ArFurnitureLibrary {
         placement: PlacementType.floor),
     'plant': ArFurnitureItem(
         name: 'Plant',
-        modelFile: 'bauhaus_chair.glb',
-        widthMeters: 0.5,
+        modelFile: 'ph_potted_plant_02.glb',
+        widthMeters: 0.7,
         icon: Icons.eco,
         placement: PlacementType.floor),
     'tv_stand': ArFurnitureItem(
         name: 'TV Stand',
-        modelFile: 'folding_table.glb',
-        widthMeters: 1.4,
+        modelFile: 'ph_modern_wooden_cabinet.glb',
+        widthMeters: 2.44,
         icon: Icons.tv,
         placement: PlacementType.floor),
     'rug': ArFurnitureItem(
@@ -217,6 +277,66 @@ class ArFurnitureLibrary {
         modelFile: 'folding_table.glb',
         widthMeters: 1.2,
         icon: Icons.view_agenda,
+        placement: PlacementType.floor),
+    'lounge_chair': ArFurnitureItem(
+        name: 'Lounge Chair',
+        modelFile: 'ph_mid_century_lounge_chair.glb',
+        widthMeters: 1.01,
+        icon: Icons.event_seat,
+        placement: PlacementType.floor),
+    'accent_chair': ArFurnitureItem(
+        name: 'Accent Chair',
+        modelFile: 'ph_modern_arm_chair_01.glb',
+        widthMeters: 0.82,
+        icon: Icons.chair_alt,
+        placement: PlacementType.floor),
+    'dining_chair': ArFurnitureItem(
+        name: 'Dining Chair',
+        modelFile: 'ph_dining_chair_02.glb',
+        widthMeters: 0.43,
+        icon: Icons.chair,
+        placement: PlacementType.floor),
+    'ottoman': ArFurnitureItem(
+        name: 'Ottoman',
+        modelFile: 'ph_ottoman_01.glb',
+        widthMeters: 0.88,
+        icon: Icons.crop_square,
+        placement: PlacementType.floor),
+    'chesterfield_sofa': ArFurnitureItem(
+        name: 'Chesterfield Sofa',
+        modelFile: 'ph_sofa_02.glb',
+        widthMeters: 1.81,
+        icon: Icons.weekend,
+        placement: PlacementType.floor),
+    'bar_stool': ArFurnitureItem(
+        name: 'Bar Stool',
+        modelFile: 'ph_bar_chair_round_01.glb',
+        widthMeters: 0.48,
+        icon: Icons.chair_alt,
+        placement: PlacementType.floor),
+    'side_table': ArFurnitureItem(
+        name: 'Side Table',
+        modelFile: 'ph_side_table_01.glb',
+        widthMeters: 0.55,
+        icon: Icons.table_bar,
+        placement: PlacementType.floor),
+    'round_coffee_table': ArFurnitureItem(
+        name: 'Round Coffee Table',
+        modelFile: 'ph_coffee_table_round_01.glb',
+        widthMeters: 1.3,
+        icon: Icons.circle_outlined,
+        placement: PlacementType.floor),
+    'chest_of_drawers': ArFurnitureItem(
+        name: 'Chest of Drawers',
+        modelFile: 'ph_vintage_wooden_drawer_01.glb',
+        widthMeters: 1.72,
+        icon: Icons.inventory,
+        placement: PlacementType.floor),
+    'office_desk': ArFurnitureItem(
+        name: 'Office Desk',
+        modelFile: 'ph_metal_office_desk.glb',
+        widthMeters: 2.0,
+        icon: Icons.desk,
         placement: PlacementType.floor),
   };
 

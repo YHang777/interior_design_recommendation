@@ -412,7 +412,9 @@ void main() {
     final mapped = chatPlacementForProduct(withDims);
     expect(mapped.iconName, 'sofa');
     expect(mapped.width, 200);
-    expect(mapped.height, 50);
+    // Plan depth is the seller DEPTH; the vertical height drives the 3D.
+    expect(mapped.height, 100);
+    expect(mapped.heightCm, 50);
     expect(mapped.name, 'Deep Sofa');
     expect(mapped.id, contains('sofa-2'));
 

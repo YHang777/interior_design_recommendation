@@ -9,6 +9,8 @@ import '../../../../../services/chat_history_store.dart';
 import '../../data/datasources/chat_datasource.dart';
 import '../../data/datasources/supabase_room_design_datasource.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
+import '../../../marketplace/presentation/providers/marketplace_providers.dart'
+    show marketplaceProductsProvider;
 
 // ─── Datasource ────────────────────────────────────────────────────────────────
 
@@ -276,28 +278,58 @@ final pendingChatPlacementsProvider =
     StateNotifierProvider<ChatPlacementsNotifier, List<FurniturePlacement>>(
         (ref) => ChatPlacementsNotifier());
 
-FurniturePlacement chatPlacementForProduct(Product product) {
-  final iconName = _chatIconNameFor(product);
+FurniturePlacement chatPlacementForProduct(Product product) =>
+    placementForProduct(product,
+        id: 'chat-${product.id}-${DateTime.now().microsecondsSinceEpoch}');
+
+// A marketplace product as a plan piece: seller W×D on the floor (depth, not
+// height — the old mapping put the vertical size into the plan depth), the
+// seller height as the 3D height, and the product's own GLB when ready.
+FurniturePlacement placementForProduct(Product product, {required String id}) {
+  final iconName = iconNameForProduct(product);
   final fallback = _chatCatalogSizes[iconName] ?? (80.0, 60.0);
   var width = fallback.$1;
-  var height = fallback.$2;
+  var depth = fallback.$2;
+  double? heightCm;
   final dims = product.dimensions;
   if (dims != null && dims.widthM > 0) {
-    width = (dims.widthM * 100).clamp(10.0, 300.0).toDouble();
+    width = (dims.widthM * 100).clamp(10.0, 500.0).toDouble();
+  }
+  if (dims != null && dims.depthM > 0) {
+    depth = (dims.depthM * 100).clamp(10.0, 500.0).toDouble();
   }
   if (dims != null && dims.heightM > 0) {
-    height = (dims.heightM * 100).clamp(10.0, 300.0).toDouble();
+    heightCm = (dims.heightM * 100).clamp(2.0, 300.0).toDouble();
   }
   return FurniturePlacement(
-    id: 'chat-${product.id}-${DateTime.now().microsecondsSinceEpoch}',
+    id: id,
     name: product.name,
     iconName: iconName,
     x: 20,
     y: 20,
     width: width,
-    height: height,
+    height: depth,
+    productId: product.id,
+    modelUrl: productModelUrl(product),
+    heightCm: heightCm,
+    imageUrl: product.image.isEmpty ? null : product.image,
   );
 }
+
+// The product's ready GLB, or null while it has none.
+String? productModelUrl(Product product) {
+  final a = product.ar3d;
+  if (a == null || a.status != 'ready' || !a.url.startsWith('http')) {
+    return null;
+  }
+  return a.url;
+}
+
+// Planner catalogue + showroom furnishing use only products whose 3D model
+// is ready AND whose seller size is complete.
+bool productHasReady3d(Product product) =>
+    productModelUrl(product) != null &&
+    (product.dimensions?.isComplete ?? false);
 
 const _chatCatalogSizes = <String, (double, double)>{
   'sofa': (180, 90),
@@ -314,7 +346,7 @@ const _chatCatalogSizes = <String, (double, double)>{
   'bookshelf': (90, 30),
 };
 
-String _chatIconNameFor(Product product) {
+String iconNameForProduct(Product product) {
   final source = '${product.category} ${product.name}'.toLowerCase();
   const keys = <String, String>{
     'coffee table': 'coffee_table',
@@ -341,3 +373,19 @@ String _chatIconNameFor(Product product) {
   }
   return 'unknown';
 }
+
+// Live marketplace products that can render as real 3D pieces (ready GLB +
+// complete seller size), newest first as the stream delivers them. Empty
+// while loading, on error, or where Firebase is unavailable (tests).
+final marketplace3dProductsProvider = Provider<List<Product>>((ref) {
+  try {
+    final products = ref.watch(marketplaceProductsProvider).valueOrNull;
+    if (products == null) return const [];
+    return [
+      for (final p in products)
+        if (p.isActive && productHasReady3d(p)) p,
+    ];
+  } catch (_) {
+    return const [];
+  }
+});

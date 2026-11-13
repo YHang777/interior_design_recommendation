@@ -39,7 +39,7 @@ void main() {
       rig.dolly(1000);
       expect(rig.distanceM, rig.maxDistanceM);
       rig.dolly(0.0001);
-      expect(rig.distanceM, 1.2);
+      expect(rig.distanceM, 0.8);
     });
   });
 

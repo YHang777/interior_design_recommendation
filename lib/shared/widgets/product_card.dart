@@ -272,12 +272,21 @@ class ProductCard extends StatelessWidget {
 
                       Row(
                         children: [
-                          Text(
-                            Formatters.myr(product.price),
-                            style: GoogleFonts.poppins(
-                              fontSize: compact ? 12 : 14,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.accent,
+                          // Big prices (RM 128,900) shrink instead of
+                          // pushing past narrow cards.
+                          Flexible(
+                            flex: 3,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                Formatters.myr(product.price),
+                                style: GoogleFonts.poppins(
+                                  fontSize: compact ? 12 : 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.accent,
+                                ),
+                              ),
                             ),
                           ),
                           if (product.originalPrice != null) ...[

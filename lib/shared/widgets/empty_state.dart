@@ -20,6 +20,22 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Scrolls when taller than the space (short phones, large text) and
+    // stays centered when it fits.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: constraints.maxHeight.isFinite ? constraints.maxHeight : 0,
+            minWidth: constraints.maxWidth.isFinite ? constraints.maxWidth : 0,
+          ),
+          child: _content(),
+        ),
+      ),
+    );
+  }
+
+  Widget _content() {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),

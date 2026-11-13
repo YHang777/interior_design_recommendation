@@ -405,7 +405,12 @@ void main() {
     }
   });
 
-  testWidgets('wall-mode taps add corners and reject ones too close together',
+  List<List<Offset>> interiorOf(WidgetTester tester) =>
+      (stateOf(tester).debugInteriorWalls as List)
+          .map((c) => (c as List).cast<Offset>())
+          .toList();
+
+  testWidgets('wall-mode taps build an interior wall; the room stays',
       (tester) async {
     await pumpPlanner(tester);
 
@@ -414,17 +419,38 @@ void main() {
 
     await tapFloor(tester, const Offset(30, 30));
     await tapFloor(tester, const Offset(35, 35));
-    expect(wallsOf(tester), hasLength(1),
-        reason: 'a corner within 12 cm of an existing one is rejected');
+    expect(interiorOf(tester).single, hasLength(1),
+        reason: 'a corner within 12 cm of the last one is rejected');
 
     await tapFloor(tester, const Offset(370, 30));
     await tapFloor(tester, const Offset(200, 250));
 
-    final walls = wallsOf(tester);
-    expect(walls, hasLength(3));
-    expect(walls[0], moreOrLessEqualsPoint(const Offset(30, 30)));
-    expect(walls[1], moreOrLessEqualsPoint(const Offset(370, 30)));
-    expect(walls[2], moreOrLessEqualsPoint(const Offset(200, 250)));
+    final chain = interiorOf(tester).single;
+    expect(chain, hasLength(3));
+    expect(chain[0], moreOrLessEqualsPoint(const Offset(30, 30)));
+    expect(chain[1], moreOrLessEqualsPoint(const Offset(370, 30)));
+    expect(chain[2], moreOrLessEqualsPoint(const Offset(200, 250)));
+    expect(wallsOf(tester), isEmpty,
+        reason: 'three corners must NOT replace the room with a triangle');
+  });
+
+  testWidgets('Finish wall starts a separate wall on the next tap',
+      (tester) async {
+    await pumpPlanner(tester);
+    await tester.tap(find.text('Walls'));
+    await tester.pump();
+
+    await tapFloor(tester, const Offset(100, 100));
+    await tapFloor(tester, const Offset(300, 100));
+    await tester.tap(find.byKey(const ValueKey('planner-finish-wall')));
+    await tester.pump();
+    await tapFloor(tester, const Offset(100, 300));
+    await tapFloor(tester, const Offset(100, 450));
+
+    final chains = interiorOf(tester);
+    expect(chains, hasLength(2));
+    expect(chains[0], hasLength(2));
+    expect(chains[1], hasLength(2));
   });
 
   testWidgets('wall handles move corners to new floor points', (tester) async {
@@ -460,8 +486,8 @@ void main() {
     expect(walls[3], moreOrLessEqualsPoint(const Offset(50, 450)));
   });
 
-  testWidgets('wall-mode long-press clears the outline and undo restores it',
-      (tester) async {
+  testWidgets('wall-mode long-press clears interior walls, keeps the outline, '
+      'and undo restores them', (tester) async {
     await pumpPlanner(tester, walls: const [
       Offset(50, 50),
       Offset(350, 50),
@@ -470,20 +496,22 @@ void main() {
     ]);
     await tester.tap(find.text('Walls'));
     await tester.pump();
+    await tapFloor(tester, const Offset(100, 200));
+    await tapFloor(tester, const Offset(300, 200));
+    expect(interiorOf(tester).single, hasLength(2));
 
-    await longPressFloor(tester, const Offset(200, 250));
+    await longPressFloor(tester, const Offset(200, 350));
 
-    expect(wallsOf(tester), isEmpty);
-    expect(find.text('Walls cleared'), findsOneWidget);
+    expect(interiorOf(tester), isEmpty);
+    expect(wallsOf(tester), hasLength(4), reason: 'the room outline stays');
+    expect(find.text('Interior walls cleared'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(find.text('Undo'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    final walls = wallsOf(tester);
-    expect(walls, hasLength(4));
-    expect(walls.first, moreOrLessEqualsPoint(const Offset(50, 50)));
+    expect(interiorOf(tester).single, hasLength(2));
   });
 
   testWidgets('opening a saved design restores its wall outline',

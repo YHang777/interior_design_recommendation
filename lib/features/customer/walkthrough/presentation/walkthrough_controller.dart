@@ -14,6 +14,7 @@ class WalkthroughController extends ChangeNotifier {
       : roomW = design.widthCm,
         roomH = design.heightCm,
         walls = List.of(design.walls),
+        interiorWalls = [for (final c in design.interiorWalls) List.of(c)],
         furniture = List.of(design.furniture) {
     walker = _findSpawn();
   }
@@ -21,6 +22,7 @@ class WalkthroughController extends ChangeNotifier {
   final double roomW;
   final double roomH;
   final List<Offset> walls;
+  final List<List<Offset>> interiorWalls;
   final List<FurniturePlacement> furniture;
 
   // Room coords in cm (y grows south); heading in radians, 0 = east.
@@ -29,7 +31,7 @@ class WalkthroughController extends ChangeNotifier {
   double zoom = 1;
 
   static const stepCm = 30.0;
-  static const walkerRadiusCm = 18.0;
+  static const walkerRadiusCm = 30.0; // shoulder clearance — 18 cm put the eye on the wall
   static const turnStepRad = pi / 12; // 15° per press — Street View feel
   static const walkOverHeightCm = 30.0; // rugs etc. — stepped on, not around
 
@@ -46,6 +48,12 @@ class WalkthroughController extends ChangeNotifier {
         final a = walls[i];
         final b = walls[(i + 1) % walls.length];
         if (distToSegment(p, a, b) < walkerRadiusCm) return false;
+      }
+    }
+    // Interior walls are 10 cm slabs: keep the walker radius off each face.
+    for (final (a, b) in interiorWallSegments(interiorWalls)) {
+      if (distToSegment(p, a, b) < walkerRadiusCm + kInteriorWallHalfCm) {
+        return false;
       }
     }
     return !_furnitureBlocked(p, escapeFrom);
@@ -125,7 +133,8 @@ class WalkthroughController extends ChangeNotifier {
   }
 
   // Walker-centered drop target, settled by the planner's ring search so
-  // the ghost always shows where the piece will actually land.
+  // the ghost always shows where the piece will actually land — on clear
+  // floor, not inside another piece.
   FurniturePlacement resolveGhost(FurniturePlacement f) {
     final tl = Offset(
       walker.dx - footprintW(f) / 2,
@@ -136,8 +145,15 @@ class WalkthroughController extends ChangeNotifier {
       roomW: roomW,
       roomH: roomH,
       walls: walls,
+      others: furniture,
+      interiorWalls: interiorWalls,
     );
   }
+
+  // False when the piece cannot fit anywhere in this room at its current
+  // orientation — the screen refuses the placement.
+  bool ghostFits(FurniturePlacement f) => placementFits(resolveGhost(f),
+      roomW: roomW, roomH: roomH, walls: walls, interiorWalls: interiorWalls);
 
   FurniturePlacement place(FurniturePlacement f) {
     final placed = resolveGhost(f);

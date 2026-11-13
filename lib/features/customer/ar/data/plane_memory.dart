@@ -249,6 +249,10 @@ class PlaneMemory {
   // height is really the floor.
   bool _floorYStrictEstablished = false;
 
+  // floorY was last set while the phone height was known. A pre-pose lock
+  // may sit on another storey and must not paint through a later pose gap.
+  bool _floorYCameraBacked = false;
+
   double? _probeProvenY;
 
   // Agreeing readings noteFloorYCandidate needs before it may move floorY —
@@ -281,6 +285,8 @@ class PlaneMemory {
   double? get floorY => _floorY;
 
   bool get floorEstablished => _floorY != null;
+
+  bool get floorYCameraBacked => _floorY != null && _floorYCameraBacked;
 
   // Whether floorY may anchor green rendering (overlayZoneOf floorYTrusted,
   // synthetic floor). A probe-proven height always decides; floorY can no
@@ -476,6 +482,10 @@ class PlaneMemory {
     _TrackedPlane? best;
     var bestDist = double.infinity;
     for (final r in stream.values) {
+      // Floor records answer only for their own height: a hit on the
+      // courtyard under a balcony (or the floor beside a table) must not
+      // inherit the class of the slab above it.
+      if (planeType == 1 && (r.centerY - y).abs() > 0.25) continue;
       final dx = r.centerX - x;
       final dy = planeType == 1 ? 0.0 : r.centerY - y;
       final dz = r.centerZ - z;
@@ -649,12 +659,33 @@ class PlaneMemory {
     // Once relaxed (long scan), the loose 0.5 m window can no longer lock
     // the floor — a bed top sitting 0.55 m below the phone must not become
     // floorY and then refuse the real floor via the height gate.
+    // A floorY further under the phone than anyone holds one is another
+    // storey (courtyard below a balcony, locked before the first pose).
+    // Forget it outright — the in-band floor then establishes fresh instead
+    // of creeping up at 0.35, and the probe lock proved a height that no
+    // longer applies. The 0.3 m margin keeps a phone raised overhead from
+    // dropping a real floor.
+    final stale = _floorY;
+    if (stale != null &&
+        _cameraY != null &&
+        _cameraY! - stale > maxPhoneAboveFloorM + 0.3) {
+      _floorY = null;
+      _floorYStrictEstablished = false;
+      _floorYCameraBacked = false;
+      _probeCorrected = false;
+      _probeProvenY = null;
+      _probeStreak = 0;
+      _probeStreakY = null;
+      _upStreak = 0;
+      _upStreakY = null;
+    }
     final target = strictBest ?? (gatesRelaxed ? null : looseBest);
     if (target == null) return;
     // Only a strict-band target with a known camera height proves the paint
     // height; loose/camera-unknown assignments demote the flag instead.
     final fromStrict = strictBest != null && _cameraY != null;
     final current = _floorY;
+    _floorYCameraBacked = _cameraY != null;
     if (current == null) {
       _floorY = target;
       _floorYStrictEstablished = fromStrict;

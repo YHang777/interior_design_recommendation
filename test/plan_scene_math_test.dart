@@ -223,7 +223,7 @@ void main() {
     r.dolly(1000);
     expect(r.distanceM, maxD);
     r.dolly(0.0001);
-    expect(r.distanceM, 1.2);
+    expect(r.distanceM, 0.8);
   });
 
   test('frameRoom centers the target and frames the diagonal', () {

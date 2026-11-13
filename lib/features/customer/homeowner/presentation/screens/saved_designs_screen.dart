@@ -211,17 +211,28 @@ class SavedDesignsScreen extends ConsumerWidget {
                         style: GoogleFonts.poppins(
                             fontSize: 12, color: AppColors.textSecondary)),
                     const SizedBox(height: 4),
-                    Row(
+                    // Wraps onto a second line on narrow phones / large text
+                    // instead of running under the menu button.
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        if (design.furniture.isNotEmpty) ...[
-                          Icon(Icons.chair,
-                              size: 12, color: AppColors.textHint),
-                          const SizedBox(width: 3),
-                          Text('${design.furniture.length} items',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 11, color: AppColors.textHint)),
-                          const SizedBox(width: 10),
-                        ],
+                        if (design.furniture.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.chair,
+                                  size: 12, color: AppColors.textHint),
+                              const SizedBox(width: 3),
+                              Text(
+                                  '${design.furniture.length} '
+                                  '${design.furniture.length == 1 ? 'item' : 'items'}',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      color: AppColors.textHint)),
+                            ],
+                          ),
                         Text(_formatDate(design.updatedAt),
                             style: GoogleFonts.poppins(
                                 fontSize: 11, color: AppColors.textHint)),

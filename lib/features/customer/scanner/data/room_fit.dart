@@ -1,8 +1,10 @@
 import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show Offset, Rect;
 
 import '../../../../models/room_design.dart';
+import 'furniture_catalog.dart' show heightCmForFurniture;
 
 // Shared room geometry: the planner and the walkthrough must agree on what
 // "fits" means, so one implementation backs both.
@@ -63,11 +65,16 @@ bool fitsAt({
   required double roomW,
   required double roomH,
   required List<Offset> walls,
+  List<List<Offset>> interiorWalls = const [],
 }) {
   final fw = footprintW(f);
   final fh = footprintH(f);
   if (tl.dx < 0 || tl.dy < 0) return false;
   if (tl.dx + fw > roomW || tl.dy + fh > roomH) return false;
+  if (interiorWalls.isNotEmpty &&
+      rectHitsInteriorWalls(Rect.fromLTWH(tl.dx, tl.dy, fw, fh), interiorWalls)) {
+    return false;
+  }
   if (walls.length < 3) return true;
 
   final corners = [
@@ -92,23 +99,109 @@ bool fitsAt({
   return true;
 }
 
+// ── interior walls ──
+// Partitions drawn inside the room are 10 cm slabs centered on their chain;
+// a footprint may touch a face but never cross into the slab.
+const double kInteriorWallHalfCm = 5.0;
+
+bool rectHitsInteriorWalls(Rect r, List<List<Offset>> chains,
+    {double halfThicknessCm = kInteriorWallHalfCm}) {
+  // Shrink by a hair so a piece flush against a wall face still fits.
+  final box = r.deflate(0.5);
+  for (final chain in chains) {
+    if (chain.isEmpty) continue;
+    if (chain.length == 1) {
+      if (distToRect(chain.first, box) < halfThicknessCm) return true;
+      continue;
+    }
+    for (var i = 0; i + 1 < chain.length; i++) {
+      if (_segmentRectDistance(chain[i], chain[i + 1], box) < halfThicknessCm) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+double _segmentRectDistance(Offset a, Offset b, Rect r) {
+  if (r.contains(a) || r.contains(b)) return 0;
+  final c = [r.topLeft, r.topRight, r.bottomRight, r.bottomLeft];
+  for (var i = 0; i < 4; i++) {
+    if (segmentsCross(a, b, c[i], c[(i + 1) % 4])) return 0;
+  }
+  var best = math.min(distToRect(a, r), distToRect(b, r));
+  for (final p in c) {
+    best = math.min(best, distToSegment(p, a, b));
+  }
+  return best;
+}
+
+// Wall-chain points flattened into segments (a lone corner is a post: a, a).
+List<(Offset, Offset)> interiorWallSegments(List<List<Offset>> chains) => [
+      for (final chain in chains)
+        if (chain.length == 1)
+          (chain.first, chain.first)
+        else
+          for (var i = 0; i + 1 < chain.length; i++) (chain[i], chain[i + 1]),
+    ];
+
+// Rugs and other flat floor coverings may sit under furniture; everything
+// else needs its own floor patch.
+bool isFloorCovering(FurniturePlacement f) =>
+    heightCmForFurniture(f.iconName) < 5;
+
+// Two footprints share real floor (touching edges is fine).
+bool footprintsOverlap(FurniturePlacement a, FurniturePlacement b) {
+  if (isFloorCovering(a) || isFloorCovering(b)) return false;
+  final ra = furnitureRect(a).deflate(0.5);
+  final rb = furnitureRect(b).deflate(0.5);
+  return ra.overlaps(rb);
+}
+
+bool _clearOf(FurniturePlacement f, Offset tl, List<FurniturePlacement> others) {
+  if (others.isEmpty) return true;
+  final moved = f.copyWith(x: tl.dx, y: tl.dy);
+  for (final o in others) {
+    if (o.id == f.id) continue;
+    if (footprintsOverlap(moved, o)) return false;
+  }
+  return true;
+}
+
 // Walk rings outward from the drop point (5 cm steps, 16 angles) and take
 // the first spot that fits — the piece settles next to where the finger
-// left it, never teleports to the room center.
+// left it, never teleports to the room center. With [others], a spot must
+// also be clear of the other pieces (a new chair can't vanish inside the
+// sofa); a full room falls back to the walls-only fit.
 FurniturePlacement resolveDrop(
   FurniturePlacement f, {
   required double roomW,
   required double roomH,
   required List<Offset> walls,
+  List<FurniturePlacement> others = const [],
+  List<List<Offset>> interiorWalls = const [],
 }) {
-  if (fitsAt(f: f, tl: Offset(f.x, f.y), roomW: roomW, roomH: roomH, walls: walls)) {
-    return f;
-  }
+  bool fits(Offset tl) => fitsAt(
+      f: f,
+      tl: tl,
+      roomW: roomW,
+      roomH: roomH,
+      walls: walls,
+      interiorWalls: interiorWalls);
+  final found = _ringSearch(f, roomW, roomH,
+      (tl) => fits(tl) && _clearOf(f, tl, others));
+  if (found != null) return found;
+  if (others.isEmpty) return f;
+  return _ringSearch(f, roomW, roomH, fits) ?? f;
+}
+
+FurniturePlacement? _ringSearch(FurniturePlacement f, double roomW,
+    double roomH, bool Function(Offset tl) ok) {
+  if (ok(Offset(f.x, f.y))) return f;
   final fw = footprintW(f);
   final fh = footprintH(f);
   final maxX = max(0.0, roomW - fw);
   final maxY = max(0.0, roomH - fh);
-
   final maxR = sqrt(roomW * roomW + roomH * roomH);
   for (var r = 5.0; r <= maxR; r += 5.0) {
     const steps = 16;
@@ -118,13 +211,59 @@ FurniturePlacement resolveDrop(
         (f.x + cos(a) * r).clamp(0.0, maxX).toDouble(),
         (f.y + sin(a) * r).clamp(0.0, maxY).toDouble(),
       );
-      if (fitsAt(f: f, tl: cand, roomW: roomW, roomH: roomH, walls: walls)) {
-        return f.copyWith(x: cand.dx, y: cand.dy);
-      }
+      if (ok(cand)) return f.copyWith(x: cand.dx, y: cand.dy);
     }
   }
-  return f;
+  return null;
 }
+
+// Room-size validation: the piece as given if it fits somewhere, else the
+// piece turned 90° if THAT fits, else null — it is bigger than the room and
+// must be refused, never parked half inside a wall.
+FurniturePlacement? fitInRoom(
+  FurniturePlacement f, {
+  required double roomW,
+  required double roomH,
+  required List<Offset> walls,
+  List<FurniturePlacement> others = const [],
+  List<List<Offset>> interiorWalls = const [],
+}) {
+  for (final cand in [f, f.copyWith(rotation: (f.rotation + 90) % 360)]) {
+    final r = resolveDrop(cand,
+        roomW: roomW,
+        roomH: roomH,
+        walls: walls,
+        others: others,
+        interiorWalls: interiorWalls);
+    if (placementFits(r,
+        roomW: roomW,
+        roomH: roomH,
+        walls: walls,
+        interiorWalls: interiorWalls)) {
+      return r;
+    }
+  }
+  return null;
+}
+
+// Pieces that fit nowhere in the room at either orientation.
+List<FurniturePlacement> unfitPlacements(
+  List<FurniturePlacement> items, {
+  required double roomW,
+  required double roomH,
+  required List<Offset> walls,
+  List<List<Offset>> interiorWalls = const [],
+}) =>
+    [
+      for (final f in items)
+        if (fitInRoom(f,
+                roomW: roomW,
+                roomH: roomH,
+                walls: walls,
+                interiorWalls: interiorWalls) ==
+            null)
+          f,
+    ];
 
 // ── placement guards ──
 
@@ -142,8 +281,15 @@ bool placementFits(
   required double roomW,
   required double roomH,
   required List<Offset> walls,
+  List<List<Offset>> interiorWalls = const [],
 }) =>
-    fitsAt(f: f, tl: Offset(f.x, f.y), roomW: roomW, roomH: roomH, walls: walls);
+    fitsAt(
+        f: f,
+        tl: Offset(f.x, f.y),
+        roomW: roomW,
+        roomH: roomH,
+        walls: walls,
+        interiorWalls: interiorWalls);
 
 // Render clamp for legacy/round-tripped designs: keep valid placements,
 // settle the rest next to where they are — never drawn inside a wall.
@@ -152,10 +298,19 @@ List<FurniturePlacement> clampAllPlacements(
   required double roomW,
   required double roomH,
   required List<Offset> walls,
+  List<List<Offset>> interiorWalls = const [],
 }) =>
     [
       for (final f in items)
-        placementFits(f, roomW: roomW, roomH: roomH, walls: walls)
+        placementFits(f,
+                roomW: roomW,
+                roomH: roomH,
+                walls: walls,
+                interiorWalls: interiorWalls)
             ? f
-            : resolveDrop(f, roomW: roomW, roomH: roomH, walls: walls),
+            : resolveDrop(f,
+                roomW: roomW,
+                roomH: roomH,
+                walls: walls,
+                interiorWalls: interiorWalls),
     ];

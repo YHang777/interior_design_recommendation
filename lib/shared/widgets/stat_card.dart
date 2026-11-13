@@ -76,11 +76,10 @@ class _StatCardState extends State<StatCard> {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
+            // Wraps between words; a word wider than the card ("Remaining"
+            // at large text) scales down instead of breaking mid-word.
+            _NoMidWordText(
               widget.label,
-              maxLines: 2,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.poppins(
                 color: Colors.white.withValues(alpha: 0.9),
                 fontSize: 12,
@@ -92,5 +91,42 @@ class _StatCardState extends State<StatCard> {
         ),
       ),
     );
+  }
+}
+
+class _NoMidWordText extends StatelessWidget {
+  const _NoMidWordText(this.text, {required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final scaler = MediaQuery.textScalerOf(context);
+      var widest = 0.0;
+      for (final word in text.split(' ')) {
+        final tp = TextPainter(
+          text: TextSpan(text: word, style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        if (tp.width > widest) widest = tp.width;
+      }
+      final label = Text(text,
+          maxLines: 2,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          style: style);
+      if (!c.maxWidth.isFinite || widest <= c.maxWidth) return label;
+      // Shrink just enough that the longest word fits on its line.
+      return Text(text,
+          maxLines: 2,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          style: style.copyWith(
+              fontSize: (style.fontSize ?? 12) * c.maxWidth / widest * 0.98));
+    });
   }
 }

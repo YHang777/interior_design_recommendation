@@ -18,6 +18,8 @@ import '../../homeowner/presentation/providers/design_providers.dart';
 import '../../scanner/data/camera_rig.dart';
 import '../../scanner/data/furniture_catalog.dart';
 import '../data/showroom_designs.dart';
+import '../data/showroom_furnishing.dart';
+import 'room_dollhouse_view.dart';
 import 'walkthrough_controller.dart';
 import 'walkthrough_painter.dart';
 import 'walkthrough_scene.dart';
@@ -203,7 +205,8 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
             controller: _galleryCtrl,
             onPageChanged: (i) => setState(() => _galleryPage = i),
             itemCount: showroomRooms.length,
-            itemBuilder: (_, i) => _showroomCard(showroomRooms[i]),
+            itemBuilder: (_, i) =>
+                _showroomCard(showroomRooms[i], active: i == _galleryPage),
           ),
         ),
         Padding(
@@ -263,7 +266,7 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     );
   }
 
-  Widget _showroomCard(ShowroomRoom room) {
+  Widget _showroomCard(ShowroomRoom room, {bool active = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: GestureDetector(
@@ -289,11 +292,20 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
                   padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
+                    // The visible card shows the real 3D dollhouse (one native
+                    // view at a time); neighbours keep the light plan thumb.
                     child: ColoredBox(
                       color: const Color(0xFFFAF7F0),
-                      child: CustomPaint(
-                        painter: _PlanThumbPainter(room.design),
-                      ),
+                      child: active
+                          ? RoomDollhouseView(
+                              key: ValueKey('dollhouse-${room.name}'),
+                              design: _furnished(room, watch: true),
+                              fallback: CustomPaint(
+                                  painter: _PlanThumbPainter(room.design)),
+                            )
+                          : CustomPaint(
+                              painter: _PlanThumbPainter(room.design),
+                            ),
                     ),
                   ),
                 ),
@@ -349,15 +361,24 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
     );
   }
 
+  // Marketplace GLBs first, bundled variants next, catalog models last.
+  RoomDesign _furnished(ShowroomRoom room, {bool watch = false}) =>
+      furnishWithMarketplace(
+          room.design,
+          watch
+              ? ref.watch(marketplace3dProductsProvider)
+              : ref.read(marketplace3dProductsProvider));
+
   void _enterShowroom(ShowroomRoom room) {
     if (_showroomDesign == null && widget.design != null) {
       _returnDesign = _currentDesign();
     }
-    _showroomDesign = room.design;
+    final furnished = _furnished(room);
+    _showroomDesign = furnished;
     _placing = null;
     _placingRotation = 0;
     _showHint = true;
-    _rebuildController(room.design);
+    _rebuildController(furnished);
     setState(() => _inGallery = false);
   }
 
@@ -726,7 +747,16 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
 
   void _place() {
     if (_placing == null) return;
-    final placed = _ctl.place(_pending());
+    final pending = _pending();
+    if (!_ctl.ghostFits(pending)) {
+      showAppSnackbar(
+          context,
+          '${pending.name} (${pending.width.toInt()}×${pending.height.toInt()} cm) '
+          "doesn't fit in this room${_placingRotation == 0 ? ' — try rotating it' : ''}.",
+          isError: true);
+      return;
+    }
+    final placed = _ctl.place(pending);
     showAppSnackbar(context, '${placed.name} placed');
   }
 
@@ -759,6 +789,7 @@ class _WalkthroughScreenState extends ConsumerState<WalkthroughScreen> {
       heightCm: _ctl.roomH,
       furniture: List.of(_ctl.furniture),
       walls: List.of(_ctl.walls),
+      interiorWalls: [for (final c in _ctl.interiorWalls) List.of(c)],
       detectedItems: existing?.detectedItems ?? const [],
       floorFinishType: existing?.floorFinishType,
       floorFinishColor: existing?.floorFinishColor,

@@ -114,8 +114,13 @@ void main() {
       for (var i = 0; i < 20; i++) {
         c.move(const Offset(1, 0));
       }
-      // 380 + 30 would put the walker past the 18 cm radius at 382.
-      expect(c.walker.dx, 380);
+      // Last whole 30 cm step from the 200 cm center that keeps the walker
+      // radius clear of the 400 cm wall.
+      const r = WalkthroughController.walkerRadiusCm;
+      final lastStep =
+          200 + ((400 - r - 200) / WalkthroughController.stepCm).floor() *
+              WalkthroughController.stepCm;
+      expect(c.walker.dx, lastStep);
       expect(c.walker.dx,
           lessThanOrEqualTo(400 - WalkthroughController.walkerRadiusCm));
     });

@@ -1100,6 +1100,7 @@ Uint8List generateRoomShellGlb({
   required FloorFinish floor,
   required WallFinish wall,
   List<bool>? cutMask,
+  List<DraftWall> draftWalls = const [],
 }) {
   if (shell.floorTriangles.isEmpty) {
     throw ArgumentError.value(
@@ -1247,7 +1248,91 @@ Uint8List generateRoomShellGlb({
         const _Vec3(0, 1, 0), _tone(bbC, 1.06), _kMatSatin);
   }
 
+  // ── draft walls ──
+  // A part-drawn outline (1–2 corners) still shows real walls: each run is
+  // a solid 10 cm slab centered on its line, a lone corner a square post.
+  for (final d in draftWalls) {
+    _emitDraftWall(mesh, d, d.cut ? cutH : wallH, wallBase, wallMat,
+        _cmToM(shell.wallThicknessCm));
+  }
+
   return mesh.buildGlb('room_shell');
+}
+
+class DraftWall {
+  const DraftWall(this.aCm, this.bCm, {this.cut = false});
+
+  final Offset aCm;
+  final Offset bCm;
+
+  // Dollhouse height: the run stands between the planner camera and the
+  // room.
+  final bool cut;
+}
+
+void _emitDraftWall(_Mesh mesh, DraftWall d, double h, int base, int mat,
+    double t) {
+  final a = Offset(_cmToM(d.aCm.dx), _cmToM(d.aCm.dy));
+  final b = Offset(_cmToM(d.bCm.dx), _cmToM(d.bCm.dy));
+  final len = (b - a).distance;
+  final dir = len < 1e-6 ? const Offset(1, 0) : (b - a) / len;
+  final n = Offset(-dir.dy, dir.dx);
+  final half = t / 2;
+  // End caps extend half a thickness so consecutive runs overlap into a
+  // solid corner.
+  final a0 = a - dir * half;
+  final b0 = b + dir * half;
+  final c = [
+    a0 + n * half,
+    b0 + n * half,
+    b0 - n * half,
+    a0 - n * half,
+  ];
+  _Vec3 lo(Offset p) => _Vec3(p.dx, 0, p.dy);
+  _Vec3 hi(Offset p) => _Vec3(p.dx, h, p.dy);
+  for (var i = 0; i < 4; i++) {
+    final p = c[i];
+    final q = c[(i + 1) % 4];
+    final e = q - p;
+    final el = e.distance;
+    if (el < 1e-9) continue;
+    final out = Offset(e.dy / el, -e.dx / el);
+    final mid = (p + q) / 2;
+    final centre = (a + b) / 2;
+    final flip = (mid - centre).dx * out.dx + (mid - centre).dy * out.dy < 0;
+    final nn = flip ? Offset(-out.dx, -out.dy) : out;
+    mesh.quad(lo(p), lo(q), hi(q), hi(p), _Vec3(nn.dx, 0, nn.dy),
+        _tone(base, i.isEven ? 1.0 : 0.9), mat);
+  }
+  mesh.quad(hi(c[0]), hi(c[1]), hi(c[2]), hi(c[3]), const _Vec3(0, 1, 0),
+      _tone(base, 1.08), mat);
+}
+
+// First-person ceiling: the floor ring lifted to wall height, facing down.
+// A separate node so it can opt out of shadow casting.
+Uint8List generateRoomCeilingGlb({
+  required ShellGeometry shell,
+  required WallFinish wall,
+}) {
+  if (shell.floorTriangles.isEmpty) {
+    throw ArgumentError.value(shell.ringCm.length, 'shell.ringCm',
+        'generateRoomCeilingGlb requires a closed ring of at least 3 corners');
+  }
+  final mesh = _Mesh();
+  final h = _cmToM(shell.wallHeightCm);
+  // Ceilings read soft warm white whatever the wall paint; unlit, so the
+  // tone shows as authored instead of the IBL's dim underside.
+  final color = _tone(0xFFE9E5DE, 1.0);
+  for (final tri in shell.outerFloorTriangles) {
+    mesh._tri(
+        _Vec3(_cmToM(tri[0].dx), h, _cmToM(tri[0].dy)),
+        _Vec3(_cmToM(tri[1].dx), h, _cmToM(tri[1].dy)),
+        _Vec3(_cmToM(tri[2].dx), h, _cmToM(tri[2].dy)),
+        const _Vec3(0, -1, 0),
+        color,
+        _kMatUnlit);
+  }
+  return mesh.buildGlb('room_ceiling');
 }
 
 void _emitFloorRectClipped(_Mesh m, double x0, double z0, double x1, double z1,
@@ -1374,6 +1459,9 @@ const int _kMatMatte = 0;
 const int _kMatSatin = 1;
 const int _kMatMetal = 2;
 const int _kMatGloss = 3;
+// Emitted only when a mesh uses it (KHR_materials_unlit) — the walkthrough
+// ceiling faces away from the key light and read as a dull grey slab lit.
+const int _kMatUnlit = 4;
 
 const List<Map<String, dynamic>> _kMaterials = [
   {'name': 'matte', 'metallicFactor': 0.0, 'roughnessFactor': 0.92},
@@ -1425,7 +1513,10 @@ Uint8List _buildGlb(_Mesh mesh, String nodeName) {
   final groupCounts = <int>[];
   for (final mat in usedMats) {
     final idxs = groups[mat]!;
-    groupOffsets.add(o);
+    // Accessor byteOffset is relative to bufferView 1, which already starts
+    // at vertexBytes — the absolute write cursor would double-count it and
+    // point every loader past the end of the buffer.
+    groupOffsets.add(o - vertexBytes);
     groupCounts.add(idxs.length);
     for (final idx in idxs) {
       if (use32) {
@@ -1457,11 +1548,13 @@ Uint8List _buildGlb(_Mesh mesh, String nodeName) {
   }
 
   // ── JSON chunk ───────────────────────────────────────────────────────────
+  final usesUnlit = usedMats.contains(_kMatUnlit);
   final json = <String, dynamic>{
     'asset': {
       'version': '2.0',
       'generator': 'interior_design_recommendation/glb_generator.dart',
     },
+    if (usesUnlit) 'extensionsUsed': ['KHR_materials_unlit'],
     'scene': 0,
     'scenes': [
       {
@@ -1497,7 +1590,18 @@ Uint8List _buildGlb(_Mesh mesh, String nodeName) {
             'roughnessFactor': spec['roughnessFactor'],
           },
           'doubleSided': true,
-        }
+        },
+      if (usesUnlit)
+        {
+          'name': 'unlit',
+          'pbrMetallicRoughness': {
+            'baseColorFactor': [1.0, 1.0, 1.0, 1.0],
+            'metallicFactor': 0.0,
+            'roughnessFactor': 1.0,
+          },
+          'extensions': {'KHR_materials_unlit': <String, dynamic>{}},
+          'doubleSided': true,
+        },
     ],
     'buffers': [
       {'byteLength': vertexBytes + indexBytes}

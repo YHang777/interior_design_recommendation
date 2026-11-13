@@ -1387,6 +1387,12 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             ),
           ),
           const SizedBox(height: 6),
+          // Ink + tile background need a Material between them and the
+          // card's coloured box (ListTile 'may be invisible' assertion).
+          Material(
+            type: MaterialType.transparency,
+            child: Column(
+              children: [
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _isEco,
@@ -1436,6 +1442,9 @@ class _ProductFormScreenState extends ConsumerState<ProductFormScreen> {
             ),
             secondary: const Icon(Icons.visibility_outlined,
                 color: AppColors.secondaryAccent),
+          ),
+              ],
+            ),
           ),
         ],
       ),

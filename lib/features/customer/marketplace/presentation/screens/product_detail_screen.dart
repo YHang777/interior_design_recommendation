@@ -611,8 +611,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary)),
-        const Spacer(),
-        QuantityStepper(
+        const SizedBox(width: 12),
+        // The stepper keeps its natural size where it fits and scales down
+        // on narrow phones / large text instead of overflowing.
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: QuantityStepper(
           value: _clampedQty(product),
           min: 1,
           max: product.stock,
@@ -624,6 +631,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                 ? 'Only ${product.stock} available — that\'s the maximum'
                 : 'Minimum quantity is 1',
             color: AppColors.warning,
+          ),
+        ),
+            ),
           ),
         ),
       ],
@@ -900,11 +910,16 @@ class _ChipBadge extends StatelessWidget {
             Icon(icon, size: 12, color: color),
             const SizedBox(width: 4),
           ],
-          Text(text,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color)),
+          // A category/style longer than the line has nowhere to wrap to.
+          Flexible(
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: color)),
+          ),
         ],
       ),
     );

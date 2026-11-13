@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart' show Icons;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/catalog_model_resolver.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/furniture_catalog.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late Directory tempRoot;
 
   setUp(() {
@@ -25,10 +28,27 @@ void main() {
   RoomCatalogItem item(String iconName) =>
       roomCatalog.firstWhere((c) => c.iconName == iconName);
 
-  test('bundled pieces resolve to their asset URI', () async {
+  test('bundled pieces materialize to an identical GLB file', () async {
+    final data = await rootBundle.load('assets/models/three_seater_sofa.glb');
+    final assetBytes =
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
     final src = await resolver().resolve(item('sofa'));
-    expect(src.sourceType, 'asset');
-    expect(src.source, 'assets/models/three_seater_sofa.glb');
+    expect(src.sourceType, 'file', reason: 'one proven file:// load path');
+    expect(src.file!.existsSync(), isTrue);
+    expect(src.file!.readAsBytesSync(), assetBytes);
+    expect(GlbBounds.fromGlbBytes(assetBytes).widthM, greaterThan(0));
+  });
+
+  test('a stale or corrupt cache file is re-authored on a fresh resolver',
+      () async {
+    final first = await resolver().resolve(item('bookshelf'));
+    final good = first.file!.readAsBytesSync();
+    first.file!.writeAsBytesSync([1, 2, 3, 4]);
+    final second = await resolver().resolve(item('bookshelf'));
+    expect(second.file!.path, first.file!.path);
+    expect(second.file!.readAsBytesSync(), good,
+        reason: 'the pre-fix build left corrupt GLBs on device — reuse kept '
+            'them alive forever');
   });
 
   test('stand-in pieces generate a real model at catalog size', () async {

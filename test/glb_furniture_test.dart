@@ -330,5 +330,58 @@ void main() {
           depthM: 0.4));
       expect(primitivesOf(json), hasLength(1));
     });
+
+    test('every material group indexes real emitted triangles', () {
+      List<int> readIndices(
+          Map<String, dynamic> json, Uint8List bytes, int accessorIdx) {
+        final data = ByteData.sublistView(bytes);
+        final accessors = json['accessors'] as List;
+        final bufferViews = json['bufferViews'] as List;
+        final acc = accessors[accessorIdx] as Map<String, dynamic>;
+        final bv =
+            bufferViews[acc['bufferView'] as int] as Map<String, dynamic>;
+        final jsonLen = data.getUint32(12, Endian.little);
+        final base = 12 + 8 + jsonLen + 8 +
+            (bv['byteOffset'] as int? ?? 0) +
+            (acc['byteOffset'] as int? ?? 0);
+        final count = acc['count'] as int;
+        final comp = acc['componentType'] as int;
+        return [
+          for (var i = 0; i < count; i++)
+            comp == 5123
+                ? data.getUint16(base + i * 2, Endian.little)
+                : data.getUint32(base + i * 4, Endian.little),
+        ];
+      }
+
+      for (final (category, name) in [
+        ('storage', 'Cabinet'),
+        ('Furniture', 'Mystery Object'),
+      ]) {
+        final bytes = generateFurnitureGlb(
+            category: category,
+            name: name,
+            widthM: 0.9,
+            heightM: 1.8,
+            depthM: 0.5);
+        final json = glbJson(bytes);
+        final vCount =
+            ((json['accessors'] as List).first as Map)['count'] as int;
+        final prims = primitivesOf(json);
+        for (var gi = 0; gi < prims.length; gi++) {
+          final idx = readIndices(json, bytes, prims[gi]['indices'] as int);
+          expect(idx.length % 3, 0, reason: '$name group $gi whole triangles');
+          for (var t = 0; t < idx.length; t += 3) {
+            // _tri emits three fresh vertices per triangle: (3k, 3k+1, 3k+2).
+            // Scrambled accessor offsets break exactly this.
+            expect(idx[t] % 3, 0, reason: '$name group $gi tri $t');
+            expect(idx[t + 1], idx[t] + 1, reason: '$name group $gi tri $t');
+            expect(idx[t + 2], idx[t] + 2, reason: '$name group $gi tri $t');
+            expect(idx[t + 2], lessThan(vCount),
+                reason: '$name group $gi tri $t');
+          }
+        }
+      }
+    });
   });
 }

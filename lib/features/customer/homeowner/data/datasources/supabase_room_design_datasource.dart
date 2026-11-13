@@ -70,10 +70,13 @@ class SupabaseRoomDesignDatasource {
       if (data.containsKey('heightCm')) 'height_cm': data['heightCm'],
       if (data.containsKey('furniture') ||
           data.containsKey('walls') ||
+          data.containsKey('interiorWalls') ||
           hasFinishes)
         'furniture': {
           'items': data['furniture'] ?? [],
           'walls': data['walls'] ?? [],
+          if (data['interiorWalls'] != null)
+            'interiorWalls': data['interiorWalls'],
           if (hasFinishes)
             'finishes': {
               if (data['floorFinishType'] != null)

@@ -27,16 +27,23 @@ class PageHeading extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: titleStyle ??
-                    GoogleFonts.poppins(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.3,
-                      height: 1.2,
-                    ),
+              // One line that scales down: at large text sizes a single
+              // word ("Marketplace") otherwise broke mid-word.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  style: titleStyle ??
+                      GoogleFonts.poppins(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                        letterSpacing: -0.3,
+                        height: 1.2,
+                      ),
+                ),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 6),

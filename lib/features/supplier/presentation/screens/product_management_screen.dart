@@ -628,12 +628,18 @@ class _ProductTile extends StatelessWidget {
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              Text(
-                                Formatters.myr(product.price),
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.accent,
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    Formatters.myr(product.price),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.accent,
+                                    ),
+                                  ),
                                 ),
                               ),
                               if (product.discountPercent != null) ...[

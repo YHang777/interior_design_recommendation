@@ -574,13 +574,18 @@ class _CheckoutBar extends StatelessWidget {
               ],
               Row(
                 children: [
-                  Text(
-                    'Subtotal ($itemCount item${itemCount == 1 ? '' : 's'})',
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      color: AppColors.textPrimary,
+                  Flexible(
+                    child: Text(
+                      'Subtotal ($itemCount item${itemCount == 1 ? '' : 's'})',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: FittedBox(
                       fit: BoxFit.scaleDown,

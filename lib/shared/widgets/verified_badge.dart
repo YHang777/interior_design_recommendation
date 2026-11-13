@@ -74,7 +74,15 @@ class VerifiedSellerLine extends StatelessWidget {
           ),
           const SizedBox(width: 4),
         ],
-        VerifiedBadge(verificationStatus: supplier.verificationStatus),
+        // Scales down rather than overflowing when the card is narrower
+        // than the badge (small phones, large text).
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: VerifiedBadge(verificationStatus: supplier.verificationStatus),
+          ),
+        ),
       ],
     );
   }

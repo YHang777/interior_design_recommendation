@@ -55,6 +55,7 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
       fovDeg: 70);
   FurniturePlacement? _resolvedGhost;
   double _pinchZoom = 1;
+  double? _aspect;
 
   @override
   void initState() {
@@ -91,7 +92,7 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
 
   void _pushCamera() {
     final c = widget.controller;
-    widget.rig.setZoom(c.zoom);
+    widget.rig.setZoom(c.zoom, aspect: _aspect);
     _pose = widget.rig.pose(
       walkerXCm: c.walker.dx,
       walkerYCm: c.walker.dy,
@@ -111,6 +112,7 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
     final wall = WallFinish(type: sel.wallType, colorArgb: sel.wallColorArgb);
     final sig = '${c.roomW}x${c.roomH}#'
         '${c.walls.map((p) => '${p.dx},${p.dy}').join('|')}#'
+        '${c.interiorWalls.map((ch) => ch.map((p) => '${p.dx},${p.dy}').join(';')).join('|')}#'
         '${sel.floorType},${sel.floorColorArgb},${sel.floorSizeM}#'
         '${sel.wallType},${sel.wallColorArgb}#'
         '${c.furniture.map((f) => '${f.id}:${f.x},${f.y},${f.rotation},${f.width},${f.height}').join('|')}';
@@ -121,7 +123,9 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
         roomWCm: c.roomW,
         roomHCm: c.roomH,
         floor: floor,
-        wall: wall);
+        wall: wall,
+        ceiling: true,
+        interiorWallsCm: c.interiorWalls);
     _bridge.syncFurniture(c.furniture);
   }
 
@@ -145,6 +149,16 @@ class _WalkthroughSceneState extends State<WalkthroughScene> {
   @override
   Widget build(BuildContext context) {
     if (!Scene3DView.supported) return widget.fallback;
+    return LayoutBuilder(builder: (context, constraints) {
+      final size = constraints.biggest;
+      if (size.width > 0 && size.height > 0 && size.isFinite) {
+        _aspect = size.width / size.height;
+      }
+      return _stage();
+    });
+  }
+
+  Widget _stage() {
     _pushCamera();
     _syncModels();
     _resolvedGhost = widget.ghost == null

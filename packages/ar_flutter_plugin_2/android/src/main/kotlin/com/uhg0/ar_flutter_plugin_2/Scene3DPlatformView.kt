@@ -1,6 +1,7 @@
 package com.uhg0.ar_flutter_plugin_2
 
 import android.content.Context
+import android.net.Uri
 import android.view.View
 import androidx.lifecycle.Lifecycle
 import com.google.android.filament.Skybox
@@ -14,6 +15,7 @@ import io.flutter.plugin.platform.PlatformView
 import io.github.sceneview.SceneView
 import io.github.sceneview.collision.Vector3
 import io.github.sceneview.node.ModelNode
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +36,10 @@ class Scene3DPlatformView(
     private val sceneView = SceneView(context = context, sharedLifecycle = lifecycle)
     private val channel = MethodChannel(messenger, "scene3d_$id")
     private val nodesMap = mutableMapOf<String, ModelNode>()
+    // Latest addModel request per id — an older, slower load finishing late
+    // must not replace the newer model (stand-in vs real GLB).
+    private val addSeq = mutableMapOf<String, Int>()
+    private var seqCounter = 0
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var disposed = false
 
@@ -48,9 +54,20 @@ class Scene3DPlatformView(
         disposed = true
         channel.setMethodCallHandler(null)
         mainScope.cancel()
-        nodesMap.values.toList().forEach { sceneView.removeChildNode(it) }
+        // The shared lifecycle may already have torn the Filament scene down
+        // (gallery card scrolled away) — removing nodes then throws
+        // "Calling method on destroyed Scene". destroy() frees them anyway.
+        nodesMap.values.toList().forEach {
+            try {
+                sceneView.removeChildNode(it)
+            } catch (_: Throwable) {
+            }
+        }
         nodesMap.clear()
-        sceneView.destroy()
+        try {
+            sceneView.destroy()
+        } catch (_: Throwable) {
+        }
     }
 
     // ── environment ──
@@ -135,12 +152,19 @@ class Scene3DPlatformView(
         val up = float3Of(call.argument<List<Any?>>("up")) ?: Float3(0.0f, 1.0f, 0.0f)
         val fovDeg = numOf(call.argument<Any?>("fovDeg")) ?: 55.0f
         sceneView.cameraNode.lookAt(eye, target, up)
-        // Vertical FOV; aspect follows the laid-out surface, with a sane
-        // placeholder before the first layout pass.
+        // Dart sends a VERTICAL FOV; setLensProjection takes a FOCAL LENGTH
+        // in mm over Filament's 24 mm sensor height. Passing the degrees
+        // straight through made "55°" a 55 mm telephoto (~25°) — everything
+        // rendered ~2.3× too big and drifted off the Dart-projected overlays.
+        // The focal length is also stored on the node because SceneView
+        // re-applies it on every surface resize.
+        val halfFov = Math.toRadians(fovDeg.toDouble().coerceIn(10.0, 120.0)) / 2.0
+        val focalMm = 12.0 / Math.tan(halfFov)
         val w = sceneView.width
         val h = sceneView.height
         val aspect = if (w > 0 && h > 0) w.toDouble() / h.toDouble() else 16.0 / 9.0
-        sceneView.cameraNode.setLensProjection(fovDeg.toDouble(), aspect, 0.05, 100.0)
+        sceneView.cameraNode.focalLength = focalMm
+        sceneView.cameraNode.setLensProjection(focalMm, aspect, 0.05, 100.0)
         result.success(null)
     }
 
@@ -151,26 +175,50 @@ class Scene3DPlatformView(
             result.error("INVALID_ARGUMENTS", "id and source are required", null)
             return
         }
+        // SceneView's FileLoader treats a bare path as an APK asset name and
+        // throws inside its own unmanaged coroutine (fatal). Cache files must
+        // arrive as file:// URIs — the same form the AR path passes.
         val fileLocation = when (call.argument<String>("sourceType")) {
             "asset" -> FlutterInjector.instance().flutterLoader().getLookupKeyForAsset(source)
-            else -> source
+            else -> if (source.contains("://")) {
+                source
+            } else {
+                Uri.fromFile(File(source)).toString()
+            }
         }
         val transform = readTransform(call)
-        sceneView.modelLoader.loadModelInstanceAsync(fileLocation) { instance ->
-            mainScope.launch {
-                if (disposed) return@launch
-                if (instance == null) {
-                    result.error("MODEL_LOAD_ERROR", "failed to load $source", null)
-                    return@launch
-                }
-                nodesMap.remove(id)?.let { sceneView.removeChildNode(it) }
-                val node = ModelNode(modelInstance = instance, autoAnimate = false)
-                node.name = id
-                applyTransform(node, transform)
-                nodesMap[id] = node
-                sceneView.addChildNode(node)
-                result.success(null)
+        val castShadows = call.argument<Boolean>("castShadows") ?: true
+        val seq = ++seqCounter
+        addSeq[id] = seq
+        // Loading on our scope turns an unreadable file into MODEL_LOAD_ERROR
+        // instead of an app crash (loadModelInstanceAsync has no error path).
+        mainScope.launch {
+            val instance = try {
+                sceneView.modelLoader.loadModelInstance(fileLocation)
+            } catch (e: Throwable) {
+                NativeTrace.log(viewContextOf(), "scene3d: model load failed $source: $e")
+                null
             }
+            if (disposed) return@launch
+            if (addSeq[id] != seq) {
+                result.success(null)
+                return@launch
+            }
+            if (instance == null) {
+                result.error("MODEL_LOAD_ERROR", "failed to load $source", null)
+                return@launch
+            }
+            nodesMap.remove(id)?.let { sceneView.removeChildNode(it) }
+            val node = ModelNode(modelInstance = instance, autoAnimate = false)
+            node.name = id
+            try {
+                node.isShadowCaster = castShadows
+            } catch (_: Throwable) {
+            }
+            applyTransform(node, transform)
+            nodesMap[id] = node
+            sceneView.addChildNode(node)
+            result.success(null)
         }
     }
 
@@ -248,9 +296,10 @@ class Scene3DPlatformView(
     }
 
     private fun applyTransform(node: ModelNode, t: Transform) {
-        node.scale = Float3(t.sx, t.sy, t.sz)
-        // Bounding box is model-space and unscaled; ground the scaled min-Y.
+        // Bounds are model-space and unscaled — read them before touching
+        // scale so no scale-dependent cache can taint the grounding math.
         val minModelY = node.center.y - node.halfExtent.y
+        node.scale = Float3(t.sx, t.sy, t.sz)
         node.position = Float3(t.x, t.y - minModelY * t.sy, t.z)
         node.rotation = Float3(0.0f, t.yawDeg, 0.0f)
     }

@@ -97,6 +97,165 @@ class GlbBounds {
     );
   }
 
+  // Bounds as the renderer sees the model: every mesh's POSITION box pushed
+  // through its node's world transform (matrix or TRS, composed down the
+  // default scene). Bundled catalog GLBs carry Z-up→Y-up rotations and unit
+  // scales (0.01, 5.53 …) on their nodes; fitting a seller box against raw
+  // accessor bounds swapped height/depth and blew pieces up to room size or
+  // shrank them to millimetres. Raw [fromGlbBytes] stays for callers that
+  // rewrite vertex data directly (glb_rescaler).
+  static GlbBounds sceneFromGlbBytes(Uint8List bytes) {
+    final glb = GlbStructure.parse(bytes);
+    final json = glb.json;
+    final nodes = json['nodes'];
+    final meshes = json['meshes'];
+    if (nodes is! List || meshes is! List || nodes.isEmpty) {
+      return fromGlbBytes(bytes);
+    }
+    List<int> roots;
+    final scenes = json['scenes'];
+    final sceneIdx = json['scene'] is int ? json['scene'] as int : 0;
+    if (scenes is List &&
+        sceneIdx >= 0 &&
+        sceneIdx < scenes.length &&
+        scenes[sceneIdx] is Map &&
+        (scenes[sceneIdx] as Map)['nodes'] is List) {
+      roots = [
+        for (final n in (scenes[sceneIdx] as Map)['nodes'] as List)
+          if (n is int) n,
+      ];
+    } else {
+      final children = <int>{};
+      for (final n in nodes) {
+        if (n is Map && n['children'] is List) {
+          for (final c in n['children'] as List) {
+            if (c is int) children.add(c);
+          }
+        }
+      }
+      roots = [
+        for (var i = 0; i < nodes.length; i++)
+          if (!children.contains(i)) i,
+      ];
+    }
+
+    var minX = double.infinity, minY = double.infinity, minZ = double.infinity;
+    var maxX = double.negativeInfinity,
+        maxY = double.negativeInfinity,
+        maxZ = double.negativeInfinity;
+    var found = false;
+
+    List<double>? boxOf(int accessorIndex) {
+      final a = glb.rawAccessor(accessorIndex);
+      if (a == null) return null;
+      final lo = GlbStructure.finiteMinMax(a['min']);
+      final hi = GlbStructure.finiteMinMax(a['max']);
+      if (lo == null || hi == null) return null;
+      return [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]];
+    }
+
+    void visit(int idx, List<double> parent, int depth) {
+      if (depth > 64 || idx < 0 || idx >= nodes.length) return;
+      final node = nodes[idx];
+      if (node is! Map) return;
+      final world = _mul(parent, _localMatrix(node));
+      final meshIdx = node['mesh'];
+      if (meshIdx is int && meshIdx >= 0 && meshIdx < meshes.length) {
+        final mesh = meshes[meshIdx];
+        final prims = mesh is Map ? mesh['primitives'] : null;
+        if (prims is List) {
+          for (final p in prims) {
+            final attrs = p is Map ? p['attributes'] : null;
+            final pos = attrs is Map ? attrs['POSITION'] : null;
+            if (pos is! int) continue;
+            final box = boxOf(pos);
+            if (box == null) continue;
+            for (var c = 0; c < 8; c++) {
+              final x = (c & 1) == 0 ? box[0] : box[3];
+              final y = (c & 2) == 0 ? box[1] : box[4];
+              final z = (c & 4) == 0 ? box[2] : box[5];
+              final wx = world[0] * x + world[4] * y + world[8] * z + world[12];
+              final wy = world[1] * x + world[5] * y + world[9] * z + world[13];
+              final wz = world[2] * x + world[6] * y + world[10] * z + world[14];
+              if (wx < minX) minX = wx;
+              if (wy < minY) minY = wy;
+              if (wz < minZ) minZ = wz;
+              if (wx > maxX) maxX = wx;
+              if (wy > maxY) maxY = wy;
+              if (wz > maxZ) maxZ = wz;
+              found = true;
+            }
+          }
+        }
+      }
+      final children = node['children'];
+      if (children is List) {
+        for (final c in children) {
+          if (c is int) visit(c, world, depth + 1);
+        }
+      }
+    }
+
+    const identity = <double>[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    for (final r in roots) {
+      visit(r, identity, 0);
+    }
+    if (!found || !minX.isFinite || !maxX.isFinite) return fromGlbBytes(bytes);
+    return GlbBounds(
+      minX: minX,
+      minY: minY,
+      minZ: minZ,
+      maxX: maxX,
+      maxY: maxY,
+      maxZ: maxZ,
+    );
+  }
+
+  // Column-major 4×4, glTF convention: matrix wins, else T · R · S.
+  static List<double> _localMatrix(Map node) {
+    final m = node['matrix'];
+    if (m is List && m.length == 16 && m.every((v) => v is num)) {
+      return [for (final v in m) (v as num).toDouble()];
+    }
+    List<double> vec(Object? v, List<double> dflt) =>
+        v is List && v.length == dflt.length && v.every((e) => e is num)
+            ? [for (final e in v) (e as num).toDouble()]
+            : dflt;
+    final t = vec(node['translation'], const [0, 0, 0]);
+    final q = vec(node['rotation'], const [0, 0, 0, 1]);
+    final s = vec(node['scale'], const [1, 1, 1]);
+    final x = q[0], y = q[1], z = q[2], w = q[3];
+    final r00 = 1 - 2 * (y * y + z * z);
+    final r01 = 2 * (x * y - z * w);
+    final r02 = 2 * (x * z + y * w);
+    final r10 = 2 * (x * y + z * w);
+    final r11 = 1 - 2 * (x * x + z * z);
+    final r12 = 2 * (y * z - x * w);
+    final r20 = 2 * (x * z - y * w);
+    final r21 = 2 * (y * z + x * w);
+    final r22 = 1 - 2 * (x * x + y * y);
+    return [
+      r00 * s[0], r10 * s[0], r20 * s[0], 0,
+      r01 * s[1], r11 * s[1], r21 * s[1], 0,
+      r02 * s[2], r12 * s[2], r22 * s[2], 0,
+      t[0], t[1], t[2], 1,
+    ];
+  }
+
+  static List<double> _mul(List<double> a, List<double> b) {
+    final out = List<double>.filled(16, 0);
+    for (var col = 0; col < 4; col++) {
+      for (var row = 0; row < 4; row++) {
+        var sum = 0.0;
+        for (var k = 0; k < 4; k++) {
+          sum += a[k * 4 + row] * b[col * 4 + k];
+        }
+        out[col * 4 + row] = sum;
+      }
+    }
+    return out;
+  }
+
   @override
   String toString() =>
       'GlbBounds(min=($minX, $minY, $minZ), max=($maxX, $maxY, $maxZ), '

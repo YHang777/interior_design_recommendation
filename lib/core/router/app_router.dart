@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -47,13 +48,26 @@ import '../../shared/screens/order_receipt_screen.dart';
 
 import 'route_names.dart';
 
+// Debug-only device sandbox: `flutter run --dart-define=SANDBOX_ROUTE=/walkthrough`
+// (or /design-editor, /ar-viewer) opens straight onto that screen with no
+// sign-in, for emulator/device testing of the 3D and AR surfaces.
+// kDebugMode is a compile-time false in profile/release, so this can never
+// ship.
+const _sandboxRoute =
+    kDebugMode ? String.fromEnvironment('SANDBOX_ROUTE') : '';
+const _sandboxRoutes = {'/walkthrough', '/design-editor', '/ar-viewer'};
+const _sandbox = _sandboxRoute != '';
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authRefresh = ref.watch(authRefreshProvider);
 
   return GuardedGoRouter(
-    initialLocation: '/login',
+    initialLocation: _sandbox ? _sandboxRoute : '/login',
     refreshListenable: authRefresh,
     redirect: (context, state) {
+      if (_sandbox && _sandboxRoutes.contains(state.matchedLocation)) {
+        return null;
+      }
       final authState = ref.read(authStateProvider);
 
       final isLoading = authState.isLoading;

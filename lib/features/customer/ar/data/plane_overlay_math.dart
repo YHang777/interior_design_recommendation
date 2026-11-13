@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 import 'placement_policy.dart';
@@ -136,6 +137,33 @@ double trustedOverlayRefY({
       : floorY;
 }
 
+// Payload-lowest horizontal plane — the untrusted-floorY reference. A plane
+// more than [maxBelowCameraM] under the phone is another storey (a courtyard
+// over a balcony railing, a stairwell) and can never be the floor being
+// stood on; letting it anchor turned every real floor plane into a mask.
+// Subsumed planes are mask material, and a held plane far below the
+// remembered floor is a stale ghost.
+double? overlayLowestPlaneY({
+  required List<ARPlaneInfo> planes,
+  required Set<int> liveIds,
+  double? floorY,
+  double? cameraY,
+  double maxBelowCameraM = 2.4,
+}) {
+  double? lowest;
+  for (final p in planes) {
+    if (p.planeType != 1 || p.subsumed || !p.centerY.isFinite) continue;
+    if (cameraY != null && cameraY - p.centerY > maxBelowCameraM) continue;
+    if (!liveIds.contains(p.id) &&
+        floorY != null &&
+        p.centerY < floorY - 0.5) {
+      continue;
+    }
+    if (lowest == null || p.centerY < lowest) lowest = p.centerY;
+  }
+  return lowest;
+}
+
 OverlayZoneKind overlayZoneOf({
   required int planeType,
   required double centerY,
@@ -144,6 +172,7 @@ OverlayZoneKind overlayZoneOf({
   double? lowestPlaneY,
   bool floorYTrusted = false,
   bool corroborateFloorY = false,
+  bool floorYCameraBacked = true,
   double extentX = 0,
   double extentZ = 0,
 }) {
@@ -188,7 +217,9 @@ OverlayZoneKind overlayZoneOf({
     // No camera height: a plane at floor level still paints (the memory
     // already remembers this floor); anything else drops.
     if (cameraY == null) {
-      return (floorY != null && (centerY - floorY).abs() <= 0.3)
+      return (floorY != null &&
+              floorYCameraBacked &&
+              (centerY - floorY).abs() <= 0.3)
           ? OverlayZoneKind.floor
           : OverlayZoneKind.drop;
     }
@@ -206,7 +237,8 @@ OverlayZoneKind overlayZoneOf({
   // agree on when green may appear. floorY is deliberately ignored here.
   if (cameraY != null) {
     final below = cameraY - centerY;
-    return below >= plausibleMinM && below <= plausibleMaxM
+    if (below > plausibleMaxM) return OverlayZoneKind.drop;
+    return below >= plausibleMinM
         ? OverlayZoneKind.floor
         : OverlayZoneKind.mask;
   }
@@ -1071,7 +1103,7 @@ List<PlaneQuad> capWallQuads(List<PlaneQuad> walls, int max) {
 // commonly end 0.5–0.8 m short of the corner, so the gap bound sits at 0.8;
 // beyond that a break in the wall (door reveal, pillar) risks bridging.
 List<PlaneQuad> joinWallCorners(List<PlaneQuad> walls,
-    {double maxGapM = 0.8}) {
+    {double maxGapM = 0.8, double maxTrimM = 0.3}) {
   if (walls.length < 2) return List<PlaneQuad>.of(walls);
   final out = List<PlaneQuad>.of(walls);
   final yRange = [for (final q in out) _groupYRange([q])];
@@ -1101,22 +1133,28 @@ List<PlaneQuad> joinWallCorners(List<PlaneQuad> walls,
       // cross = sin(dihedral); the gate above keeps it far from singular.
       final t = (rcx * ubz - rcz * ubx) / cross; // P = cA + t·uA
       final s = (rcx * uaz - rcz * uax) / cross; // P = cB + s·uB
+      // Signed: positive = the run stops short of the corner, negative = it
+      // pokes past it. A small overshoot is fit noise bleeding paint over
+      // the adjacent wall and is cut back; a long one is a through-wall at
+      // a T-junction and stays.
       final gapA = t.abs() - a.extentX / 2;
       final gapB = s.abs() - b.extentX / 2;
-      final extA = gapA > 0.03 ? gapA : 0.0;
-      final extB = gapB > 0.03 ? gapB : 0.0;
-      if (extA == 0 && extB == 0) continue;
-      if (extA > maxGapM || extB > maxGapM) continue;
+      if (gapA > maxGapM || gapB > maxGapM) continue;
+      double adjust(double gap) =>
+          (gap > 0.03 || (gap < -0.03 && gap >= -maxTrimM)) ? gap : 0.0;
+      final adjA = adjust(gapA);
+      final adjB = adjust(gapB);
+      if (adjA == 0 && adjB == 0) continue;
       final endA = t > 0 ? 1 : -1;
       final endB = s > 0 ? 1 : -1;
-      if (extA > 0 && (usedEnds[i]?.contains(endA) ?? false)) continue;
-      if (extB > 0 && (usedEnds[j]?.contains(endB) ?? false)) continue;
-      if (extA > 0) {
-        out[i] = _extendWallEnd(a, gap: extA, end: endA);
+      if (adjA != 0 && (usedEnds[i]?.contains(endA) ?? false)) continue;
+      if (adjB != 0 && (usedEnds[j]?.contains(endB) ?? false)) continue;
+      if (adjA != 0) {
+        out[i] = _extendWallEnd(a, gap: adjA, end: endA);
         (usedEnds[i] ??= <int>{}).add(endA);
       }
-      if (extB > 0) {
-        out[j] = _extendWallEnd(b, gap: extB, end: endB);
+      if (adjB != 0) {
+        out[j] = _extendWallEnd(b, gap: adjB, end: endB);
         (usedEnds[j] ??= <int>{}).add(endB);
       }
     }
@@ -1136,7 +1174,19 @@ PlaneQuad _extendWallEnd(PlaneQuad q, {required double gap, required int end}) {
     q.center.z + uz * gap / 2 * end,
   );
   List<Vector3> poly = q.polygon;
-  if (poly.length >= 3) {
+  if (gap < 0 && poly.length >= 3) {
+    // Trim: clamp the outline at the corner line; vertices short of it keep
+    // the ARCore shape.
+    final limit = q.extentX / 2 + gap;
+    poly = [
+      for (final v in poly)
+        () {
+          final p = (v.x - q.center.x) * ux + (v.z - q.center.z) * uz;
+          final over = p * end - limit;
+          return over > 0 ? v - Vector3(ux * over * end, 0, uz * over * end) : v;
+        }(),
+    ];
+  } else if (poly.length >= 3) {
     var minP = double.infinity;
     var maxP = double.negativeInfinity;
     for (final v in poly) {

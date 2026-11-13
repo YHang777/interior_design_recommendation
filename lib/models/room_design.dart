@@ -9,6 +9,20 @@ List<Offset> _parseWalls(dynamic raw) {
   ];
 }
 
+// Interior wall chains: each inner list is a run of corners joined by real
+// walls INSIDE the room (partitions, closets). Never auto-closed.
+List<List<Offset>> _parseWallChains(dynamic raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final chain in raw)
+      if (chain is List)
+        () {
+          final pts = _parseWalls(chain);
+          return pts;
+        }(),
+  ].where((c) => c.isNotEmpty).toList();
+}
+
 class FurniturePlacement {
   final String id;
   final String name;
@@ -19,6 +33,14 @@ class FurniturePlacement {
   final double height;
   final double rotation;
   final String? imageAsset;
+  // Marketplace origin + the piece's own 3D model: an http(s) GLB (seller
+  // upload / Tripo) or a bundled 'assets/models/…' file. Null = the catalog
+  // model for [iconName].
+  final String? productId;
+  final String? modelUrl;
+  // True vertical size; null = the catalog height for [iconName].
+  final double? heightCm;
+  final String? imageUrl;
 
   const FurniturePlacement({
     required this.id,
@@ -30,6 +52,10 @@ class FurniturePlacement {
     required this.height,
     this.rotation = 0,
     this.imageAsset,
+    this.productId,
+    this.modelUrl,
+    this.heightCm,
+    this.imageUrl,
   });
 
   FurniturePlacement copyWith({
@@ -43,6 +69,10 @@ class FurniturePlacement {
     double? rotation,
     String? imageAsset,
     bool clearImageAsset = false,
+    String? productId,
+    String? modelUrl,
+    double? heightCm,
+    String? imageUrl,
   }) {
     return FurniturePlacement(
       id: id ?? this.id,
@@ -54,6 +84,10 @@ class FurniturePlacement {
       height: height ?? this.height,
       rotation: rotation ?? this.rotation,
       imageAsset: clearImageAsset ? null : (imageAsset ?? this.imageAsset),
+      productId: productId ?? this.productId,
+      modelUrl: modelUrl ?? this.modelUrl,
+      heightCm: heightCm ?? this.heightCm,
+      imageUrl: imageUrl ?? this.imageUrl,
     );
   }
 
@@ -69,6 +103,10 @@ class FurniturePlacement {
       'rotation': rotation,
     };
     if (imageAsset != null) m['imageAsset'] = imageAsset;
+    if (productId != null) m['productId'] = productId;
+    if (modelUrl != null) m['modelUrl'] = modelUrl;
+    if (heightCm != null) m['heightCm'] = heightCm;
+    if (imageUrl != null) m['imageUrl'] = imageUrl;
     return m;
   }
 
@@ -85,6 +123,12 @@ class FurniturePlacement {
       rotation:
           (json['rotation'] is num) ? (json['rotation'] as num).toDouble() : 0,
       imageAsset: json['imageAsset']?.toString(),
+      productId: json['productId']?.toString(),
+      modelUrl: json['modelUrl']?.toString(),
+      heightCm: (json['heightCm'] is num)
+          ? (json['heightCm'] as num).toDouble()
+          : null,
+      imageUrl: json['imageUrl']?.toString(),
     );
   }
 }
@@ -97,6 +141,7 @@ class RoomDesign {
   final double heightCm;
   final List<FurniturePlacement> furniture;
   final List<Offset> walls;
+  final List<List<Offset>> interiorWalls;
   final List<String> detectedItems;
   final String? imagePath;
   // Finish fields hold RoomFinishCatalog enum names + palette argbs (the AI
@@ -117,6 +162,7 @@ class RoomDesign {
     this.heightCm = 500,
     this.furniture = const [],
     this.walls = const [],
+    this.interiorWalls = const [],
     this.detectedItems = const [],
     this.imagePath,
     this.floorFinishType,
@@ -136,6 +182,7 @@ class RoomDesign {
     double? heightCm,
     List<FurniturePlacement>? furniture,
     List<Offset>? walls,
+    List<List<Offset>>? interiorWalls,
     List<String>? detectedItems,
     String? imagePath,
     bool clearImagePath = false,
@@ -155,6 +202,7 @@ class RoomDesign {
       heightCm: heightCm ?? this.heightCm,
       furniture: furniture ?? this.furniture,
       walls: walls ?? this.walls,
+      interiorWalls: interiorWalls ?? this.interiorWalls,
       detectedItems: detectedItems ?? this.detectedItems,
       imagePath: clearImagePath ? null : (imagePath ?? this.imagePath),
       floorFinishType: floorFinishType ?? this.floorFinishType,
@@ -175,6 +223,10 @@ class RoomDesign {
         'heightCm': heightCm,
         'furniture': furniture.map((f) => f.toJson()).toList(),
         'walls': [for (final w in walls) [w.dx, w.dy]],
+        if (interiorWalls.isNotEmpty)
+          'interiorWalls': [
+            for (final c in interiorWalls) [for (final p in c) [p.dx, p.dy]],
+          ],
         'detectedItems': detectedItems,
         if (imagePath != null) 'imagePath': imagePath,
         if (floorFinishType != null) 'floorFinishType': floorFinishType,
@@ -193,9 +245,11 @@ class RoomDesign {
     // arrays) must both load.
     var furnitureRaw = json['furniture'];
     var walls = const <Offset>[];
+    var interior = const <List<Offset>>[];
     Map? finishesRaw;
     if (furnitureRaw is Map) {
       walls = _parseWalls(furnitureRaw['walls']);
+      interior = _parseWallChains(furnitureRaw['interiorWalls']);
       if (furnitureRaw['finishes'] is Map) {
         finishesRaw = furnitureRaw['finishes'] as Map;
       }
@@ -203,6 +257,9 @@ class RoomDesign {
     }
     if (walls.isEmpty && json['walls'] is List) {
       walls = _parseWalls(json['walls']);
+    }
+    if (interior.isEmpty && json['interiorWalls'] is List) {
+      interior = _parseWallChains(json['interiorWalls']);
     }
     String? finishType(String flatKey, String nestedKey) =>
         json[flatKey]?.toString() ?? finishesRaw?[nestedKey]?.toString();
@@ -228,6 +285,7 @@ class RoomDesign {
               .toList()
           : [],
       walls: walls,
+      interiorWalls: interior,
       detectedItems: (json['detectedItems'] is List)
           ? (json['detectedItems'] as List<dynamic>)
               .map((e) => e.toString())

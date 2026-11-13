@@ -33,6 +33,7 @@ FurniturePlacement _f(
   double h, [
   double rotation = 0,
   String? imageAsset,
+  String? modelUrl,
 ]) =>
     FurniturePlacement(
       id: id,
@@ -44,6 +45,7 @@ FurniturePlacement _f(
       height: h,
       rotation: rotation,
       imageAsset: imageAsset,
+      modelUrl: modelUrl,
     );
 
 List<Offset> _box(double w, double h) =>
@@ -64,7 +66,8 @@ final showroomRooms = <ShowroomRoom>[
       walls: _box(500, 400),
       furniture: [
         _f('s1', 'Sofa', 'sofa', 160, 305, 180, 90, 0,
-            'assets/images/furniture_sofa_modern.png'),
+            'assets/images/furniture_sofa_modern.png',
+            'assets/models/tuxedo_sofa.glb'),
         _f('s2', 'Coffee Table', 'coffee_table', 200, 235, 100, 50, 0,
             'assets/images/furniture_table_coffee.png'),
         _f('s3', 'TV Stand', 'tv_stand', 180, 5, 140, 45),
@@ -155,15 +158,15 @@ final showroomRooms = <ShowroomRoom>[
       heightCm: 350,
       walls: _box(450, 350),
       furniture: [
-        _f('d1', 'Dining Table', 'dining_table', 250, 125, 140, 100, 0,
+        _f('d1', 'Dining Table', 'dining_table', 260, 125, 140, 100, 0,
             'assets/images/furniture_table_dining.png'),
-        _f('d2', 'Armchair', 'armchair', 265, 35, 70, 70, 0,
+        _f('d2', 'Armchair', 'armchair', 275, 35, 70, 70, 0,
             'assets/images/furniture_chair_modern.png'),
-        _f('d3', 'Armchair', 'armchair', 265, 235, 70, 70, 0,
+        _f('d3', 'Armchair', 'armchair', 275, 235, 70, 70, 0,
             'assets/images/furniture_chair_modern.png'),
-        _f('d4', 'Armchair', 'armchair', 135, 125, 70, 70, 0,
+        _f('d4', 'Armchair', 'armchair', 110, 125, 70, 70, 0,
             'assets/images/furniture_chair_modern.png'),
-        _f('d5', 'Rug', 'rug', 235, 115, 160, 120, 0,
+        _f('d5', 'Rug', 'rug', 245, 115, 160, 120, 0,
             'assets/images/furniture_rug_modern.png'),
         _f('d6', 'Plant', 'plant', 25, 25, 30, 30, 0,
             'assets/images/plant.jpg'),
@@ -226,7 +229,8 @@ final showroomRooms = <ShowroomRoom>[
       ],
       furniture: [
         _f('t1', 'Sofa', 'sofa', 30, 305, 180, 90, 0,
-            'assets/images/furniture_sofa_modern.png'),
+            'assets/images/furniture_sofa_modern.png',
+            'assets/models/apartment_sofa.glb'),
         _f('t2', 'Coffee Table', 'coffee_table', 70, 225, 100, 50, 0,
             'assets/images/furniture_table_coffee.png'),
         _f('t3', 'Bed', 'bed', 290, 80, 200, 160, 0,

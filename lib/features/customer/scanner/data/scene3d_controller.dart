@@ -18,6 +18,7 @@ class SceneModel {
     this.scaleX = 1,
     this.scaleY = 1,
     this.scaleZ = 1,
+    this.castShadows = true,
   });
 
   final String id;
@@ -43,6 +44,10 @@ class SceneModel {
 
   final double scaleZ;
 
+  // Off for the walkthrough ceiling — it would shade the whole room from the
+  // key light.
+  final bool castShadows;
+
   Map<String, Object?> toArgs({bool includeSource = true}) => {
         'id': id,
         if (includeSource) ...{
@@ -54,6 +59,7 @@ class SceneModel {
         'z': zM,
         'yawDeg': yawDeg,
         'scale': [scaleX, scaleY, scaleZ],
+        if (!castShadows) 'castShadows': false,
       };
 }
 

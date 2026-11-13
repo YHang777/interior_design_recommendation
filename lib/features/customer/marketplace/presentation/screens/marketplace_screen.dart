@@ -241,10 +241,16 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                   return SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     sliver: SliverGrid(
+                      // Taller cells as the user's text scale grows — the
+                      // fixed 0.68 clipped the price row at 1.3x text.
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
+                          SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        childAspectRatio: 0.68,
+                        childAspectRatio: 0.68 /
+                            (1 +
+                                (MediaQuery.textScalerOf(context).scale(1) - 1)
+                                        .clamp(0.0, 1.0) *
+                                    0.4),
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
                       ),

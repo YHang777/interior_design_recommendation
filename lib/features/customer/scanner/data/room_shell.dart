@@ -121,6 +121,10 @@ class ShellGeometry {
           ],
       ];
 
+  // Triangulated outer ring — the ceiling spans to the wall's outer face so
+  // no sliver of sky shows over the wall tops.
+  List<List<Offset>> get outerFloorTriangles => triangulateRing(outerRingCm);
+
   Rect get boundsCm {
     final pts = [...ringCm, ...outerRingCm];
     var minX = pts.first.dx, minY = pts.first.dy;

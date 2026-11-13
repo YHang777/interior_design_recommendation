@@ -493,19 +493,26 @@ class _Field extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              value,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary,
-              ),
-            ),
+            // Space-free values (emails, phone numbers) scale down on one
+            // line instead of breaking mid-word; addresses still wrap.
+            child: value.trim().contains(' ')
+                ? Text(value, style: _valueStyle)
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(value, maxLines: 1, style: _valueStyle),
+                  ),
           ),
         ],
       ),
     );
   }
+
+  static final TextStyle _valueStyle = GoogleFonts.poppins(
+    fontSize: 13,
+    fontWeight: FontWeight.w500,
+    color: AppColors.textPrimary,
+  );
 }
 
 class _EditField extends StatelessWidget {

@@ -905,18 +905,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     // movement beats, and a live-only reference re-anchors to a tabletop
     // and paints it as floor. A held plane far below the remembered floor
     // is a stale ghost and stays excluded.
-    double? lowestPlaneY;
-    for (final p in planes) {
-      if (p.planeType != 1 || p.subsumed) continue;
-      if (!liveIds.contains(p.id) &&
-          floorY != null &&
-          p.centerY < floorY - 0.5) {
-        continue;
-      }
-      if (lowestPlaneY == null || p.centerY < lowestPlaneY) {
-        lowestPlaneY = p.centerY;
-      }
-    }
+    final lowestPlaneY = overlayLowestPlaneY(
+      planes: planes,
+      liveIds: liveIds,
+      floorY: floorY,
+      cameraY: cameraY,
+    );
     // Floor paint lands HERE, not on the plane's own drifted center height:
     // ARCore fitted Ys sit 7-20 cm above the probe-proven floor, which is
     // exactly the sheet that hovers through furniture. Fresh cloud
@@ -971,6 +965,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         lowestPlaneY: lowestPlaneY,
         floorYTrusted: trusted,
         corroborateFloorY: corroborated,
+        floorYCameraBacked: _planeMemory.floorYCameraBacked,
         extentX: lk != null ? lk.extentX : p.extentX,
         extentZ: lk != null ? lk.extentZ : p.extentZ,
       );

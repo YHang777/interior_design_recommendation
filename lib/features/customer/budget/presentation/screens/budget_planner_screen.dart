@@ -302,6 +302,9 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
               // Budget scope: whole-home total, or key it to a saved design.
               DropdownButtonFormField<String>(
                 value: _designId,
+                // Without isExpanded the items size to their text and run
+                // past the field on every phone width.
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Budget for',
                   prefixIcon: Icon(Icons.home_work),
@@ -309,18 +312,21 @@ class _BudgetPlannerScreenState extends ConsumerState<BudgetPlannerScreen> {
                 items: [
                   const DropdownMenuItem(
                     value: '',
-                    child: Text('Whole home (total budget)'),
+                    child: Text('Whole home (total budget)',
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                   for (final d in designs)
                     DropdownMenuItem(
                       value: d.id,
-                      child: Text(d.name.isEmpty ? 'Untitled design' : d.name),
+                      child: Text(d.name.isEmpty ? 'Untitled design' : d.name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   if (_designId.isNotEmpty &&
                       !designs.any((d) => d.id == _designId))
                     DropdownMenuItem(
                       value: _designId,
-                      child: Text(_selectedRoom),
+                      child: Text(_selectedRoom,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                 ],
                 onChanged: (v) {

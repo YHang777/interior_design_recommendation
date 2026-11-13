@@ -72,11 +72,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          Text(text,
-              style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+          Expanded(
+            child: Text(text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
         ],
       ),
     );

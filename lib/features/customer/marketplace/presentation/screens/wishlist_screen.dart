@@ -348,12 +348,19 @@ class _WishlistRow extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          Formatters.myr(product.price),
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.accent,
+                        Flexible(
+                          flex: 3,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              Formatters.myr(product.price),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.accent,
+                              ),
+                            ),
                           ),
                         ),
                         if (product.originalPrice != null) ...[

@@ -67,7 +67,7 @@ class OrbitRig {
   }
 
   void dolly(double factor) {
-    distanceM = (distanceM * factor).clamp(1.2, maxDistanceM);
+    distanceM = (distanceM * factor).clamp(0.8, maxDistanceM);
   }
 
   void pan(double dXm, double dZm) {
@@ -87,6 +87,26 @@ class OrbitRig {
       fovDeg: fovDeg,
     );
   }
+}
+
+// Orbit distance at which the whole room (plus wall thickness) fits the
+// narrower of the two view angles — a portrait phone's horizontal FOV is far
+// tighter than the vertical one, so a diagonal-only rule cropped the room.
+double fitRoomDistanceM({
+  required double roomWCm,
+  required double roomHCm,
+  required double fovDeg,
+  required double aspect,
+  double wallHeightM = 2.7,
+}) {
+  // The orbit pivots on the FLOOR center, and the far walls rise 2.7 m above
+  // it — the bounding radius must include that height or the wall tops crop.
+  final halfDiag = sqrt(roomWCm * roomWCm + roomHCm * roomHCm) / 200.0 + 0.15;
+  final radius = sqrt(halfDiag * halfDiag + wallHeightM * wallHeightM);
+  final halfV = fovDeg * pi / 360.0;
+  final halfH = atan(tan(halfV) * (aspect > 0 ? aspect : 1.0));
+  final half = min(halfV, halfH);
+  return max(2.2, radius / sin(half) * 0.95);
 }
 
 // Walkthrough camera: eye at standing height over the walker, heading from
@@ -111,8 +131,16 @@ class FirstPersonRig {
   }
 
   // Walkthrough zoom (1 = human) narrows the lens instead of moving the eye.
-  void setZoom(double zoom) {
-    fovDeg = (70.0 / zoom).clamp(35.0, 95.0);
+  // With the viewport [aspect], zoom 1 aims for a ~75° HORIZONTAL view: a
+  // portrait phone at a fixed 70° vertical saw only ~35° across, so one wall
+  // filled the screen. Capped at 95° vertical to keep edges undistorted.
+  void setZoom(double zoom, {double? aspect}) {
+    var base = 70.0;
+    if (aspect != null && aspect > 0 && aspect < 1) {
+      const halfH = 37.5 * pi / 180;
+      base = 2 * atan(tan(halfH) / aspect) * 180 / pi;
+    }
+    fovDeg = (base / zoom).clamp(35.0, 95.0);
   }
 
   ScenePose pose({

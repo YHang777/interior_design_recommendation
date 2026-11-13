@@ -36,12 +36,17 @@ class RatingStars extends StatelessWidget {
         }),
         if (count != null) ...[
           const SizedBox(width: 4),
-          Text(
-            '($count!)',
-            style: GoogleFonts.poppins(
-              fontSize: size - 2,
-              color: AppColors.textSecondary,
-              height: 1.3,
+          // '($count!)' printed a literal "!" after the number.
+          Flexible(
+            child: Text(
+              '($count)',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: size - 2,
+                color: AppColors.textSecondary,
+                height: 1.3,
+              ),
             ),
           ),
         ],

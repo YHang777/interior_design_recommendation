@@ -3,12 +3,24 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:interior_design_recommendation/features/customer/ar/data/catalog_model_resolver.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_bounds.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/glb_generator.dart'
     show FloorFinish, FloorFinishType, WallFinish, WallFinishType;
+import 'package:interior_design_recommendation/features/customer/scanner/data/furniture_catalog.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/planner_scene_bridge.dart';
 import 'package:interior_design_recommendation/features/customer/scanner/data/scene3d_controller.dart';
 import 'package:interior_design_recommendation/models/room_design.dart';
+
+class _BrokenResolver extends CatalogModelResolver {
+  _BrokenResolver(this.file) : super(cacheRootProvider: () async => file.parent);
+
+  final File file;
+
+  @override
+  Future<CatalogModelSource> resolve(RoomCatalogItem item) async =>
+      CatalogModelSource.file(file);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -267,6 +279,26 @@ void main() {
     // Unknown icons are not modelled by the bundled library — a generated
     // stand-in fills the placement box (height falls back to the 30–220 cm
     // clamp of the plan height).
+    final scale = args['scale']! as List;
+    expect(scale[0], moreOrLessEquals(1.0, epsilon: 0.02));
+    expect(scale[1], moreOrLessEquals(1.0, epsilon: 0.02));
+    expect(scale[2], moreOrLessEquals(1.0, epsilon: 0.02));
+  });
+
+  test('an unmeasurable model still places at the catalog box', () async {
+    final broken = File('${cacheRoot.path}${Platform.pathSeparator}broken.glb')
+      ..writeAsBytesSync([1, 2, 3, 4]);
+    final bridge = PlannerSceneBridge(
+      controller: Scene3DController(viewId: 7),
+      catalogResolver: _BrokenResolver(broken),
+    );
+    await bridge.syncFurniture([cabinet()]);
+
+    final add = log.where((c) => c.method == 'addModel').toList();
+    expect(add, hasLength(1), reason: 'the piece must still reach the scene');
+    final args = argsOf(add.single);
+    expect(args['id'], 'f1');
+    expect(args['source'], broken.path);
     final scale = args['scale']! as List;
     expect(scale[0], moreOrLessEquals(1.0, epsilon: 0.02));
     expect(scale[1], moreOrLessEquals(1.0, epsilon: 0.02));
