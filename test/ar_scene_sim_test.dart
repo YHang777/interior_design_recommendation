@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/plane_overlay_math.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/wall_snap.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 import 'support/ar_scene_sim.dart';
@@ -67,16 +68,14 @@ void main() {
       });
     }
 
-    test('railing paints as a wall that stands on the balcony slab', () {
+    test('a waist-high railing is an object, never a painted wall', () {
       final sim = ArSceneSim(surfaces: balconyScene(), seed: 3);
       final last = sim
           .walk(swayPath(Vector3(-1, 0, 0.3), Vector3(1, 0, 1.0), 60))
           .last;
-      final railing = paintedWallFor(last.walls, balconyScene()[2]);
-      expect(railing, isNotNull);
-      final bottom = railing!.center.y - railing.extentZ / 2;
-      expect(bottom, closeTo(-1.4, 0.06),
-          reason: 'the railing must not reach down to the courtyard');
+      expect(paintedWallFor(last.walls, balconyScene()[2]), isNull,
+          reason: 'walls reach head height; a 1 m railing is furniture-height');
+      expect(last.floorY, closeTo(-1.4, 0.06));
     });
 
     test('a two-storey drop behaves the same', () {
@@ -118,6 +117,34 @@ void main() {
             expect(endErrorAt(q!, corner), lessThan(0.08),
                 reason: 'wall ${w.id} end misses corner $corner');
           }
+        }
+      });
+    }
+
+    for (final seed in seeds) {
+      test('seed $seed: walls fitted 8° off still meet at square corners',
+          () {
+        final scene = roomScene();
+        final sim = ArSceneSim(
+            surfaces: scene, seed: seed, wallYawBiasRad: 8 * math.pi / 180);
+        final last = sim
+            .walk(swayPath(Vector3(-1, 0, 1), Vector3(1, 0, -1), 80))
+            .last;
+        final walls = scene.where((s) => s.vertical).toList();
+        final painted = <PlaneQuad>[];
+        for (final w in walls) {
+          final q = paintedWallFor(last.walls, w);
+          expect(q, isNotNull, reason: 'wall ${w.id} not painted');
+          // The learned axis averages the per-wall errors, so it can sit a
+          // few degrees off truth — never beyond the worst single fit.
+          final off = RoomAxis.wrapQuarter(q!.yaw - w.yaw).abs();
+          expect(off, lessThan(8 * math.pi / 180));
+          painted.add(q);
+        }
+        for (final q in painted.skip(1)) {
+          expect(RoomAxis.wrapQuarter(q.yaw - painted.first.yaw).abs(),
+              lessThan(1e-6),
+              reason: 'every wall must be exactly square to the others');
         }
       });
     }

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:ar_flutter_plugin_2/ar_flutter_plugin.dart';
 import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
+import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
 import 'package:ar_flutter_plugin_2/datatypes/node_types.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_anchor_manager.dart';
 import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
@@ -19,6 +20,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:vector_math/vector_math_64.dart' hide Colors;
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/utils/boot_trace.dart';
+import '../../../../../core/utils/native_scene_guard.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../models/product.dart';
 import '../../../../../models/room_design.dart';
@@ -28,6 +30,7 @@ import '../../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../../shared/widgets/float_button.dart';
 import '../../../../../services/model_generation/model_glb_resolver.dart';
 import '../../data/ar_product_entry.dart';
+import '../../data/ar_session_recorder.dart';
 import '../../data/cloud_zone_builder.dart';
 import '../../data/depth_cloud.dart';
 import '../../data/furniture_model_library.dart';
@@ -44,6 +47,9 @@ import '../../data/placement_reticle.dart';
 import '../../data/plane_overlay_math.dart';
 import '../../data/room_outline_builder.dart';
 import '../../data/scan_coach.dart';
+import '../../data/room_walls.dart';
+import '../../data/wall_raycast.dart';
+import '../../data/wall_snap.dart';
 import '../widgets/placement_reticle.dart';
 import '../widgets/plane_overlay.dart';
 import '../widgets/scan_coach_overlay.dart';
@@ -245,6 +251,12 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   double? _lastCameraY;
   DateTime? _lastCameraYAt;
   Vector3? _lastCameraPos;
+  ArSessionRecorder? _recorder;
+  bool _arCounted = false;
+  final RoomAxis _roomAxis = RoomAxis(tolRad: 20 * math.pi / 180);
+  final RoomWalls _roomWalls = RoomWalls();
+  Offset? _lastTapPx;
+  Size? _arViewSize;
   double? _lastCameraPitchDeg;
   DateTime? _lastCameraPitchAt;
 
@@ -417,6 +429,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _scanCoachTicker?.cancel();
     _reticleTimer?.cancel();
     _overlayVpTimer?.cancel();
+    _recorder?.close();
+    _recorder = null;
     _stopRotateHold();
     _overlay.dispose();
     _overlayVp.dispose();
@@ -425,6 +439,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     // slipped past native dispose SIGSEGV'd in ARCore (tombstone 2026-11-10).
     _session?.dispose();
     _session = null;
+    if (_arCounted) NativeSceneGuard.arClosed();
     super.dispose();
   }
 
@@ -554,6 +569,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   // ─── ARCore availability ───
 
   Future<void> _checkArCore() async {
+    await NativeSceneGuard.beforeArOpen();
+    if (!mounted) return;
+    NativeSceneGuard.arOpened();
+    _arCounted = true;
     var available = false;
     try {
       available = await _channel.invokeMethod<bool>('isArCoreAvailable') ??
@@ -592,6 +611,13 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     _anchors = anchors;
     _sessionStartedAt = DateTime.now();
     BootTrace.log('ar-screen: ar view created');
+    ArSessionRecorder.start().then((r) {
+      if (!mounted) {
+        r?.close();
+        return;
+      }
+      _recorder = r;
+    });
 
     _session!
         .onInitialize(
@@ -649,6 +675,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             'ar-screen: payload empty (floorRecords=${_planeMemory.floorPlanes.length} floorY=${_planeMemory.floorY})');
       }
       _payloadWasNonEmpty = planes.isNotEmpty;
+      _recorder?.planes(planes, vp);
       // Subsumed planes never feed memory: their coverage already lives
       // inside the parent polygon (counting both fakes early readiness).
       // Synthetic cloud walls are never subsumed — they feed memory and
@@ -705,6 +732,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         final pose = await _session?.getCameraPose();
         final t = pose?.getTranslation();
         final y = t?.y;
+        if (pose != null) _recorder?.camera(pose);
         if (y != null && y.isFinite && mounted) {
           _lastCameraY = y;
           _lastCameraPos = t;
@@ -749,6 +777,10 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
                   updateMaskTracks(tracks: _maskTracks, curr: rawMasks);
               _cloudMasks = emitMaskTracks(_maskTracks);
               final probe = floorProbeCandidate(points: pts, refY: fy);
+              _recorder?.cloud(pts,
+                  probe: probe,
+                  feature: (feature?.length ?? 0) ~/ 3,
+                  depth: (depth?.length ?? 0) ~/ 3);
               if (probe != null) {
                 _planeMemory.noteFloorYCandidate(probe);
                 BootTrace.log(
@@ -993,7 +1025,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         yaw: lk != null ? lk.yaw : p.yaw,
         extentX: lk != null ? lk.extentX : p.extentX,
         extentZ: lk != null ? lk.extentZ : p.extentZ,
-        vertical: zone == OverlayZoneKind.wall,
+        vertical: p.planeType == 2,
         kind: zone == OverlayZoneKind.wall
             ? PlaneQuadKind.wall
             : PlaneQuadKind.floor,
@@ -1037,7 +1069,8 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
         ..addAll(rest)
         // join last: closes the perpendicular seam at corners the merge
         // cap (0.26 rad) can never bridge.
-        ..addAll(joinWallCorners(mergeWallQuads(capWallQuads(walls, 20))));
+        ..addAll(joinWallCorners(
+            _roomWalls.update(_snapWalls(walls), baseY: baseY)));
       // Post-clamp canary: withWallBaseAt guarantees bottoms ≥ baseY, so
       // any dip here proves a bypass path — the symptom-A trace.
       var minWallBottom = double.infinity;
@@ -1093,6 +1126,16 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
       masks: masks,
       synthetic: synthetic,
     );
+    _recorder?.paint(
+      quads: quads,
+      masks: masks,
+      synthetic: synthetic,
+      floorY: floorY,
+      refY: refY,
+      cameraY: cameraY,
+      trusted: trusted,
+      syntheticWalls: _syntheticWalls,
+    );
     // Throttled: only log when the overlay state actually changes shape.
     // cameraY deliberately stays out — at 2 dp it changes most rebuilds
     // and turned the trace into a 10 Hz file-IO stream. syn/clamp
@@ -1116,6 +1159,38 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
             'masks=${masks.length}');
       }
     }
+  }
+
+  ARHitTestResult? _paintedWallHitAtTap() {
+    final px = _lastTapPx;
+    final size = _arViewSize;
+    final vp = _overlayVp.value ?? _overlay.value?.vp;
+    if (px == null || size == null || vp == null) return null;
+    final ray = screenRay(vp, px, size);
+    if (ray == null) return null;
+    final h = raycastWalls(
+        origin: ray.origin, dir: ray.dir, walls: _wallZoneQuads);
+    if (h == null) return null;
+    BootTrace.log('ar-screen: painted wall hit d=${h.distance.toStringAsFixed(2)} '
+        'w=${h.wall.extentX.toStringAsFixed(2)} h=${h.wall.extentZ.toStringAsFixed(2)}');
+    return ARHitTestResult(
+      ARHitTestResultType.plane,
+      h.distance,
+      wallHitPose(h),
+      planeType: 2,
+      planeExtentX: h.wall.extentX,
+      planeExtentZ: h.wall.extentZ,
+    );
+  }
+
+  List<PlaneQuad> _snapWalls(List<PlaneQuad> walls) {
+    final hadAxis = _roomAxis.axis != null;
+    _roomAxis.observe(walls);
+    final ax = _roomAxis.axis;
+    if (!hadAxis && ax != null) {
+      BootTrace.log('ar-screen: room axis ${(ax * 180 / math.pi).toStringAsFixed(1)}°');
+    }
+    return _roomAxis.snap(walls);
   }
 
   // Id-keyed vertex EMA so plane corners stop wobbling frame to frame.
@@ -1303,7 +1378,7 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
 
   Future<void> _onPlaneOrPointTap(List<ARHitTestResult> hits) async {
     if (_busy) return;
-    if (hits.isEmpty) {
+    if (hits.isEmpty && _reticleIntent != PlacementType.wall) {
       // An empty tap used to return in silence — the user just saw their
       // tap do nothing. Say why (the hint text depends on the intent).
       BootTrace.log('ar-screen: tap 0 plane hits intent=$_reticleIntent');
@@ -1454,7 +1529,15 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
     // Only finishes pass footprintOf — they get CUT around objects, never
     // refused for them (masks) or slid body-first (push).
     final isFinish = footprintOf != null;
-    final candidates = _memoryFiltered(hits, requiredPlacement);
+    // Painted walls join AFTER the memory filter: a small ARCore scrap at
+    // the same spot must not veto the wall the user can see.
+    final painted = requiredPlacement == PlacementType.floor
+        ? null
+        : _paintedWallHitAtTap();
+    final candidates = [
+      ..._memoryFiltered(hits, requiredPlacement),
+      if (painted != null) painted,
+    ];
     switch (requiredPlacement) {
       case PlacementType.floor:
         if (liveFloorY == null) {
@@ -2477,6 +2560,17 @@ class _ArViewerScreenState extends State<ArViewerScreen> {
   }
 
   Widget _buildArView() {
+    return LayoutBuilder(builder: (context, box) {
+      _arViewSize = box.biggest;
+      return Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (e) => _lastTapPx = e.localPosition,
+        child: _buildArStack(),
+      );
+    });
+  }
+
+  Widget _buildArStack() {
     return Stack(
       fit: StackFit.expand,
       children: [

@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import '../../../../../core/constants/app_colors.dart';
+import '../../../../../core/utils/native_scene_guard.dart';
 import '../../../../../core/utils/user_errors.dart';
 import '../../../../../core/utils/formatters.dart';
 import '../../../../../models/product.dart';
@@ -131,6 +132,15 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
   late final OrbitRig _rig;
   final ValueNotifier<int> _sceneRev = ValueNotifier(0);
   final GlobalKey _sceneKey = GlobalKey();
+  // Bumped after AR / walk-through: their camera surface can leave the
+  // planner's platform view black on return, so it is rebuilt fresh (the
+  // bridge re-pushes the whole room on the new view id).
+  int _sceneGen = 0;
+
+  Future<void> _rebuildSceneWhenSettled() async {
+    await NativeSceneGuard.settled();
+    if (mounted) setState(() => _sceneGen++);
+  }
   Size _viewport = Size.zero;
   Timer? _shellThrottle;
   Timer? _furnitureThrottle;
@@ -1636,9 +1646,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                               design: _snapshotDesign(),
                             ),
                           );
-                          if (updated != null && mounted) {
-                            _adoptDesign(updated);
-                          }
+                          if (!mounted) return;
+                          if (updated != null) _adoptDesign(updated);
+                          _rebuildSceneWhenSettled();
                         },
                       ),
                       IconButton(
@@ -1649,7 +1659,9 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                             '/walkthrough',
                             extra: _snapshotDesign(),
                           );
-                          if (saved != null && mounted) _adoptDesign(saved);
+                          if (!mounted) return;
+                          if (saved != null) _adoptDesign(saved);
+                          _rebuildSceneWhenSettled();
                         },
                       ),
                       IconButton(
@@ -1983,6 +1995,7 @@ class _RoomScannerScreenState extends ConsumerState<RoomScannerScreen> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: Scene3DView(
+                          key: ValueKey('planner-scene3d-$_sceneGen'),
                           controller: _bridge.controller,
                           onTap: _onSceneTap,
                           onLongPress: _onSceneLongPress,

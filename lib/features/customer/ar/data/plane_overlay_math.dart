@@ -164,6 +164,9 @@ double? overlayLowestPlaneY({
   return lowest;
 }
 
+const double minWallTopAboveFloorM = 1.4;
+const double typicalPhoneHeightM = 1.4;
+
 OverlayZoneKind overlayZoneOf({
   required int planeType,
   required double centerY,
@@ -181,9 +184,18 @@ OverlayZoneKind overlayZoneOf({
     // cabinet/shelf side with altitude is an object, not a wall. Defaults
     // fail closed so a caller that forgets extents drops instead of
     // painting wrongly.
-    return ArPlacementPolicy.wallAreaQualifies(extentX, extentZ)
-        ? OverlayZoneKind.wall
-        : OverlayZoneKind.drop;
+    if (!ArPlacementPolicy.wallAreaQualifies(extentX, extentZ)) {
+      return OverlayZoneKind.drop;
+    }
+    // Furniture sides (bed, nightstand, sofa back) are vertical too but
+    // stop well below head height — device logs: walls top out at +1.7–2.1
+    // m above the floor, furniture at +0.5–1.3 m. Low verticals are
+    // objects: punched out, never painted as wall.
+    final ref = floorY ?? (cameraY != null ? cameraY - typicalPhoneHeightM : null);
+    if (ref != null && centerY + extentZ / 2 < ref + minWallTopAboveFloorM) {
+      return OverlayZoneKind.mask;
+    }
+    return OverlayZoneKind.wall;
   }
   if (planeType != 1) return OverlayZoneKind.drop;
   // Above the reference = an object top (furniture mask); below = a lower
@@ -1469,14 +1481,24 @@ OverlayZones buildOverlayZones({
   required List<List<Offset>> walls,
   required List<List<Offset>> masks,
 }) {
+  // One union pass per zone, never one per fragment: every outline goes
+  // into a single nonZero path with a common winding (overlaps then fill as
+  // a union instead of cancelling) and Skia resolves it in one sweep. The
+  // old fragment-by-fragment union re-processed the growing result N times
+  // on every camera move — the "laggy once planes pile up" cost (bench:
+  // 4.7 → 2.2 ms on a 14-floor/10-wall/12-mask scene). Folding the cuts
+  // into the same op measured slower (3.7 ms), so cuts stay separate.
   Path? merge(List<List<Offset>> polys) {
-    Path? out;
+    final path = Path()..fillType = PathFillType.nonZero;
+    var n = 0;
     for (final p in polys) {
-      if (p.length < 3) continue;
-      final path = Path()..addPolygon(p, true);
-      out = out == null ? path : Path.combine(PathOperation.union, out, path);
+      final s = simplifyScreenPolygon(p);
+      if (s.length < 3) continue;
+      path.addPolygon(_signedArea(s) >= 0 ? s : s.reversed.toList(), true);
+      n++;
     }
-    return out;
+    if (n == 0) return null;
+    return Path.combine(PathOperation.union, path, Path());
   }
 
   var floorZone = merge(floors);
@@ -1547,3 +1569,45 @@ List<Offset>? projectPlaneQuad({
       points: planeQuadCorners(quad),
       viewport: viewport,
     );
+
+double _signedArea(List<Offset> p) {
+  var a = 0.0;
+  for (var i = 0; i < p.length; i++) {
+    final j = (i + 1) % p.length;
+    a += p[i].dx * p[j].dy - p[j].dx * p[i].dy;
+  }
+  return a / 2;
+}
+
+// Drops vertices that sit within [tolPx] of the line through their
+// neighbours (ARCore outlines carry up to 64 near-collinear points), then
+// caps the count — boolean cost scales with edges, the look does not.
+List<Offset> simplifyScreenPolygon(List<Offset> p,
+    {double tolPx = 1.5, int maxVerts = 24}) {
+  if (p.length <= 3) return p;
+  var pts = List<Offset>.of(p);
+  var changed = true;
+  while (changed && pts.length > 3) {
+    changed = false;
+    for (var i = 0; i < pts.length && pts.length > 3; i++) {
+      final a = pts[(i + pts.length - 1) % pts.length];
+      final b = pts[i];
+      final c = pts[(i + 1) % pts.length];
+      final ac = c - a;
+      final len = ac.distance;
+      final d = len < 1e-9
+          ? (b - a).distance
+          : ((b - a).dx * ac.dy - (b - a).dy * ac.dx).abs() / len;
+      if (d < tolPx) {
+        pts.removeAt(i);
+        changed = true;
+        i--;
+      }
+    }
+  }
+  if (pts.length > maxVerts) {
+    final stride = pts.length / maxVerts;
+    pts = [for (var k = 0; k < maxVerts; k++) pts[(k * stride).floor()]];
+  }
+  return pts;
+}

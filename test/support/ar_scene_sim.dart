@@ -4,6 +4,8 @@ import 'package:ar_flutter_plugin_2/models/ar_plane_info.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/cloud_zone_builder.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/plane_memory.dart';
 import 'package:interior_design_recommendation/features/customer/ar/data/plane_overlay_math.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/room_walls.dart';
+import 'package:interior_design_recommendation/features/customer/ar/data/wall_snap.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 // ── Mock AR world ──
@@ -104,11 +106,21 @@ class ArSceneSim {
     this.poseMissingFrames = 3,
     this.floorFitBiasM = 0.03,
     this.wallEndErrorM = (-0.25, 0.6),
+    this.wallYawBiasRad = 0,
   }) : _rng = math.Random(seed) {
     for (final s in surfaces.where((s) => s.vertical)) {
       _endError[s.id] = (_uniform(wallEndErrorM), _uniform(wallEndErrorM));
     }
+    // Separate stream: existing seeds keep their exact telemetry.
+    final biasRng = math.Random(seed + 1000);
+    for (final s in surfaces.where((s) => s.vertical)) {
+      _yawBias[s.id] = (biasRng.nextDouble() * 2 - 1) * wallYawBiasRad;
+    }
   }
+
+  // Fixed per-wall yaw error, like the 5–10° device fits (round 3).
+  final double wallYawBiasRad;
+  final Map<int, double> _yawBias = {};
 
   final List<SimSurface> surfaces;
 
@@ -129,6 +141,9 @@ class ArSceneSim {
   final math.Random _rng;
 
   final memory = PlaneMemory();
+  final roomAxis = RoomAxis(tolRad: 20 * math.pi / 180);
+  final roomWalls = RoomWalls();
+  final DateTime _t0 = DateTime(2026);
 
   final _seen = <int, int>{};
 
@@ -170,7 +185,7 @@ class ArSceneSim {
       centerZ: c.z + _noise(0.01),
       extentX: w,
       extentZ: s.depthOrHeight * math.min(1.0, grow + 0.2),
-      yaw: s.yaw + _noise(0.02),
+      yaw: s.yaw + (_yawBias[s.id] ?? 0) + _noise(0.02),
     );
   }
 
@@ -254,8 +269,15 @@ class ArSceneSim {
     final baseY = refY ?? minFloorPaintY ?? floorY;
     final walls = baseY == null
         ? wallQuads
-        : joinWallCorners(mergeWallQuads(capWallQuads(
-            [for (final w in wallQuads) withWallBaseAt(w, refY: baseY)], 20)));
+        : () {
+            final based = [
+              for (final w in wallQuads) withWallBaseAt(w, refY: baseY)
+            ];
+            roomAxis.observe(based);
+            return joinWallCorners(roomWalls.update(roomAxis.snap(based),
+                baseY: baseY,
+                now: _t0.add(Duration(milliseconds: 100 * _frame))));
+          }();
     return SimFrame(
       camera: cam,
       floorY: floorY,

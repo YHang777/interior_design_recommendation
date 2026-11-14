@@ -52,6 +52,7 @@ List<PlaneQuad> obstacleMaskQuads({
   final clusters = <_MaskCluster>[];
   for (final cluster in _clusterCells(dense)) {
     if (_clusterSitsOnWall(cluster, walls, cellM)) continue;
+    if (!_clusterIsCompact(cluster, cellM)) continue;
     clusters.add(cluster);
   }
   // Biggest cluster first; min (ix, iz) breaks ties so the same cloud
@@ -114,6 +115,29 @@ List<_MaskCluster> _clusterCells(List<_Cell> dense) {
   }
   return out;
 }
+
+// Objects fill their outline; a chain of wall + furniture points around an
+// undetected wall does not. Device round 7: such a chain hulled into a
+// 2.8×2.75 m "object" that punched 40–93% of the screen out of both zones,
+// so painted planes kept vanishing. Sparse or room-sized hulls are dropped.
+bool _clusterIsCompact(_MaskCluster cluster, double cellM) {
+  final hull = _clusterToQuad(cluster, cellM);
+  final poly = hull.polygon;
+  var area = 0.0;
+  for (var i = 0; i < poly.length; i++) {
+    final a = poly[i];
+    final b = poly[(i + 1) % poly.length];
+    area += a.x * b.z - b.x * a.z;
+  }
+  area = area.abs() / 2;
+  if (math.max(hull.extentX, hull.extentZ) > maxObstacleSpanM) return false;
+  final filled = cluster.cells.length * cellM * cellM;
+  if (area > 0.8 && filled < area * minObstacleFill) return false;
+  return true;
+}
+
+const double maxObstacleSpanM = 2.2;
+const double minObstacleFill = 0.45;
 
 // ≥60% of the cluster's points (weighted) sitting on a wall plane means
 // the cluster IS wall surface — punching it into the floor/mask would

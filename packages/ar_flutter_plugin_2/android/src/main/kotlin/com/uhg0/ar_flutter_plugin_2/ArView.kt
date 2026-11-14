@@ -89,7 +89,7 @@ class ArView(
         private const val RADIANS_TO_DEGREES = 57.2957795f
     }
     private val viewContext: Context = context
-    private var sceneView: ARSceneView
+    private var sceneView: SafeARSceneView
     private val mainScope = CoroutineScope(Dispatchers.Main)
     private var worldOriginNode: Node? = null
 
@@ -145,13 +145,17 @@ class ArView(
     // Stable integer id per ARCore Plane, so the app's PlaneMemory can keep
     // per-plane history (smoothing + reclassification) across telemetry
     // frames. ARCore exposes no public trackable id, so we mint our own.
-    private val planeIds = java.util.IdentityHashMap<Plane, Int>()
+    // Keyed by value: ARCore hands out a NEW Plane wrapper for the same
+    // native plane on every call (equals/hashCode compare the native
+    // handle), so an identity map minted a fresh id every frame and broke
+    // every per-id smoothing, lock and classification streak in Dart.
+    private val planeIds = HashMap<Plane, Int>()
     private var nextPlaneId = 1
 
     // Last time each plane genuinely appeared in getUpdatedTrackables.
     // Stable planes keep re-emitting from the cache; freshMs tells Dart
     // which observations are real updates (see the payload builder).
-    private val planeLastFreshAt = java.util.IdentityHashMap<Plane, Long>()
+    private val planeLastFreshAt = HashMap<Plane, Long>()
 
     // Sliding point-cloud buffer feeding refinePlane — a single frame's cloud
     // is too sparse for a confident RANSAC fit on weak sensors. Same
@@ -167,6 +171,53 @@ class ArView(
     private var planesFrameCounter = 0
     private var firstFrameTraced = false
     private var frameErrorTraced = false
+    private var frameErrorCount = 0
+
+    // ── perf diagnostics (5 s summaries in ar_native_trace.log) ──
+    private var perfWindowStartMs = 0L
+    private var perfLastCallbackMs = 0L
+    private var perfMaxGapMs = 0L
+    private var perfStalls = 0
+    private var perfCallbacks = 0
+    private var perfCamFrames = 0
+    private var perfLastCamTs = -1L
+    private var perfLastTracking: TrackingState? = null
+
+    private fun perfFrame(frame: Frame) {
+        val now = SystemClock.elapsedRealtime()
+        if (perfLastCallbackMs > 0) {
+            val gap = now - perfLastCallbackMs
+            if (gap > perfMaxGapMs) perfMaxGapMs = gap
+            if (gap > 50) perfStalls++
+        }
+        perfLastCallbackMs = now
+        perfCallbacks++
+        if (frame.timestamp != perfLastCamTs) {
+            perfLastCamTs = frame.timestamp
+            perfCamFrames++
+        }
+        val tracking = frame.camera.trackingState
+        if (tracking != perfLastTracking) {
+            NativeTrace.log(
+                viewContext,
+                "arview: tracking ${perfLastTracking} -> $tracking reason=${frame.camera.trackingFailureReason} live=${livePlanes.size}",
+            )
+            perfLastTracking = tracking
+        }
+        if (perfWindowStartMs == 0L) perfWindowStartMs = now
+        val win = now - perfWindowStartMs
+        if (win >= 5000) {
+            NativeTrace.log(
+                viewContext,
+                "arview: perf cbFps=${perfCallbacks * 1000 / win} camFps=${perfCamFrames * 1000 / win} maxGapMs=$perfMaxGapMs stalls=$perfStalls live=${livePlanes.size}",
+            )
+            perfWindowStartMs = now
+            perfMaxGapMs = 0
+            perfStalls = 0
+            perfCallbacks = 0
+            perfCamFrames = 0
+        }
+    }
 
     // Session identity for the config-time cache clears — see the
     // sessionConfiguration lambda. Plus diagnostic cadence counters and
@@ -188,6 +239,15 @@ class ArView(
 
     private val onSessionMethodCall =
         MethodChannel.MethodCallHandler { call, result ->
+            val callStart = SystemClock.elapsedRealtime()
+            handleSessionCall(call, result)
+            val callMs = SystemClock.elapsedRealtime() - callStart
+            if (callMs > 20) {
+                NativeTrace.log(viewContext, "arview: slow call ${call.method} ${callMs}ms")
+            }
+        }
+
+    private fun handleSessionCall(call: MethodCall, result: MethodChannel.Result) {
             when (call.method) {
                 "init" -> handleInit(call, result)
                 "showPlanes" -> handleShowPlanes(call, result)
@@ -205,7 +265,7 @@ class ArView(
                 "hitTest" -> handleHitTest(call, result)
                 else -> result.notImplemented()
             }
-        }
+    }
     // ~25 rendered frames of grace: during normal tracking the stamp is
     // refreshed at 30–60 Hz, so this never fires. When the frame loop has
     // stalled (or the session is being torn down) callers get null and
@@ -292,7 +352,7 @@ class ArView(
 
     init {
         NativeTrace.log(viewContext, "arview: init start")
-        sceneView = ARSceneView(
+        sceneView = SafeARSceneView(
             context = viewContext,
             sharedLifecycle = lifecycle,
             sessionConfiguration = { session, config ->
@@ -321,6 +381,7 @@ class ArView(
                 if (newSession) {
                     livePlanes.clear()
                     planeLastFreshAt.clear()
+                    planeIds.clear()
                     detectedPlanes.clear()
                     latestFrame = null
                     lastFrameAtMs = 0L
@@ -333,6 +394,12 @@ class ArView(
             }
         )
         NativeTrace.log(viewContext, "arview: scene view created")
+        sceneView.onFrameError = { e ->
+            frameErrorCount++
+            if (frameErrorCount == 1 || frameErrorCount % 120 == 0) {
+                NativeTrace.log(viewContext, "arview: frame error #$frameErrorCount ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
 
         rootLayout.addView(sceneView)
 
@@ -780,6 +847,7 @@ class ArView(
                 // detected planes jitter and float above the real floor. Never
                 // call session.update() here; just consume `frame`.
                 onSessionUpdated = { _, frame ->
+                    perfFrame(frame)
                     try {
                         if (!isSessionPaused) {
                             run {
@@ -941,6 +1009,7 @@ class ArView(
                                         else -> {
                                             livePlanes.remove(plane)
                                             planeLastFreshAt.remove(plane)
+                                            planeIds.remove(plane)
                                         }
                                     }
                                 }
@@ -2302,6 +2371,7 @@ class ArView(
         nodesMap.clear()
         livePlanes.clear()
         planeLastFreshAt.clear()
+        planeIds.clear()
         pointAccumulator.clear()
         sceneView.destroy()
         pointCloudNodes.toList().forEach { removePointCloudNode(it) }

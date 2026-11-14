@@ -61,6 +61,38 @@ List<List<double>> _grid({
 
 void main() {
   group('obstacleMaskQuads', () {
+    test('an L of wall points around an undetected corner never masks', () {
+      // Device round 7: this shape hulled into a 2.8×2.75 m mask that
+      // erased most of the painted floor and walls.
+      final pts = <List<double>>[];
+      for (var x = 0.05; x < 2.8; x += 0.1) {
+        for (final y in [0.6, 1.0, 1.4]) {
+          pts
+            ..add([x, y, 0.05])
+            ..add([x + 0.02, y, 0.1]);
+        }
+      }
+      for (var z = 0.15; z < 2.8; z += 0.1) {
+        for (final y in [0.6, 1.0, 1.4]) {
+          pts
+            ..add([0.05, y, z])
+            ..add([0.1, y, z + 0.02]);
+        }
+      }
+      expect(obstacleMaskQuads(points: _flat(pts), refY: 0), isEmpty);
+    });
+
+    test('a compact chair-sized object still masks', () {
+      final pts = _grid(
+        xs: [for (var x = 1.0; x < 1.5; x += 0.05) x],
+        ys: [0.45, 0.8],
+        zs: [for (var z = 1.0; z < 1.5; z += 0.05) z],
+      );
+      final quads = obstacleMaskQuads(points: _flat(pts), refY: 0);
+      expect(quads, hasLength(1));
+      expect(quads.single.extentX, lessThan(1.0));
+    });
+
     test('three obstacle points in one cell → one quad at mean height', () {
       final quads = obstacleMaskQuads(
         points: _flat(const [

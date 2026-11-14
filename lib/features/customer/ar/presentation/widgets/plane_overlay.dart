@@ -76,7 +76,7 @@ class PlaneOverlayPainter extends CustomPainter {
     late final OverlayZones zones;
     if (cache != null &&
         cache.size == size &&
-        cache.vp == viewProjection) {
+        _sameView(cache.vp, viewProjection)) {
       // Same snapshot, same viewport, same matrices: reuse the Paths.
       zones = OverlayZones(floor: cache.floor, wall: cache.wall);
     } else {
@@ -174,6 +174,17 @@ class PlaneOverlayPainter extends CustomPainter {
             'quads=${quads.length} masks=${masks.length}');
       }
     }
+  }
+
+  // A handheld-still phone jitters the pose every frame; differences this
+  // small move nothing by even a pixel, so the cached zones are reused.
+  static bool _sameView(Matrix4? a, Matrix4 b) {
+    if (a == null) return false;
+    if (identical(a, b)) return true;
+    for (var i = 0; i < 16; i++) {
+      if ((a.storage[i] - b.storage[i]).abs() > 2e-4) return false;
+    }
+    return true;
   }
 
   // 45° diagonal lines clipped to the wall outline — walls read as walls

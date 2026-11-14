@@ -295,6 +295,52 @@ void main() {
       );
     });
 
+    test('a vertical plane topping out below head height is an object mask',
+        () {
+      // Device round 1: bed side top +1.3 m, nightstand +0.5 m.
+      expect(
+        overlayZoneOf(
+            planeType: 2,
+            centerY: 0.65,
+            floorY: 0,
+            extentX: 2.0,
+            extentZ: 1.3),
+        OverlayZoneKind.mask,
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 2,
+            centerY: 0.9,
+            floorY: 0,
+            extentX: 1.5,
+            extentZ: 1.0),
+        OverlayZoneKind.wall,
+        reason: 'top at +1.4 m reaches the wall threshold',
+      );
+    });
+
+    test('without floorY the wall height test uses the camera height', () {
+      expect(
+        overlayZoneOf(
+            planeType: 2,
+            centerY: 0.5,
+            cameraY: 1.5,
+            extentX: 2.0,
+            extentZ: 1.0),
+        OverlayZoneKind.mask,
+        reason: 'top 1.0 m vs estimated floor 0.1 → +0.9 m',
+      );
+      expect(
+        overlayZoneOf(
+            planeType: 2,
+            centerY: 1.2,
+            cameraY: 1.5,
+            extentX: 2.0,
+            extentZ: 1.4),
+        OverlayZoneKind.wall,
+      );
+    });
+
     test('vertical planes below the shared area gate drop', () {
       // 0.999 m² is just under ArPlacementPolicy.minWallAreaM2 (1.0).
       expect(
